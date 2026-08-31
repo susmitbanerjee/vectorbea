@@ -59,6 +59,11 @@ class NodeExecutorRegistry(
         // Reference executors — look up tool/agent definition from DB at runtime
         NodeType.TOOL      to ToolNodeExecutor(dataSource, connectionResolver, dbPoolManager, eventStore),
         NodeType.AGENT     to AgentNodeExecutor(dataSource, connectionResolver, eventStore, dbPoolManager),
+        /* A TYPE ADDITION and nothing more. `agent` nodes keep their executor
+           unchanged, and the two are siblings over the same primitives rather
+           than one type with a branch inside it. */
+        NodeType.AGENT_TEAM to AgentTeamNodeExecutor(dataSource, connectionResolver, eventStore,
+                                  dbPoolManager),
     )
 
     private val unsupported = UnsupportedNodeExecutor()

@@ -60,6 +60,10 @@ data class WorkerConfig(
     val shortConcurrency: Int,
     val longConcurrency: Int,
     val agentConcurrency: Int,
+    /** The dispatched-child lane. Its own pool, so a parked supervisor's
+     *  children do not queue behind new top-level runs. */
+    val agentChildConcurrency: Int,
+    val agentInteractiveConcurrency: Int,
     val systemConcurrency: Int,
     /**
      * Threads available for tenant-database node execution, isolated from every
@@ -150,6 +154,11 @@ data class WorkerConfig(
             val shortConcurrency  = poolSize("SHORT",  "SHORT_WORKER_CONCURRENCY")  ?: maxOf(8, concurrency)
             val longConcurrency   = poolSize("LONG",   "LONG_WORKER_CONCURRENCY")   ?: maxOf(1, concurrency / 2)
             val agentConcurrency  = poolSize("AGENT",  "AGENT_WORKER_CONCURRENCY")  ?: maxOf(6, concurrency / 2)
+            val agentChildConcurrency = poolSize("AGENT_CHILD", "AGENT_CHILD_WORKER_CONCURRENCY")
+                ?: agentConcurrency
+            val agentInteractiveConcurrency =
+                poolSize("AGENT_INTERACTIVE", "AGENT_INTERACTIVE_WORKER_CONCURRENCY")
+                    ?: (agentConcurrency / 2).coerceAtLeast(1)
             val systemConcurrency = poolSize("SYSTEM", "SYSTEM_WORKER_CONCURRENCY") ?: 2
 
             // Tenant-database node execution runs on its own dispatcher, sized
@@ -192,6 +201,8 @@ data class WorkerConfig(
                 shortConcurrency  = shortConcurrency.coerceIn(1, 64),
                 longConcurrency   = longConcurrency.coerceIn(1, 32),
                 agentConcurrency  = agentConcurrency.coerceIn(1, 32),
+                agentChildConcurrency = agentChildConcurrency.coerceIn(1, 32),
+                agentInteractiveConcurrency = agentInteractiveConcurrency.coerceIn(1, 32),
                 systemConcurrency = systemConcurrency.coerceIn(1, 16),
                 tenantDbConcurrency = tenantDbConcurrency.coerceIn(1, 64),
                 readBatchSize       = env("WORKER_READ_BATCH_SIZE")?.toIntOrNull()?.coerceIn(1, 50) ?: 8,
@@ -254,7 +265,9 @@ data class WorkerConfig(
         log.info("  streams     : runs.short / runs.long / runs.agent / runs.system (typed)")
         log.info("  legacy      : ${if (legacyStreamEnabled) "$queueStream / group=$queueGroup (DUAL-CONSUME ACTIVE)" else "disabled"}")
         log.info("  concurrency : $concurrency (fallback formula only)")
-        log.info("  pools       : short=$shortConcurrency long=$longConcurrency agent=$agentConcurrency system=$systemConcurrency")
+        log.info("  pools       : short=$shortConcurrency long=$longConcurrency agent=$agentConcurrency " +
+            "agent.child=$agentChildConcurrency agent.interactive=$agentInteractiveConcurrency " +
+            "system=$systemConcurrency")
         log.info("  tenant-db   : $tenantDbConcurrency threads (isolated dispatcher)")
         log.info("  max run threads: ${shortConcurrency + longConcurrency + agentConcurrency + systemConcurrency} pool + $tenantDbConcurrency tenant-db")
         log.info("  prefetch    : readBatch=$readBatchSize perPoolBuffer=$maxPrefetchPerPool")

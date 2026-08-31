@@ -39,9 +39,54 @@ data class AgentLoopState(
         val recalled: Boolean = false,
     )
 
+    /**
+     * Every way the loop can stop.
+     *
+     * Adding one is a COMPILE ERROR in three places on purpose —
+     * `StopReasonTaxonomy.classify`, `AgentBrainRunner.describeStop` and the
+     * taxonomy test all exhaust this enum with no `else`. A stop reason with no
+     * class and no sentence is a category with nothing behind it, and a category
+     * tells nobody what happened to their run.
+     */
     enum class StopReason {
         FINAL_OUTPUT, MAX_ITERATIONS, BUDGET_EXCEEDED, AGENT_FAILED,
-        APPROVAL_REQUESTED, TOOL_NOT_ALLOWED, SCHEMA_INVALID, ERROR
+        APPROVAL_REQUESTED, TOOL_NOT_ALLOWED, SCHEMA_INVALID, ERROR,
+
+        // ── Orchestration (§5.3). All non-retryable, all ORCHESTRATION class. ──
+
+        /** Delegated to an agent it was not granted. The roster analogue of TOOL_NOT_ALLOWED. */
+        AGENT_NOT_IN_ROSTER,
+
+        /** The delegation chain went deeper than the team's limit. */
+        MAX_DEPTH_EXCEEDED,
+
+        /** The same (from, to, contract-hash) triple has been seen too many times. */
+        HANDOFF_LOOP,
+
+        /**
+         * A child failed and the join policy cannot proceed without it.
+         *
+         * DEFINED AND UNCONSTRUCTED until joins exist. A failed delegation is a
+         * failed OBSERVATION and the parent's loop continues — exactly as a failed
+         * tool call does, because an agent is a callable exactly like a tool. The
+         * supervisor can try a different worker, reformulate, or produce a partial
+         * FINAL that states what it could not get; all three beat a hard stop, and
+         * the last is what the completion margin exists for. This reason is
+         * reserved for `wait_all`, where the parent genuinely cannot proceed, and
+         * lands with `onChildFailure` in P10.
+         */
+        CHILD_FAILED,
+
+        /**
+         * Waiting on children that can never resolve.
+         *
+         * DEFINED AND UNCONSTRUCTED until fan-out exists — there is nothing to
+         * deadlock on with a single inline child.
+         */
+        JOIN_DEADLOCK,
+
+        /** The SUBTREE ceiling, not this agent's own. See BudgetLedger. */
+        TEAM_BUDGET_EXCEEDED,
     }
 }
 

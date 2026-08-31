@@ -57,7 +57,26 @@ data class AppendEventRequest(
     val correlationId: String? = null,
 )
 
-open class RunEventRepository(dataSource: DataSource) : BaseRepository(dataSource) {
+open class RunEventRepository(
+    dataSource: DataSource,
+    /**
+     * Allocate `sequence` from the dedicated `run_event_seq` counter instead of
+     * `agent_runs FOR UPDATE` + `MAX(sequence)+1`.
+     *
+     * -- THIS FLAG IS SHARED WITH THE WORKER AND THAT IS THE WHOLE POINT -----
+     * `RunEventStore.SequenceSource` reads the SAME env var. Both processes
+     * append to `run_events` for the same run, and the lock is what stops them
+     * writing the same number. If one side locks `agent_runs` and the other
+     * locks `run_event_seq`, they exclude nothing: two different rows, two
+     * writers, one duplicate `sequence`, and the run timeline's
+     * `?afterSequence=` cursor silently skips an event.
+     *
+     * So it defaults OFF and is turned on only once both are deployed. Never set
+     * it on one service alone, not even briefly during a rollout.
+     */
+    private val useSeqCounter: Boolean =
+        System.getenv("AGENT_EVENT_SEQ_COUNTER")?.lowercase() == "true",
+) : BaseRepository(dataSource) {
     override val log = LoggerFactory.getLogger(RunEventRepository::class.java)
 
     private val cols = """
@@ -89,15 +108,25 @@ open class RunEventRepository(dataSource: DataSource) : BaseRepository(dataSourc
             val prev = c.autoCommit
             c.autoCommit = false
             try {
-                c.prepareStatement("SELECT 1 FROM agent_runs WHERE id = ? FOR UPDATE").use { s ->
-                    s.setObject(1, req.runId)
-                    s.executeQuery().use { /* taken for the lock, not for the row */ }
-                }
-                val seq = c.prepareStatement(
-                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_events WHERE run_id = ?"
-                ).use { s ->
-                    s.setObject(1, req.runId)
-                    s.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                val seq = if (useSeqCounter) {
+                    /* One statement: lock the counter row, advance it, return the
+                       number. Same serialization as below, on a row that carries
+                       nothing else. */
+                    c.prepareStatement("SELECT run_events_allocate_seq(?, 1)").use { s ->
+                        s.setObject(1, req.runId)
+                        s.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                    }
+                } else {
+                    c.prepareStatement("SELECT 1 FROM agent_runs WHERE id = ? FOR UPDATE").use { s ->
+                        s.setObject(1, req.runId)
+                        s.executeQuery().use { /* taken for the lock, not for the row */ }
+                    }
+                    c.prepareStatement(
+                        "SELECT COALESCE(MAX(sequence), 0) + 1 FROM run_events WHERE run_id = ?"
+                    ).use { s ->
+                        s.setObject(1, req.runId)
+                        s.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+                    }
                 }
                 val event = c.prepareStatement(
                     """

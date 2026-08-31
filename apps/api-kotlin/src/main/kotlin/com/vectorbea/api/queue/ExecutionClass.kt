@@ -18,6 +18,26 @@ enum class ExecutionClass(val wire: String) {
     /** Any LLM or AI-agent node. The scarce resource. */
     AGENT("agent"),
 
+    /**
+     * A dispatched child activation — §12.3.
+     *
+     * Its own lane for two reasons, and the first is the one that bites: a
+     * supervisor parked on its children must not sit behind a cold backlog of new
+     * top-level runs, because then the parent's latency is the queue's depth and a
+     * team gets slower exactly when the platform is busy. The second is that child
+     * work has a different duration profile, so mixing the two makes the
+     * free-slot heuristic wrong for both.
+     */
+    AGENT_CHILD("agent.child"),
+
+    /**
+     * A run with a caller waiting — SSE attached, or a deadline set.
+     *
+     * What keeps a demo responsive while a batch of 500 drains. Nobody watching a
+     * spinner cares that the queue is fair.
+     */
+    AGENT_INTERACTIVE("agent.interactive"),
+
     /** Timers, recovery and continuations — synthesized by the worker, never starved. */
     SYSTEM("system"),
     ;

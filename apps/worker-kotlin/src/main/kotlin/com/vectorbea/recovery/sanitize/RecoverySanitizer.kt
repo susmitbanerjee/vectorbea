@@ -7,7 +7,12 @@ object RecoverySanitizer {
         Regex("""(?i)(api[-_]?key['":\s=]+)[A-Za-z0-9+/\-_]{20,}""") to "$1[REDACTED]",
         Regex("""(?i)(password['":\s=]+)[^\s,'"]{4,}""") to "$1[REDACTED]",
         Regex("""(?i)(secret['":\s=]+)[^\s,'"]{8,}""") to "$1[REDACTED]",
-        Regex("""postgresql://[^@]+@""") to "postgresql://[REDACTED]@",
+        /* Both spellings. libpq, JDBC and every ORM accept `postgres://`, it is
+           what most connection strings in the wild actually look like, and the
+           pattern matched only the long form — so the commonest shape of the
+           commonest leak went straight through. Found by a blackboard test that
+           wrote a failed-connection message. */
+        Regex("""postgres(ql)?://[^@]+@""") to "postgresql://[REDACTED]@",
         Regex("""mysql://[^@]+@""") to "mysql://[REDACTED]@",
         Regex("""mongodb(\+srv)?://[^@]+@""") to "mongodb://[REDACTED]@",
         Regex("""(?i)(bearer\s+)[A-Za-z0-9\-_=]{20,}""") to "$1[REDACTED]",

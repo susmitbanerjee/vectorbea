@@ -27,6 +27,13 @@ data class WorkspaceLimits(
 ) {
     fun limitFor(type: WorkerJobType): Int = when (type) {
         WorkerJobType.AGENT -> maxAgent
+        /* The same per-tenant agent cap covers all three agent lanes, and
+           deliberately as ONE budget rather than three: giving children their own
+           allowance would mean a tenant at its agent cap could still start
+           unlimited work by fanning out, which is the cap not existing. The
+           per-run and per-workspace ACTIVATION caps are what bound the fan-out's
+           width; this bounds the tenant's total agent concurrency. */
+        WorkerJobType.AGENT_CHILD, WorkerJobType.AGENT_INTERACTIVE -> maxAgent
         WorkerJobType.LONG -> maxLong
         WorkerJobType.SHORT -> maxShort
         // Operational continuations must always be admissible: a timer resume or

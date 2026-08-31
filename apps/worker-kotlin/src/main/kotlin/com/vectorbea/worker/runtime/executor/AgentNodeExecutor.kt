@@ -62,6 +62,24 @@ class AgentNodeExecutor(
      * client is used. See that parameter for why the seam exists.
      */
     private val llmHttpClient: java.net.http.HttpClient? = null,
+    /**
+     * Mirrors AGENT_DELEGATION_ENABLED, for the same reason the other two flags
+     * here are parameters: a differential test drives both paths in one JVM.
+     */
+    private val delegationEnabled: Boolean =
+        com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.DELEGATION_ENABLED,
+    /**
+     * Mirrors AGENT_LOOP_RECONSTRUCTION_ENABLED, forwarded to the brain.
+     *
+     * A parameter so the delegation resume test can drive BOTH settings in one
+     * JVM. The two reach the same place by different routes — flag off, the parent
+     * replays from iteration 1 and re-issues the DELEGATE; flag on, it resumes at
+     * the delegating iteration, because reconstruction takes completed and failed
+     * rows and the delegating iteration is `running` when the child parks — and
+     * only one of those is what the design note describes.
+     */
+    private val reconstructionEnabled: Boolean =
+        com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.RECONSTRUCTION_ENABLED,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -315,6 +333,13 @@ class AgentNodeExecutor(
         val maxToolCalls: Int,
         val maxCostCents: Int,
         val allowedToolIds: List<String>,
+        /**
+         * The team roster. Empty on a pre-V044 schema and empty by default, and in
+         * both cases that means NO delegation — see
+         * AgentSafetyGuard.validateAgentAllowed for why this reads the opposite way
+         * to [allowedToolIds].
+         */
+        val canDelegateTo: List<String> = emptyList(),
     )
 
     /**
@@ -339,7 +364,11 @@ class AgentNodeExecutor(
                        COALESCE(max_cost_cents, 50) AS max_cost_cents_val,
                        -- allowed_tool_ids is TEXT[] (added by V003), not JSONB.
                        -- to_jsonb() converts text[] → ["id1","id2"] as jsonb safely.
-                       COALESCE(to_jsonb(allowed_tool_ids), '[]'::jsonb) AS allowed_tool_ids_json
+                       COALESCE(to_jsonb(allowed_tool_ids), '[]'::jsonb) AS allowed_tool_ids_json,
+                       -- V044. Absent on an older schema, which sends this query to
+                       -- the V001 fallback below — where the roster is empty, and an
+                       -- empty roster correctly means no delegation.
+                       COALESCE(to_jsonb(can_delegate_to), '[]'::jsonb)  AS can_delegate_to_json
                        FROM agents
                        WHERE id = ? AND workspace_id = ? AND status = 'active'"""
                 ).use { stmt ->
@@ -364,6 +393,11 @@ class AgentNodeExecutor(
                             maxToolCalls    = rs.getObject("max_tool_calls_val")?.let { (it as? Number)?.toInt() } ?: 5,
                             maxCostCents    = rs.getObject("max_cost_cents_val")?.let { (it as? Number)?.toInt() } ?: 50,
                             allowedToolIds  = toolIds,
+                            canDelegateTo   = try {
+                                @Suppress("UNCHECKED_CAST")
+                                mapper.readValue(rs.getString("can_delegate_to_json") ?: "[]",
+                                    List::class.java) as List<String>
+                            } catch (_: Exception) { emptyList() },
                         )
                     }
                 }
@@ -438,6 +472,17 @@ class AgentNodeExecutor(
         val connectionId = agent.llmConnectionId
             ?: return NodeResult.Failed("Iterative agent '${agent.name}' has no LLM connection configured.")
 
+        /*
+         * One ledger per agent step, built only when delegation could actually
+         * happen. A single agent with no roster has no tree to bound, and giving it
+         * a ledger would add an allocation, a settle and a clamp attribute to every
+         * span for a tree of one.
+         */
+        val budgetLedger = if (delegationEnabled && agent.canDelegateTo.isNotEmpty())
+            com.vectorbea.worker.agents.budget.BudgetLedger(
+                com.vectorbea.worker.runtime.budget.RunCeilings.forWorkspace(dataSource, ctx.workspaceId))
+        else null
+
         val brainRunner = AgentBrainRunner(
             dataSource         = dataSource,
             eventStore         = eventStore,
@@ -447,6 +492,14 @@ class AgentNodeExecutor(
                the Approvals screen reads and the same gate DB_WRITE nodes use. */
             approvalStore      = com.vectorbea.worker.runtime.checkpoint.ApprovalStore(dataSource),
             llmHttpClient      = llmHttpClient,
+            /* One ledger per step, shared by every agent beneath it. That sharing IS
+               the budget tree: a child's spend debits its parent because both are
+               nodes in the same ledger, not because anyone remembered to add it up. */
+            budgetLedger       = budgetLedger,
+            reconstructionEnabled = reconstructionEnabled,
+            teamLimits         = com.vectorbea.worker.agents.orchestration.TeamLimits
+                .fromNodeConfig(node.config),
+            delegationEnabled  = delegationEnabled,
         )
 
         val config = AgentBrainConfig(
@@ -477,6 +530,9 @@ class AgentNodeExecutor(
             allowedToolIds  = agent.allowedToolIds.mapNotNull {
                 try { UUID.fromString(it) } catch (_: Exception) { null }
             }.toSet(),
+            canDelegateTo   = agent.canDelegateTo.mapNotNull {
+                try { UUID.fromString(it) } catch (_: Exception) { null }
+            }.toSet(),
             resolvedInput   = resolvedInputs,
         )
 
@@ -492,7 +548,7 @@ class AgentNodeExecutor(
          * single-agent workflow cannot tell the difference.
          */
         if (activationsEnabled) {
-            return runActivation(agent, node, config, brainRunner, ctx)
+            return runActivation(agent, node, config, brainRunner, ctx, budgetLedger)
         }
 
         return try {
@@ -579,10 +635,12 @@ class AgentNodeExecutor(
         config: com.vectorbea.worker.agents.brain.model.AgentBrainConfig,
         brainRunner: AgentBrainRunner,
         ctx: RuntimeContext,
+        budgetLedger: com.vectorbea.worker.agents.budget.BudgetLedger? = null,
     ): NodeResult {
         val harness = com.vectorbea.worker.agents.orchestration.AgentHarness(
             store = com.vectorbea.worker.agents.orchestration.ActivationStore(dataSource),
             brainRunner = brainRunner,
+            ledger = budgetLedger,
         )
 
         val request = com.vectorbea.worker.agents.orchestration.AgentHarness.ActivationRequest(
@@ -606,10 +664,13 @@ class AgentNodeExecutor(
                 "maxCostCents" to agent.maxCostCents,
             ),
             agentVersion = null,
+            /* Tokens included, because the ledger bounds a subtree on all four
+               dimensions and a missing one is an unbounded one. */
             budgetAllocated = mapOf(
                 "maxIterations" to agent.maxIterations,
                 "maxToolCalls" to agent.maxToolCalls,
                 "maxCostCents" to agent.maxCostCents,
+                "maxTotalTokens" to config.maxTotalTokens,
             ),
             /* The pinned instruction is substituted here and nowhere else, so the
                rest of the config is built exactly as the legacy path builds it. */

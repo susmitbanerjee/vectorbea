@@ -75,6 +75,23 @@ class RuntimeContext(
      * through it is null-safe, so a run behaves identically with it absent.
      */
     val tracer: com.vectorbea.worker.events.RunTracer? = null,
+    /**
+     * When this tick's execution budget runs out, as epoch millis. Null when
+     * unbounded.
+     *
+     * ── WHY A NODE CAN SEE THIS AT ALL ──────────────────────────────────────
+     * `WorkflowRuntime` checks the budget BETWEEN nodes, which is right for every
+     * node that finishes in one bounded operation. An `agent_team` node does not:
+     * it is several agent loops, and a fan-out to five workers can outlast a tick
+     * on its own. Between-nodes checking would let one team node hold a worker for
+     * the whole fan-out and then discover the tick was spent.
+     *
+     * Read-only and advisory. Nothing decides a RUN outcome from it — the team
+     * uses it to stop STARTING new children, and the children it already created
+     * are durable and reattach, so the resumed execution continues rather than
+     * repeating. It is not a second budget, and it is not a scheduler.
+     */
+    val tickDeadlineAtMs: Long? = null,
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()

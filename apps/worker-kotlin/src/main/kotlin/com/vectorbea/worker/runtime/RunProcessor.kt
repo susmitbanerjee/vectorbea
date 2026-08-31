@@ -44,6 +44,13 @@ class RunProcessor(
     private val checkpointStore: CheckpointStore = CheckpointStore(dataSource),
     private val recoveryService: WorkerRecoveryService? = try { WorkerRecoveryService(dataSource) } catch (_: Exception) { null },
     private val telemetry: TelemetryClient? = null,
+    /**
+     * Wakes a dispatched child's parent when the child reaches a terminal state.
+     *
+     * Null where dispatch is not wired, in which case nothing has a parent and
+     * there is nothing to wake.
+     */
+    private val childDispatcher: com.vectorbea.worker.agents.orchestration.ChildRunDispatcher? = null,
     private val leaseManager: RunLeaseManager = RunLeaseManager(dataSource),
     /**
      * Durably re-enqueue a continuation job after a cooperative yield. Default is
@@ -1246,6 +1253,20 @@ class RunProcessor(
                 /* Only when THIS call won the transition. The CAS is what makes
                    attribution run exactly once even under redelivery. */
                 if (updated) attributeRootCause(runId, status)
+                /*
+                 * ── WAKE THE PARENT, IF THIS RUN HAS ONE ────────────────────
+                 *
+                 * Behind the same CAS, and for the same reason: the transition is
+                 * what makes "this child just became terminal" true exactly once,
+                 * so a redelivered message cannot wake the parent twice.
+                 *
+                 * `onChildTerminal` itself only enqueues when NO sibling is still
+                 * live, so a five-child fan-out wakes its parent once rather than
+                 * five times — and if that enqueue is lost, the parent is left
+                 * `waiting_for_child` with every child terminal, which is exactly
+                 * what the reconciler's `children_terminal` arm looks for.
+                 */
+                if (updated) runCatching { childDispatcher?.onChildTerminal(runId) }
                 updated
             }
         }

@@ -117,7 +117,9 @@ class ClaimConsumer(
                     defaultTotalCap = if (jobType == WorkerJobType.SYSTEM) Int.MAX_VALUE
                                       else config.maxActiveRunsPerTenant,
                     defaultClassCap = when (jobType) {
-                        WorkerJobType.AGENT -> config.maxActiveAgentRunsPerTenant
+                        WorkerJobType.AGENT,
+                        WorkerJobType.AGENT_CHILD,
+                        WorkerJobType.AGENT_INTERACTIVE -> config.maxActiveAgentRunsPerTenant
                         WorkerJobType.LONG -> config.maxActiveLongRunsPerTenant
                         WorkerJobType.SHORT -> config.maxActiveShortRunsPerTenant
                         WorkerJobType.SYSTEM -> Int.MAX_VALUE

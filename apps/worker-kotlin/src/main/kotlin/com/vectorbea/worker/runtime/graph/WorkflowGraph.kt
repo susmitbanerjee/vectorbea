@@ -488,7 +488,7 @@ data class WorkflowNode(
         NodeType.TRIGGER, NodeType.TRANSFORM, NodeType.BRANCH,
         NodeType.PARALLEL, NodeType.JOIN, NodeType.APPROVAL, NodeType.END,
         NodeType.LLM, NodeType.HTTP, NodeType.DB_QUERY, NodeType.DB_WRITE,
-        NodeType.TOOL, NodeType.AGENT,
+        NodeType.TOOL, NodeType.AGENT, NodeType.AGENT_TEAM,
     )
 }
 
@@ -577,6 +577,15 @@ enum class NodeType(val value: String) {
     // Reference types — resolved at runtime via DB lookup
     TOOL("tool"),
     AGENT("agent"),
+    /**
+     * A team of agents under an orchestration policy.
+     *
+     * A NEW TYPE, not a mode of [AGENT]. Existing agent nodes are untouched and
+     * nothing migrates: a graph that has never had a team behaves exactly as it
+     * did, and the two executors share every primitive beneath them rather than
+     * sharing a node type and branching inside it.
+     */
+    AGENT_TEAM("agent_team"),
     UNKNOWN("unknown"),
     ;
 
@@ -609,6 +618,7 @@ enum class NodeType(val value: String) {
             "db_write"                   -> DB_WRITE
             "tool"                       -> TOOL
             "agent"                      -> AGENT
+            "agent_team", "team"         -> AGENT_TEAM
             else                         -> UNKNOWN
         }
     }

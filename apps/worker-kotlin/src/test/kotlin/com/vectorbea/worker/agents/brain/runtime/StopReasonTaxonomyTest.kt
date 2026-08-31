@@ -29,7 +29,7 @@ class StopReasonTaxonomyTest {
             val result = StopReasonTaxonomy.classify(reason, failureReason = "something happened")
             assertNotNull(result, "$reason produced no classification")
         }
-        assertEquals(8, StopReason.entries.size,
+        assertEquals(14, StopReason.entries.size,
             "the enum changed — check the new stop reason has a deliberate class, " +
             "and add it to the case-by-case assertions below rather than relying on " +
             "the loop above, which only proves it is non-null")
@@ -56,6 +56,44 @@ class StopReasonTaxonomyTest {
         assertEquals(FailureClass.POLICY,         classOf(StopReason.TOOL_NOT_ALLOWED))
         assertEquals(FailureClass.BUDGET,
             classOf(StopReason.BUDGET_EXCEEDED, breach = "max iterations"))
+    }
+
+    @Test
+    fun `the orchestration stop reasons are ORCHESTRATION, except the one that is a ceiling`() {
+        fun verdictOf(r: StopReason, breach: String? = null) =
+            (StopReasonTaxonomy.classify(r, failureReason = "something happened", budgetBreach = breach)
+                as Classification.Failed).verdict
+
+        assertEquals(FailureClass.ORCHESTRATION, verdictOf(StopReason.AGENT_NOT_IN_ROSTER).failureClass)
+        assertEquals(FailureClass.ORCHESTRATION, verdictOf(StopReason.MAX_DEPTH_EXCEEDED).failureClass)
+        assertEquals(FailureClass.ORCHESTRATION, verdictOf(StopReason.HANDOFF_LOOP).failureClass)
+        assertEquals(FailureClass.ORCHESTRATION, verdictOf(StopReason.CHILD_FAILED).failureClass)
+        assertEquals(FailureClass.ORCHESTRATION, verdictOf(StopReason.JOIN_DEADLOCK).failureClass)
+
+        /*
+         * TEAM_BUDGET_EXCEEDED is BUDGET, and the exception proves the rule: a
+         * subtree ceiling is a ceiling. The operator raises a limit; the builder
+         * restructures nothing. Filing it under ORCHESTRATION because it happens
+         * to involve a team would send the wrong person to fix it.
+         */
+        val team = verdictOf(StopReason.TEAM_BUDGET_EXCEEDED)
+        assertEquals(FailureClass.BUDGET, team.failureClass)
+        assertNotNull(team.breachedLimit,
+            "a BUDGET verdict must name the limit — the class itself requires it")
+    }
+
+    @Test
+    fun `every orchestration stop reason is owned by somebody who can act`() {
+        /* A class with no owner is a category, and a category tells nobody what to
+           do. ORCHESTRATION is the workflow builder's: a roster, a depth limit and
+           a fan-out width are all configuration. */
+        listOf(StopReason.AGENT_NOT_IN_ROSTER, StopReason.MAX_DEPTH_EXCEEDED,
+               StopReason.HANDOFF_LOOP, StopReason.CHILD_FAILED, StopReason.JOIN_DEADLOCK)
+            .forEach { r ->
+                val v = (StopReasonTaxonomy.classify(r) as Classification.Failed).verdict
+                assertTrue(v.failureClass.owner.isNotBlank(), "$r has no owner")
+                assertTrue(v.evidence.isNotBlank(), "$r has no evidence sentence")
+            }
     }
 
     // ── The two overloaded reasons ────────────────────────────────────────────

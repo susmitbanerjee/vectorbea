@@ -122,21 +122,41 @@ CREATE INDEX ON run_spans (workspace_id, failure_class, created_at DESC)
 | `tick` | `run` | `WorkflowRuntime`, one per worker tick |
 | `step` | `tick` | `WorkflowRuntime.executeSingleNode` |
 | `input_mapping` | `step` | input resolution |
-| `activation` | `step` or `activation` | `AgentHarness` |
+| `activation` | `step`, or the `handoff` that created it | `AgentHarness` / `AgentCallExecutor` |
 | `iteration` | `activation` | `AgentBrainRunner` |
 | `llm_call` | `iteration` or `step` | `LlmNodeExecutor` |
 | `tool_call` | `iteration` or `step` | `ToolNodeExecutor` |
-| `handoff` | `activation` | `AgentCallExecutor` |
+| `handoff` | `activation` | `AgentBrainRunner` (wraps the whole delegation) |
 | `approval` | `step`, `activation` or `tool_call` | approval gate |
 | `retry` | `step` or `activation` | `executeGuardedWithRetry` |
 | `checkpoint` | `tick` | checkpoint writer |
 | `wait` | `run` | queue wait, approval parking, timer |
 
 **Which of these are emitted today.** `run`, `tick`, `step`, `wait`, `llm_call`
-and `tool_call` since P2; `activation` and `iteration` since P6. The rest —
+and `tool_call` since P2; `activation` and `iteration` since P6; `handoff`
+since P9. The rest —
 `input_mapping`, `handoff`, `approval`, `retry`, `checkpoint` — are the vocabulary
 this table reserves, and nothing writes them yet. A reader must not infer from a
 trace's absence of `retry` spans that a step was not retried.
+
+**Attributes that explain a thin answer.** Two families are worth knowing about,
+because both describe an agent that behaved reasonably given inputs nobody
+recorded:
+
+* `context_truncated` / `context_dropped_sections` / `context_over_budget` on an
+  `iteration` span — what the context assembler had to drop to fit the prompt. An
+  agent that "ignored" an instruction it was never shown is the hardest agent
+  failure to diagnose, because the prompt is well formed, the tool worked, and
+  the model behaved sensibly given what it got.
+* `budget_clamped` / `budget_clamped_dimensions` on an `activation` span — the
+  agent was handed less than it asked for because its parent could not afford it.
+  In every other artefact this looks exactly like an agent that is bad at its job.
+
+**A delegation's shape.** The `handoff` span covers the WHOLE delegation — the
+guards, the gate and the child's execution — so "this delegation took 40 seconds,
+38 of them waiting on a gate" is answerable. The child's `activation` span nests
+INSIDE it, which gives the constellation view a direct edge-to-node mapping rather
+than one inferred by pairing timestamps.
 
 **How an agent's spans find their parent.** Executors resolve their parent from
 the node id they already hold, via `RunTracer`'s `nodeId -> spanId` registry — see

@@ -25,8 +25,16 @@ object GraphClassifier {
 
     private val mapper = ObjectMapper()
 
-    /** Node types that make a workflow AGENT — the scarce, slowest resource. */
-    private val AGENT_NODE_TYPES = setOf("llm", "agent")
+    /**
+     * Node types that make a workflow AGENT — the scarce, slowest resource.
+     *
+     * `agent_team` is a TYPE ADDITION and nothing more: a team is several agent
+     * loops, so it belongs in the class one agent loop already puts a workflow in.
+     * No rule changes, no threshold moves, and the memo on existing version rows
+     * stays valid because no graph that lacks the new type can classify
+     * differently than it did.
+     */
+    private val AGENT_NODE_TYPES = setOf("llm", "agent", "agent_team")
 
     /** Node types that imply slow or unbounded outbound I/O. */
     private val LONG_NODE_TYPES = setOf(

@@ -28,14 +28,118 @@ import javax.sql.DataSource
 open class RunEventStore(
     private val dataSource: DataSource,
     private val pubSub: StatefulRedisPubSubConnection<String, String>,
+    /**
+     * Where a sequence number comes from. See [SequenceSource].
+     *
+     * A constructor parameter rather than a direct env read so a test can drive
+     * both modes in one JVM - the whole point of the change is that the two are
+     * interchangeable, and a claim like that is only worth what its test is.
+     */
+    private val sequenceSource: SequenceSource = SequenceSource.default(),
+    /**
+     * Coalesce events into batched writes. See [emitBuffered].
+     *
+     * Off by default. On, a hard kill can lose up to [flushEveryMs] of
+     * non-terminal events - which is why terminal events are never buffered.
+     */
+    private val batchEnabled: Boolean =
+        System.getenv("AGENT_EVENT_BATCH_ENABLED")?.lowercase() == "true",
+    private val batchSize: Int =
+        System.getenv("AGENT_EVENT_BATCH_SIZE")?.toIntOrNull()?.coerceIn(1, 500) ?: 50,
+    private val flushEveryMs: Long =
+        System.getenv("AGENT_EVENT_FLUSH_MS")?.toLongOrNull()?.coerceIn(10, 5_000) ?: 250L,
 ) {
     private val log = logger()
+
+    /**
+     * How `run_events.sequence` is allocated.
+     *
+     * -- BOTH ARE CORRECT; ONE IS CHEAPER ------------------------------------
+     * `RUN_ROW` is what shipped: take `agent_runs FOR UPDATE`, read
+     * `MAX(sequence)+1`. It is the right call against a second process appending
+     * to the same run and it is NOT being removed - 12.2 is explicit about
+     * that. Its cost is that the lock lands on the row that also carries run
+     * status, the lease and the fair-queueing vtime, so a five-agent team's
+     * hundreds of event writes queue behind every status update.
+     *
+     * `COUNTER` moves the same lock onto a dedicated `run_event_seq` row. Same
+     * serialization, same cluster-wide guarantee, no collision with `agent_runs`
+     * and no MAX() scan across the monthly partitions.
+     *
+     * -- WHY THIS IS A FLAG AND NOT A REPLACEMENT ---------------------------
+     * The API appends to `run_events` for the same run from another JVM and
+     * deploys independently. A fleet where one side allocates from the counter
+     * and the other from MAX(sequence) would write DUPLICATE sequence numbers -
+     * they would not be excluding each other at all. So the flag has to be read
+     * identically by both, and it defaults off until both are deployed.
+     */
+    enum class SequenceSource {
+        RUN_ROW,
+        COUNTER;
+
+        companion object {
+            /** Read by BOTH stores. `RunEventRepository` in the API reads the same name. */
+            fun default(): SequenceSource =
+                if (System.getenv("AGENT_EVENT_SEQ_COUNTER")?.lowercase() == "true") COUNTER
+                else RUN_ROW
+        }
+    }
 
     /**
      * Per-run in-memory locks for serializing event sequence assignment.
      * Acquired before requesting a DB connection to avoid pool exhaustion.
      */
     private val runLocks = java.util.concurrent.ConcurrentHashMap<UUID, java.util.concurrent.locks.ReentrantLock>()
+
+    /**
+     * Pending events per run, guarded by that run's entry in [runLocks].
+     *
+     * -- WHY EVENTS BUFFER DIFFERENTLY FROM SPANS ---------------------------
+     * `SpanWriter` has a bounded queue and DROPS to a counter under pressure,
+     * because a missing span is a degraded trace. An event is not that: the run
+     * timeline pages on `?afterSequence=`, so a dropped event is a hole a reader
+     * can see and cannot explain, and RUN_FAILED going missing is an outage
+     * reported as a success. So this buffer applies BACK-PRESSURE instead - a
+     * full buffer flushes on the emitting thread rather than discarding.
+     */
+    private val pending = java.util.concurrent.ConcurrentHashMap<UUID, ArrayDeque<RunEvent>>()
+
+    private val flusher = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "run-event-flush").also { it.isDaemon = true }
+    }
+    private var flushTask: java.util.concurrent.ScheduledFuture<*>? = null
+
+    /**
+     * Event types that must be on disk before the emitting thread continues.
+     *
+     * Terminal run states, and the two that gate a resume. Everything here is
+     * something a reader would treat as authoritative - "this run finished" -
+     * and something that must survive the kill that follows it.
+     */
+    private val neverBuffered = setOf(
+        EventType.RUN_STARTED, EventType.RUN_SUCCEEDED, EventType.RUN_FAILED,
+        EventType.RUN_CANCELLED, EventType.RUN_CANCELLED_CLEANLY,
+        EventType.RUN_CONTINUED_AS_NEW, EventType.RUN_YIELDED,
+        EventType.APPROVAL_REQUESTED, EventType.AGENT_APPROVAL_REQUESTED,
+    )
+
+    /** Start the periodic flush. No-op when batching is off. */
+    open fun start() {
+        if (!batchEnabled || flushTask != null) return
+        flushTask = flusher.scheduleWithFixedDelay(
+            { runCatching { flushAll() } }, flushEveryMs, flushEveryMs,
+            java.util.concurrent.TimeUnit.MILLISECONDS)
+        log.info("[events] batching on (size={}, every={}ms, seq={})",
+            batchSize, flushEveryMs, sequenceSource)
+    }
+
+    /** Flush everything and stop the periodic task. Safe to call twice. */
+    open fun stop() {
+        flushTask?.cancel(false)
+        flushTask = null
+        runCatching { flushAll() }
+        flusher.shutdown()
+    }
 
     /**
      * Immutable event to persist and publish.
@@ -240,10 +344,107 @@ open class RunEventStore(
      * operations — events are appended on a best-effort basis. If the DB
      * write succeeds but Redis publish fails, the event is still persisted.
      */
+    /**
+     * Append one event.
+     *
+     * -- THE RETURN VALUE WHEN BATCHING IS ON -------------------------------
+     * Returns the assigned sequence, as it always has, EXCEPT when the event was
+     * buffered - then it returns [SEQ_BUFFERED], because the number does not
+     * exist yet and inventing one would be worse than saying so. No caller in
+     * the worker reads this value; a caller that needs the number must call
+     * [appendEvents] directly, which is always synchronous.
+     */
     open fun appendEvent(event: RunEvent): Int {
-        val seq = insertEvent(event)
-        publishEvent(event, seq)
-        return seq
+        if (batchEnabled && event.type !in neverBuffered) {
+            emitBuffered(event)
+            return SEQ_BUFFERED
+        }
+        /* A synchronous write must not overtake buffered events for the same run,
+           or the timeline would number them out of emission order. Draining first
+           is what keeps "sequence order == emission order" true with batching on. */
+        if (batchEnabled) flush(event.runId)
+        return appendEvents(listOf(event)).first()
+    }
+
+    /**
+     * Queue an event for the next flush, flushing early if the run's buffer is full.
+     *
+     * Under the run's own lock, so emission order into the deque is the order the
+     * flush will assign sequence numbers in.
+     */
+    private fun emitBuffered(event: RunEvent) {
+        val lock = runLocks.computeIfAbsent(event.runId) { java.util.concurrent.locks.ReentrantLock() }
+        lock.lock()
+        val full: Boolean
+        try {
+            val q = pending.computeIfAbsent(event.runId) { ArrayDeque() }
+            q.addLast(event)
+            full = q.size >= batchSize
+        } finally {
+            lock.unlock()
+        }
+        if (full) flush(event.runId)
+    }
+
+    /**
+     * Write everything buffered for one run.
+     *
+     * A failed flush is logged and the events are DISCARDED rather than retried
+     * forever: [appendEvents] already retries a sequence conflict three times, so
+     * reaching here means the database refused the write, and holding a growing
+     * deque of undeliverable events until the JVM dies helps nobody. This is the
+     * one place events are lost, it is bounded by one flush, and it is loud.
+     */
+    open fun flush(runId: UUID) {
+        val lock = runLocks[runId] ?: return
+        val batch: List<RunEvent>
+        lock.lock()
+        try {
+            val q = pending[runId] ?: return
+            if (q.isEmpty()) return
+            batch = q.toList()
+            q.clear()
+        } finally {
+            lock.unlock()
+        }
+        try {
+            appendEvents(batch)
+        } catch (e: Exception) {
+            log.error("[events] flush of {} buffered event(s) failed [runId={}]: {}",
+                batch.size, runId, e.message)
+        }
+    }
+
+    /** Flush every run with pending events. */
+    open fun flushAll() {
+        pending.keys.toList().forEach { flush(it) }
+    }
+
+    /**
+     * Append a batch of events for ONE run, under a single sequence allocation.
+     *
+     * -- WHY A BATCH IS A DIFFERENT METHOD AND NOT AN OPTIMISATION -----------
+     * The semantics are identical to calling [appendEvent] N times - same order,
+     * same contiguous numbers, same rows. What changes is that the per-run lock
+     * is taken ONCE for N events instead of N times, which is the whole of 12.2
+     * item 1. Fifty events per flush is fifty times fewer acquisitions.
+     *
+     * The events must all belong to the same run: the lock is per-run, and a
+     * mixed batch would either take one run's lock while writing another's rows
+     * (wrong) or take several (a deadlock waiting for an ordering bug). Callers
+     * group; this refuses to guess.
+     *
+     * Returns the assigned sequence numbers, positionally.
+     */
+    open fun appendEvents(events: List<RunEvent>): List<Int> {
+        if (events.isEmpty()) return emptyList()
+        val runId = events.first().runId
+        require(events.all { it.runId == runId }) {
+            "appendEvents takes one run's events; group by runId before calling"
+        }
+        val seqs = insertEvents(events)
+        events.forEachIndexed { i, e -> publishEvent(e, seqs[i]) }
+        return seqs
     }
 
     /**
@@ -251,6 +452,11 @@ open class RunEventStore(
      * Without this the lock map grows for the lifetime of the JVM.
      */
     open fun forgetRun(runId: UUID) {
+        /* Flush BEFORE dropping the lock. Removing it first would leave the deque
+           unreachable from [flush], which looks up the lock and returns when it is
+           gone - the events would sit in `pending` until the JVM exits. */
+        if (batchEnabled) flush(runId)
+        pending.remove(runId)
         runLocks.remove(runId)
     }
 
@@ -275,7 +481,8 @@ open class RunEventStore(
      *   for events from the same run, so the 5-connection pool is never
      *   exhausted by event writes. Zero dropped events, no deadlock.
      */
-    private fun insertEvent(event: RunEvent): Int {
+    private fun insertEvents(events: List<RunEvent>): List<Int> {
+        val event = events.first()
         // Get (or create) the per-run lock — ~48 bytes per entry; evicted on run
         // completion via [forgetRun].
         val lock = runLocks.computeIfAbsent(event.runId) { java.util.concurrent.locks.ReentrantLock() }
@@ -289,26 +496,27 @@ open class RunEventStore(
             var lastError: Exception? = null
             repeat(3) { attempt ->
                 try {
-                    return doInsert(event)
+                    return doInsert(events)
                 } catch (e: java.sql.SQLException) {
                     if (e.sqlState == "23505") { // unique_violation — sequence race with another worker
                         lastError = e
-                        log.warn("[events] sequence conflict, retrying ({}/3) [runId={}, type={}]",
-                            attempt + 1, event.runId, event.type.value)
+                        log.warn("[events] sequence conflict, retrying ({}/3) [runId={}, type={}, n={}]",
+                            attempt + 1, event.runId, event.type.value, events.size)
                     } else throw e
                 }
             }
             throw lastError ?: IllegalStateException("event insert failed after retries")
         } catch (e: Exception) {
-            log.error("[events] failed to insert event [runId={}, type={}]: {}",
-                event.runId, event.type.value, e.message)
+            log.error("[events] failed to insert {} event(s) [runId={}, type={}]: {}",
+                events.size, event.runId, event.type.value, e.message)
             throw e
         } finally {
             lock.unlock()
         }
     }
 
-    private fun doInsert(event: RunEvent): Int {
+    private fun doInsert(events: List<RunEvent>): List<Int> {
+        val runId = events.first().runId
         return dataSource.connection.use { conn ->
             conn.autoCommit = false
             try {
@@ -336,29 +544,41 @@ open class RunEventStore(
                  * Both writers take it in the same order and touch no other row, so
                  * there is no cycle to deadlock on.
                  */
-                lockRun(conn, event.runId)
-                val seq = nextSequence(conn, event.runId)
+                /* ONE allocation for the whole batch. The block is contiguous and
+                   assigned in list order, so a batch reads back in exactly the
+                   order it was emitted. */
+                val first = allocate(conn, runId, events.size)
+                val seqs = List(events.size) { first + it }
+
                 conn.prepareStatement(INSERT_SQL).use { stmt ->
-                    bindInsert(stmt, event, seq)
-                    stmt.executeUpdate()
+                    events.forEachIndexed { i, e ->
+                        bindInsert(stmt, e, seqs[i])
+                        stmt.addBatch()
+                    }
+                    stmt.executeBatch()
                 }
-                // Update history tracking counters on agent_runs
-                val estimatedSize = estimateEventSize(event)
+
+                /* History counters, aggregated. N events used to be N updates of the
+                   same row inside the same transaction — every one of them a dead
+                   tuple. One update per batch is the same arithmetic and one row
+                   version. */
+                val estimatedSize = events.sumOf { estimateEventSize(it) }
                 conn.prepareStatement("""
                     UPDATE agent_runs
-                    SET history_event_count = history_event_count + 1,
+                    SET history_event_count = history_event_count + ?,
                         history_size_bytes  = history_size_bytes + ?,
                         updated_at          = now()
                     WHERE id = ?
                 """.trimIndent()).use { stmt ->
-                    stmt.setLong(1, estimatedSize)
-                    stmt.setObject(2, event.runId)
+                    stmt.setInt(1, events.size)
+                    stmt.setLong(2, estimatedSize)
+                    stmt.setObject(3, runId)
                     stmt.executeUpdate()
                 }
                 conn.commit()
-                log.debug("[events] inserted event [runId={}, type={}, seq={}, estimatedSize={}]",
-                    event.runId, event.type.value, seq, estimatedSize)
-                seq
+                log.debug("[events] inserted {} event(s) [runId={}, firstSeq={}, estimatedSize={}]",
+                    events.size, runId, first, estimatedSize)
+                seqs
             } catch (e: Exception) {
                 conn.rollback()
                 throw e
@@ -395,6 +615,38 @@ open class RunEventStore(
         conn.prepareStatement("SELECT 1 FROM agent_runs WHERE id = ? FOR UPDATE").use { stmt ->
             stmt.setObject(1, runId)
             stmt.executeQuery().use { /* the lock is the point; the row is not read */ }
+        }
+    }
+
+    /**
+     * Reserve [count] consecutive sequence numbers for [runId] and return the first.
+     *
+     * Runs inside the caller's transaction in BOTH modes, deliberately: the lock
+     * (whichever row it is on) must be held until the INSERT commits, or a second
+     * writer can slip in between the allocation and the write and produce rows
+     * whose `sequence` order does not match their commit order.
+     */
+    private fun allocate(conn: java.sql.Connection, runId: UUID, count: Int): Int =
+        when (sequenceSource) {
+            SequenceSource.RUN_ROW -> {
+                lockRun(conn, runId)
+                nextSequence(conn, runId)
+            }
+            SequenceSource.COUNTER -> allocateFromCounter(conn, runId, count)
+        }
+
+    /**
+     * The counter row. One statement: lock, advance, return the block's first
+     * number. Touches neither `agent_runs` nor any `run_events` partition.
+     */
+    private fun allocateFromCounter(conn: java.sql.Connection, runId: UUID, count: Int): Int {
+        conn.prepareStatement("SELECT run_events_allocate_seq(?, ?)").use { stmt ->
+            stmt.setObject(1, runId)
+            stmt.setInt(2, count)
+            stmt.executeQuery().use { rs ->
+                rs.next()
+                return rs.getInt(1)
+            }
         }
     }
 
@@ -493,6 +745,13 @@ open class RunEventStore(
         "\"${s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "").take(500)}\""
 
     companion object {
+        /**
+         * What [appendEvent] returns for an event that was buffered rather than
+         * written. Negative so it can never be mistaken for a real sequence, which
+         * starts at 1.
+         */
+        const val SEQ_BUFFERED = -1
+
         private val INSERT_SQL = """
             INSERT INTO run_events (
                 run_id, workspace_id, environment_id, sequence,

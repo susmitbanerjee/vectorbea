@@ -147,6 +147,23 @@ export function RunHeader({
           <Button size="sm" variant={comparing ? "subtle" : "secondary"} onClick={onCompare} aria-pressed={comparing}>
             Compare
           </Button>
+          {/*
+            THE DEBUG TAB'S ONLY ENTRY POINT.
+
+            The route, its three views and its API have existed since P5, and
+            nobody could reach any of it: `/runs/:id/debug` was linked from
+            nowhere — not here, not the nav, not the command palette — so it was
+            reachable only by typing the URL. A feature with no door is a feature
+            that does not exist, however complete the room behind it.
+
+            It sits beside "Open workflow" rather than in the pane strip because
+            it is a different MODE of looking at one run, not a fourth pane —
+            which is the same reason it has its own address (see the route's own
+            note on panes-not-tabs).
+          */}
+          <Button asChild size="sm" variant="secondary">
+            <Link href={`/runs/${run.id}/debug` as Route}>Debug</Link>
+          </Button>
           <Button asChild size="sm" variant="secondary">
             <Link href={`/workflows/${run.workflowId}` as Route}>Open workflow</Link>
           </Button>

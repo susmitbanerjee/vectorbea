@@ -317,6 +317,7 @@ class WorkflowRuntime(
             graph = graph,
             debugMode = debugMode,
             tracer = tracerFor(runId, workspaceId),
+            tickDeadlineAtMs = tickDeadline(),
         )
 
         // 4. Build per-run output view for cross-step template resolution
@@ -379,6 +380,7 @@ class WorkflowRuntime(
             forceReexecuteNodeIds = pendingNodeIds,
             allowLoopReconstruction = allowLoopReconstruction,
             tracer = tracerFor(runId, workspaceId),
+            tickDeadlineAtMs = tickDeadline(),
         )
 
         // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)
@@ -1725,6 +1727,17 @@ class WorkflowRuntime(
         log.info("[runtime] run yielded [runId={}, reason={}, lastNode={}]", ctx.runId, reason, lastNode)
         return ExecutionResult.Yielded(reason, lastNode)
     }
+
+    /**
+     * When this tick's wall clock runs out, for a node that can stop between
+     * sub-units of its own work.
+     *
+     * The SAME budget the tracker enforces, expressed as a deadline. One source,
+     * so a node that stops early and the runtime that yields afterwards cannot
+     * disagree about when the tick ended. See RuntimeContext.tickDeadlineAtMs.
+     */
+    private fun tickDeadline(): Long? =
+        executionBudget?.maxWallClockMs?.takeIf { it > 0 }?.let { System.currentTimeMillis() + it }
 
     private fun writeCheckpoint(nodeId: String, ctx: RuntimeContext, source: String) {
         runCatching {

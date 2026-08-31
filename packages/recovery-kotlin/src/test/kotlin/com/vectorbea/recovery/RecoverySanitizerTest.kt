@@ -15,6 +15,21 @@ class RecoverySanitizerTest {
         val r = RecoverySanitizer.sanitizeMessage("api_key: sk-abcdef1234567890abcdef1234567890")
         assertNotNull(r); assertFalse(r.contains("abcdef1234567890abcdef1234567890"), "API key should be redacted: $r")
     }
+    /**
+     * `postgres://`, the SHORT scheme.
+     *
+     * The pattern only knew `postgresql://`. libpq, JDBC and every ORM accept
+     * both, and the short form is what most connection strings in the wild
+     * actually look like — so the commonest shape of the commonest leak went
+     * straight through this, which is the redaction every payload, event and span
+     * in the system relies on. Found by a blackboard test writing a
+     * failed-connection message into a place a peer agent would read from.
+     */
+    @Test fun redactsShortSchemeDbConnectionString() {
+        val r = RecoverySanitizer.sanitizeMessage("postgres://user:mypassword@db.neon.tech/mydb")
+        assertNotNull(r); assertFalse(r.contains("mypassword"), "Password should be redacted: $r")
+    }
+
     @Test fun redactsDbConnectionString() {
         val r = RecoverySanitizer.sanitizeMessage("postgresql://user:mypassword@db.neon.tech/mydb")
         assertNotNull(r); assertFalse(r.contains("mypassword"), "Password should be redacted: $r")

@@ -62,6 +62,12 @@ object FairOrdering {
      */
     fun estimatedCost(executionClass: ExecutionClass): Double = when (executionClass) {
         ExecutionClass.AGENT -> 10.0   // seconds of LLM latency, typically
+        /* A child is an agent loop and costs a tenant the same. Charging it less
+           because it is "internal" would let a fan-out buy ten agents for the
+           price of one against the fair clock, which is the exact arbitrage the
+           depth penalty exists to close. */
+        ExecutionClass.AGENT_CHILD -> 10.0
+        ExecutionClass.AGENT_INTERACTIVE -> 10.0
         ExecutionClass.LONG -> 5.0
         ExecutionClass.SHORT -> 1.0
         ExecutionClass.SYSTEM -> 0.0   // operational work never charges a tenant

@@ -105,6 +105,44 @@ object StopReasonTaxonomy {
                        operator guessing between iterations, tokens, cost and time. */
                     breachedLimit = budgetBreach ?: limitFromText(text)))
 
+            // ── Orchestration (§5.3) ──────────────────────────────────────────
+            //
+            // All six are ORCHESTRATION and all six are unambiguous, which is the
+            // point of adding them rather than folding delegation failures into
+            // ERROR: "the agent tried to delegate to an agent it was not granted"
+            // and "the loop threw" want different people to look at them. The
+            // owner is the workflow builder in every case — a roster, a depth
+            // limit and a fan-out width are all configuration.
+            StopReason.AGENT_NOT_IN_ROSTER ->
+                Classification.Failed(FailureVerdict(FailureClass.ORCHESTRATION,
+                    "the agent delegated to an agent outside its roster"))
+
+            StopReason.MAX_DEPTH_EXCEEDED ->
+                Classification.Failed(FailureVerdict(FailureClass.ORCHESTRATION,
+                    "the delegation chain went deeper than the team's limit"))
+
+            StopReason.HANDOFF_LOOP ->
+                Classification.Failed(FailureVerdict(FailureClass.ORCHESTRATION,
+                    "the same request was delegated along the same edge repeatedly"))
+
+            StopReason.CHILD_FAILED ->
+                Classification.Failed(FailureVerdict(FailureClass.ORCHESTRATION,
+                    "a delegated child failed and the join could not proceed without it"))
+
+            StopReason.JOIN_DEADLOCK ->
+                Classification.Failed(FailureVerdict(FailureClass.ORCHESTRATION,
+                    "the team was waiting on children that could never resolve"))
+
+            StopReason.TEAM_BUDGET_EXCEEDED ->
+                /* BUDGET, not ORCHESTRATION, and the exception proves the rule: a
+                   subtree ceiling is a ceiling. The operator raises a limit; the
+                   builder does not restructure anything. Filing it under
+                   ORCHESTRATION because it happens to involve a team would send
+                   the wrong person to fix it. */
+                Classification.Failed(FailureVerdict(FailureClass.BUDGET,
+                    "the agent subtree reached its ceiling",
+                    breachedLimit = budgetBreach ?: "the team budget"))
+
             // ── Overloaded: resolved from signals, listed in [Ambiguity] ──────
             StopReason.AGENT_FAILED ->
                 Classification.Failed(

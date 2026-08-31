@@ -21,11 +21,36 @@ enum class WorkerJobType {
     /** Contains LLM, agent-loop, or tool-calling agent nodes. */
     AGENT,
 
+    /**
+     * A dispatched child activation. §12.3.
+     *
+     * Its own lane, its own pool and — because `Main` maps over [entries] — its
+     * own consumer with its own dedicated Redis connection. That last part is not
+     * incidental: `XREADGROUP BLOCK` holds a connection for the whole block
+     * window, so lanes sharing one connection would serialise behind whichever
+     * happened to be waiting, and a child lane that cannot be read while the
+     * agent lane blocks is worse than no child lane at all.
+     */
+    AGENT_CHILD,
+
+    /** A run with a caller waiting. Keeps a demo responsive while a batch drains. */
+    AGENT_INTERACTIVE,
+
     /** Internal/operational commands that must always have capacity. */
     SYSTEM;
 
-    /** Lower-case wire form — the `execution_class` column and NOTIFY payload. */
-    val label: String get() = name.lowercase()
+    /**
+     * Lower-case wire form — the `execution_class` column and NOTIFY payload.
+     *
+     * The underscore becomes a DOT, so `AGENT_CHILD` is `agent.child` and the
+     * stream is `runs.agent.child`, exactly as §12.3 names it. One translation,
+     * here, because the API's `ExecutionClass` and this enum have to agree about
+     * the string or a job is written to a stream nobody reads.
+     */
+    val label: String get() = name.lowercase().replace('_', '.')
+
+    /** True for the three lanes that carry agent work of some kind. */
+    val isAgentic: Boolean get() = this == AGENT || this == AGENT_CHILD || this == AGENT_INTERACTIVE
 
     companion object {
         /**

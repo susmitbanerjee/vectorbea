@@ -10,12 +10,14 @@ import {
   createTraceApi, subscribeToSpans,
   type CriticalPath, type RootCause, type TraceStreamStatus, type TraceTree,
 } from "~/lib/api/trace";
+import { createDebugApi, type Constellation } from "~/lib/api/constellation";
+import { AgentsView } from "./agents-view";
 import { IterationsView } from "./iterations-view";
 import { OverviewView } from "./overview-view";
 import { RootCauseBanner } from "./root-cause-banner";
 import { TimelineView } from "./timeline-view";
 
-type View = "overview" | "timeline" | "iterations";
+type View = "overview" | "timeline" | "iterations" | "agents";
 
 /** True when a rejection is this component cancelling its own in-flight request. */
 function isAborted(e: unknown): boolean {
@@ -31,14 +33,20 @@ const VIEWS: Array<{ id: View; label: string; hint: string }> = [
   { id: "overview",   label: "Overview",   hint: "Did it fail, and where?" },
   { id: "timeline",   label: "Timeline",   hint: "Why did it take that long?" },
   { id: "iterations", label: "Iterations", hint: "What did it call, and what came back?" },
+  { id: "agents",     label: "Agents",     hint: "Who asked whom to do what, and why?" },
 ];
 
 /**
- * The Debug tab: a pinned answer over three views of the evidence.
+ * The Debug tab: a pinned answer over four views of the evidence.
  *
- * The Agents constellation, Cost burn-down and Compare views are P11 and are
- * deliberately absent rather than stubbed — a tab strip with three dead entries
- * teaches people the product is unfinished every time they look at it.
+ * Cost burn-down and Compare are still absent rather than stubbed — a tab strip
+ * with dead entries teaches people the product is unfinished every time they
+ * look at it, so a view appears here the tick it starts working.
+ *
+ * Agents is loaded LAZILY, on first visit to that tab. The constellation is a
+ * second request carrying every contract and output in the run, and a run with
+ * no team has nothing to show — making every visitor pay for it to open
+ * Overview would be a tax on the common case for the benefit of the rare one.
  *
  * Wired to the real trace API through `~/lib/api/trace`, which uses the same
  * transport as the rest of `src/lib/api`. The routed builder page reads mock
@@ -74,6 +82,29 @@ export function DebugTab({
   const [error, setError] = React.useState<string | null>(null);
   const [stream, setStream] = React.useState<TraceStreamStatus>("connecting");
   const [liveSpanCount, setLiveSpanCount] = React.useState(0);
+
+  /* The constellation, fetched on first visit to Agents. Null means "not asked
+     yet", which is why `agentsError` is separate: a failed fetch and an unvisited
+     tab are different states and must not render the same. */
+  const [constellation, setConstellation] = React.useState<Constellation | null>(null);
+  const [agentsError, setAgentsError] = React.useState<string | null>(null);
+  const debugApi = React.useMemo(
+    () => createDebugApi(client.transport, workspaceId),
+    [client, workspaceId],
+  );
+
+  React.useEffect(() => {
+    if (view !== "agents" || constellation || agentsError) return;
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        setConstellation(await debugApi.constellation(runId, ac.signal));
+      } catch (e) {
+        if (!isAborted(e)) setAgentsError(messageOf(e));
+      }
+    })();
+    return () => ac.abort();
+  }, [view, constellation, agentsError, debugApi, runId]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   const load = React.useCallback(() => {

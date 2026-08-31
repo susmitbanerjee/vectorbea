@@ -47,6 +47,20 @@ class ExecutionSlots(
     private val agentPermits: Int,
     private val systemPermits: Int,
     /**
+     * Permits for the dispatched-child lane. §12.3.
+     *
+     * Defaults to the agent lane's size rather than to zero, because a worker
+     * deployed before the operator sets it must still be able to run children —
+     * a child lane with no permits is a supervisor parked forever, which is the
+     * failure this whole phase exists to prevent.
+     *
+     * A SEPARATE pool from [agentPermits], not a share of it. Sharing would put
+     * a parked supervisor's children behind the top-level backlog again, which
+     * is the head-of-line problem the lane split was for.
+     */
+    private val agentChildPermits: Int = agentPermits,
+    private val agentInteractivePermits: Int = (agentPermits / 2).coerceAtLeast(1),
+    /**
      * Threads backing the coroutine dispatcher.
      *
      * Small on purpose, and the number to watch: if the conversion worked, a few
@@ -83,6 +97,8 @@ class ExecutionSlots(
         WorkerJobType.SHORT to lane("short", shortPermits),
         WorkerJobType.LONG to lane("long", longPermits),
         WorkerJobType.AGENT to lane("agent", agentPermits),
+        WorkerJobType.AGENT_CHILD to lane("agent-child", agentChildPermits),
+        WorkerJobType.AGENT_INTERACTIVE to lane("agent-interactive", agentInteractivePermits),
         WorkerJobType.SYSTEM to lane("system", systemPermits),
     )
 

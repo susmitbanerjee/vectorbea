@@ -2,6 +2,20 @@ package com.vectorbea.worker.agents.brain.runtime
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.vectorbea.worker.agents.brain.model.*
+import com.vectorbea.worker.agents.budget.BudgetLedger
+import com.vectorbea.worker.agents.budget.BudgetVector
+import com.vectorbea.worker.agents.context.RunContextStore
+import com.vectorbea.worker.agents.orchestration.ActivationStore
+import com.vectorbea.worker.agents.orchestration.ContextRef
+import com.vectorbea.worker.agents.orchestration.HandoffStore
+import com.vectorbea.worker.agents.orchestration.JoinEvaluator
+import com.vectorbea.worker.agents.orchestration.JoinPolicy
+import com.vectorbea.worker.agents.orchestration.OnChildFailure
+import com.vectorbea.worker.agents.orchestration.TeamPolicy
+import com.vectorbea.worker.agents.orchestration.OutputSchemaCheck
+import com.vectorbea.worker.agents.orchestration.TaskContract
+import com.vectorbea.worker.agents.orchestration.TeamLimits
+import com.vectorbea.worker.runtime.executor.AgentCallExecutor
 import com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
@@ -91,6 +105,27 @@ class AgentBrainRunner(
      * tests sharing a JVM.
      */
     private val reconstructionEnabled: Boolean = RECONSTRUCTION_ENABLED,
+    /**
+     * The subtree's budget, when this run has one. Null for a single agent, which
+     * has no tree to bound.
+     */
+    private val budgetLedger: BudgetLedger? = null,
+    /** The team's §9 bounds. Defaults are the platform's; a node may tighten them. */
+    private val teamLimits: TeamLimits = TeamLimits(),
+    /**
+     * The team this agent belongs to, when it belongs to one.
+     *
+     * Null for a lone agent using P9 delegation. Non-null supplies the join
+     * policy, the child-failure setting and the permitted handoff kinds — all
+     * three of which are §6 CONFIGURATION over the same primitives, not
+     * alternative code paths.
+     */
+    private val teamPolicy: TeamPolicy? = null,
+    /**
+     * Mirrors AGENT_DELEGATION_ENABLED. A parameter for the same reason every
+     * other flag here is one: a test has to drive both paths in one JVM.
+     */
+    private val delegationEnabled: Boolean = DELEGATION_ENABLED,
 ) {
     private val log = logger()
     private val mapper = jacksonObjectMapper()
@@ -186,12 +221,99 @@ class AgentBrainRunner(
          * between attempts silently stops deduplicating — the mechanism would look
          * present and do nothing.
          */
-        internal fun toolGuardNodeId(stepId: String, toolId: UUID, args: Map<String, Any?>): String =
-            "$stepId:tool:$toolId:${sha256Hex(canonicalJson(args)).take(32)}"
+        internal fun toolGuardNodeId(scope: String, toolId: UUID, args: Map<String, Any?>): String =
+            "$scope:tool:$toolId:${sha256Hex(canonicalJson(args)).take(32)}"
 
         /** The approval key: keyed on the tool, never on the arguments. See [toolGuardNodeId]. */
-        internal fun toolApprovalNodeId(stepId: String, toolId: UUID): String =
-            "$stepId:tool:$toolId"
+        internal fun toolApprovalNodeId(scope: String, toolId: UUID): String =
+            "$scope:tool:$toolId"
+
+        /**
+         * ── THE SCOPE BOTH TOOL KEYS HANG OFF, AND WHY IT DEPENDS ON DEPTH ───
+         *
+         * ```
+         * depth == 0  →  <stepId>          (unchanged: exactly what shipped)
+         * depth  > 0  →  <activationId>
+         * ```
+         *
+         * **Why the root keeps the step scope.** Nothing in flight can be at depth
+         * greater than zero, because delegation did not exist before this phase. So
+         * this is a strict widening at a boundary that has never been reachable, not
+         * a key move: no pending approval and no guard row anywhere can change
+         * meaning, and a single-agent run derives the same two keys it always has.
+         *
+         * **Why a child needs its own scope.** Two workers in one team calling the
+         * same gated tool must open TWO gates. Sharing `<stepId>:tool:<toolId>`, the
+         * second worker silently inherits the first's decision — a person approved
+         * worker A's email and worker B's went out on the strength of it.
+         *
+         * **Why BOTH keys take the scope, together.** Scoping only the approval key
+         * gives two gates and one execution: worker B's call finds worker A's guard
+         * row under the shared `<stepId>:tool:<toolId>:<argsHash>`, is served from
+         * that cache, and emits STEP_SKIPPED. Somebody approved something that then
+         * did not happen, which is worse than the bug being fixed. The cross-agent
+         * dedup this gives up is real but speculative, and belongs in a deliberate
+         * caching feature rather than as an emergent property of key derivation.
+         *
+         * **What this rests on.** The activation-scoped key is stable only because
+         * [com.vectorbea.worker.agents.orchestration.ActivationStore] reattaches
+         * deterministically. If a delegation ever produced a SECOND activation row
+         * for the same work, the key would move with it and the resumed run would
+         * open a gate nobody can ever close. The two are asserted together, in one
+         * test, for exactly that reason.
+         *
+         * **The convergence path**, so this does not calcify into folklore: once no
+         * run predates activations, a maintenance-window migration can rewrite
+         * pending `<stepId>:tool:*` rows to their activation scope and this function
+         * collapses to `activationId ?: stepId`. Not now — but written down.
+         */
+        internal fun keyScope(config: AgentBrainConfig): String =
+            if (config.depth > 0 && config.activationId != null) config.activationId.toString()
+            else config.stepId
+
+        /**
+         * The delegation gate's key: `<stepId>:agent:<agentId>`.
+         *
+         * Disjoint from both tool keys by the `:agent:` infix. Step-scoped rather
+         * than activation-scoped for the same reason the tool APPROVAL key is keyed
+         * on the tool and not the arguments: a person approving "this step may use
+         * the billing agent" is answering a question about the step, and they must be
+         * asked once. One gate per (step, target agent) is the same bargain the tool
+         * gate already makes.
+         *
+         * Carries no iteration number and no contract hash, so it survives
+         * re-execution: the resumed step re-issues the delegation and FINDS the
+         * decision instead of opening a second gate.
+         */
+        internal fun agentApprovalNodeId(stepId: String, agentId: UUID): String =
+            "$stepId:agent:$agentId"
+
+        /**
+         * The least budget a fan-out child needs to be worth starting.
+         *
+         * One iteration and enough tokens for a single model call. Below this a
+         * child cannot produce anything, so funding N of them is not a fan-out —
+         * it is N activations that will each fail with an empty answer.
+         *
+         * A floor rather than a share: see the note at the preflight call site for
+         * why an equal share cannot be the test.
+         */
+        internal val MIN_VIABLE_CHILD = BudgetVector(
+            iterations = 1,
+            tokens = System.getenv("AGENT_MIN_CHILD_TOKENS")?.toLongOrNull() ?: 256L,
+            costMicroCents = BudgetVector.ofCents(0.01),
+        )
+
+        /**
+         * Agent-to-agent delegation. Default OFF.
+         *
+         * Off: the roster and the two actions are absent from the prompt, and a
+         * model that emits one anyway is rejected with a message saying delegation
+         * is switched off — rather than silently treated as a THINK, which would
+         * burn an iteration and tell nobody why.
+         */
+        val DELEGATION_ENABLED: Boolean =
+            System.getenv("AGENT_DELEGATION_ENABLED")?.lowercase() == "true"
 
         /**
          * A JSON rendering that two runs of the same call agree on.
@@ -290,6 +412,214 @@ class AgentBrainRunner(
         ToolNodeExecutor(ds, connectionResolver, pools, eventStore)
     }
 
+    private val activationStore: ActivationStore? by lazy {
+        dataSource?.let { ActivationStore(it) }
+    }
+
+    private val handoffStore: HandoffStore? by lazy { dataSource?.let { HandoffStore(it) } }
+
+    private val contextStore: RunContextStore? by lazy {
+        dataSource?.let { RunContextStore(it, payloads) }
+    }
+
+    /**
+     * The delegation boundary.
+     *
+     * ── HOW THE CYCLE IS BROKEN ─────────────────────────────────────────────
+     * The brain needs an [AgentCallExecutor] to serve DELEGATE, and the executor
+     * needs a brain to run the child. Both are `by lazy`, mirroring how
+     * [toolExecutor] is already built, and the child's brain is constructed PER
+     * CALL inside [runChildAgent] — so there is no field that refers to a field
+     * that refers back. The recursion this creates is bounded by the depth guard,
+     * which is checked before a child brain is ever constructed.
+     */
+    private val agentCallExecutor: AgentCallExecutor? by lazy {
+        if (!delegationEnabled) return@lazy null
+        val ds = dataSource ?: return@lazy null
+        val acts = activationStore ?: return@lazy null
+        val edges = handoffStore ?: return@lazy null
+        AgentCallExecutor(
+            dataSource = ds,
+            eventStore = eventStore,
+            activations = acts,
+            handoffs = edges,
+            runChild = ::runChildAgent,
+            ledger = budgetLedger,
+            limits = teamLimits,
+            permittedKinds = teamPolicy?.permittedKinds,
+            rosterFor = teamPolicy?.rosterFor,
+        )
+    }
+
+    /**
+     * The delegation boundary, for a caller that is not the brain's own loop.
+     *
+     * Exactly one caller: the PIPELINE policy, where the runtime advances the
+     * stages rather than a model choosing. It uses the same primitive an agent's
+     * own DELEGATE uses — which is what stops the pipeline from becoming a second
+     * dispatch path with its own guards, gate and reattach rules.
+     */
+    internal fun callExecutor(): AgentCallExecutor? = agentCallExecutor
+
+    /**
+     * Run one child agent to completion, inline.
+     *
+     * A fresh runner with the CHILD's grants, the child's activation id and the
+     * child's depth — which is what makes the child's own roster check, its own
+     * depth guard and its activation-scoped approval keys all correct without any
+     * of them having to be told they are a child.
+     *
+     * Every collaborator is passed through rather than rebuilt, so a child shares
+     * its parent's ledger (the whole point of a budget TREE), its event store and
+     * its scripted provider in tests.
+     */
+    private suspend fun runChildAgent(
+        call: AgentCallExecutor.ChildCall,
+        ctx: RuntimeContext,
+    ): AgentCallExecutor.ChildOutcome {
+        val connectionId = call.llmConnectionId
+            ?: return AgentCallExecutor.ChildOutcome.Failed(
+                "Agent '${call.agentName}' has no LLM connection configured, so it could not run.",
+                "ERROR")
+
+        val childConfig = AgentBrainConfig(
+            agentId = call.agentId,
+            workspaceId = ctx.workspaceId,
+            environmentId = ctx.environmentId,
+            runId = ctx.runId,
+            stepId = ctx.let { _ -> childStepId(call) },
+            agentName = call.agentName,
+            role = "worker",
+            instructions = call.instructions ?: "Complete the task.",
+            llmConnectionId = connectionId,
+            modelName = call.modelName ?: "gpt-4o-mini",
+            maxIterations = call.budget.iterations.coerceAtLeast(1),
+            maxToolCalls = call.budget.toolCalls.coerceAtLeast(0),
+            maxTotalTokens = call.budget.tokens.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                .coerceAtLeast(1),
+            maxCostCents = Math.ceil(call.budget.costCents).toInt().coerceAtLeast(1),
+            allowedToolIds = call.allowedToolIds,
+            canDelegateTo = call.canDelegateTo,
+            activationId = call.childActivationId,
+            depth = call.depth,
+            /* The contract's objective IS the child's task. That is the whole point
+               of a structured contract: the child is told what is wanted rather than
+               handed the parent's prompt and left to infer it. */
+            taskInstruction = childInstruction(call.contract),
+            /*
+             * ── THE CHILD IS DELIBERATELY NOT GIVEN THE CONTRACT'S SCHEMA ───
+             *
+             * §5.2 rule 1: outputSchema is validated by the CALLER'S harness, not
+             * the callee. Handing it down as the child's own `outputSchemaJson`
+             * looks like belt and braces and is not: the child would stop with its
+             * OWN SCHEMA_INVALID, the parent would see a failed observation, and the
+             * boundary check — the one that names the mismatch to the party that
+             * cares — would never run. The failure would read as "the worker
+             * failed" rather than "the worker returned a shape its caller cannot
+             * use", which is a different sentence pointing at a different fix.
+             *
+             * The schema is still STATED to the child, in the instruction, because
+             * telling it what is wanted is how it produces the right shape. Stating
+             * is not enforcing; the caller enforces.
+             */
+            outputSchemaJson = "{}",
+            resolvedInput = call.contract.inputs + resolveContextRefs(call.contract, ctx),
+        )
+
+        val child = AgentBrainRunner(
+            dataSource = dataSource,
+            eventStore = eventStore,
+            connectionResolver = connectionResolver,
+            dbPoolManager = dbPoolManager,
+            approvalStore = approvalStore,
+            llmHttpClient = llmHttpClient,
+            payloadStore = payloadStore,
+            reconstructionEnabled = reconstructionEnabled,
+            budgetLedger = budgetLedger,
+            teamLimits = teamLimits,
+            teamPolicy = teamPolicy,
+            delegationEnabled = delegationEnabled,
+        )
+
+        val result = child.run(childConfig, ctx)
+
+        budgetLedger?.consume(call.childActivationId, BudgetVector(
+            iterations = result.iterationsUsed,
+            tokens = result.tokensUsed.toLong(),
+            costMicroCents = BudgetVector.ofCents(result.estimatedCostCents),
+        ))
+
+        return when {
+            result.stopReason == AgentLoopState.StopReason.APPROVAL_REQUESTED &&
+                result.approvalId != null ->
+                AgentCallExecutor.ChildOutcome.Paused(
+                    result.approvalId,
+                    result.approvalMessage
+                        ?: "Agent '${call.agentName}' is waiting for approval to continue.")
+
+            result.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT ->
+                AgentCallExecutor.ChildOutcome.Completed(
+                    output = result.finalOutput.filterValues { it != null }.mapValues { it.value!! },
+                    tokensUsed = result.tokensUsed,
+                    costCents = result.estimatedCostCents,
+                )
+
+            else -> AgentCallExecutor.ChildOutcome.Failed(
+                result.failureReason
+                    ?: "Agent '${call.agentName}' stopped with ${result.stopReason}.",
+                result.stopReason.name,
+            )
+        }
+    }
+
+    /**
+     * The child's step id.
+     *
+     * Derived from the parent's step and the child's ACTIVATION, so two workers on
+     * one step keep separate iteration rows — `agent_iterations` is unique on
+     * `(run_id, step_id, iteration_number)`, and two children sharing a step id
+     * would overwrite each other's transcript, one iteration at a time.
+     */
+    private fun childStepId(call: AgentCallExecutor.ChildCall): String =
+        "act:${call.childActivationId}"
+
+    /** The objective, plus the parts of the contract a model needs stated in words. */
+    private fun childInstruction(contract: TaskContract): String = buildString {
+        append(contract.objective)
+        /* Stated, not enforced — see the note on outputSchemaJson in [runChildAgent].
+           A child told the expected shape usually produces it; a child that does not
+           is caught at the caller's boundary, where the mismatch means something. */
+        contract.outputSchema?.let { schema ->
+            runCatching { mapper.writeValueAsString(schema) }.getOrNull()?.let {
+                append("\n\nYOUR CALLER EXPECTS THIS SHAPE: ").append(it)
+            }
+        }
+        contract.successCriteria?.takeIf { it.isNotBlank() }?.let {
+            append("\n\nSUCCESS CRITERIA: ").append(it)
+        }
+        if (contract.constraints.isNotEmpty()) {
+            append("\n\nCONSTRAINTS:\n")
+            append(contract.constraints.joinToString("\n") { "- $it" })
+        }
+    }
+
+    /**
+     * Resolve the contract's blackboard POINTERS into values, for the child only.
+     *
+     * §5.2 rule 2: the contract carries pointers, not payloads, so the prompt does
+     * not grow at every hop. The resolution happens HERE, at the callee, and only
+     * for what the callee was actually pointed at.
+     */
+    private fun resolveContextRefs(contract: TaskContract, ctx: RuntimeContext): Map<String, Any?> {
+        if (contract.contextRefs.isEmpty()) return emptyMap()
+        val store = contextStore ?: return emptyMap()
+        return runCatching {
+            val reader = RunContextStore.Reader(ctx.runId, teamRef = null, activationId = null)
+            store.latest(reader, contract.contextRefs.map { it.key })
+                .associate { it.key to it.value }
+        }.getOrDefault(emptyMap())
+    }
+
     /**
      * Full-fidelity payload capture: injected, or built from [dataSource].
      *
@@ -350,6 +680,25 @@ class AgentBrainRunner(
         val finalOutput: Map<String, Any?>,
         val stopReason: AgentLoopState.StopReason,
         val iterationsUsed: Int,
+        /**
+         * True when the loop ended by TRANSFERRING control rather than by answering.
+         *
+         * Carried out of the loop because the harness cannot infer it: a handoff
+         * ends with FINAL_OUTPUT and the child's answer, which is
+         * indistinguishable from the agent having produced that answer itself.
+         * Without this the activation is graded `succeeded`, and a router that
+         * correctly routed is counted as having done the work.
+         */
+        val handedOff: Boolean = false,
+        /**
+         * Non-null when the loop stopped because the TICK ended, not because
+         * anything was decided.
+         *
+         * The caller stands the run down and re-executes this node. Kept separate
+         * from [failureReason] because a yield is not a failure and must never be
+         * rendered as one — the run is fine, it is simply not finished.
+         */
+        val yieldedReason: String? = null,
         val tokensUsed: Int,
         val estimatedCostCents: Double,
         val observations: List<AgentObservation>,
@@ -553,6 +902,12 @@ class AgentBrainRunner(
         var approvalId: String? = null
         var approvalMessage: String? = null
 
+        /* Set by HANDOFF. See RunResult.handedOff. */
+        var handedOff = false
+
+        /* Set when a fan-out ran out of tick. See RunResult.yieldedReason. */
+        var yieldedReason: String? = null
+
         /*
          * ── WHAT EVERY ITERATION SPAN HANGS OFF, READ EXACTLY ONCE ───────────
          *
@@ -611,8 +966,13 @@ class AgentBrainRunner(
 
                 // Build prompt and call LLM
                 val tools = loadAllowedToolDescriptors(config)
-                val systemPrompt = AgentPromptBuilder.buildSystemPrompt(config, tools)
-                val userPrompt   = AgentPromptBuilder.buildUserPrompt(config, state)
+                val systemPrompt = AgentPromptBuilder.buildSystemPrompt(config, tools, loadRoster(config))
+                /* Flag off, `built.text` is byte-for-byte what buildUserPrompt has
+                   always returned and `built.assembly` is null. On, the same
+                   sections are assembled under a budget and every drop is named. */
+                val built = AgentPromptBuilder.buildUserPromptDetailed(config, state)
+                val userPrompt = built.text
+                built.assembly?.let { iterSpan?.contextAttributesJson = it.attributesJson() }
 
                 val llmResult = callLlm(config, systemPrompt, userPrompt, runtimeCtx)
                 budget.addTokens(llmResult.tokensUsed, llmResult.estimatedCostCents)
@@ -625,6 +985,17 @@ class AgentBrainRunner(
                     safetyGuard.validateActionStructure(action)
                     if (action.type == AgentAction.ActionType.CALL_TOOL) {
                         safetyGuard.validateToolAllowed(action, config)
+                    }
+                    /* The roster grant, checked exactly where the tool grant is and
+                       in the same shape. AgentCallExecutor checks it AGAIN at the
+                       boundary; this one is what makes the stop attributable to the
+                       model's choice on this iteration. */
+                    if (action.type == AgentAction.ActionType.DELEGATE ||
+                        action.type == AgentAction.ActionType.HANDOFF) {
+                        if (!delegationEnabled) throw InvalidActionException(
+                            "${action.type} is not available: agent-to-agent delegation is " +
+                            "switched off on this worker.")
+                        safetyGuard.validateAgentAllowed(action, config)
                     }
                 } catch (e: InvalidActionException) {
                     log.warn("[brain] invalid action iter={}: {}", state.iteration, e.message)
@@ -642,6 +1013,18 @@ class AgentBrainRunner(
                     state.stopReason = AgentLoopState.StopReason.TOOL_NOT_ALLOWED
                     failureReason = "The agent tried to call tool ${e.toolId}, which is not in its allowed tool list."
                     /* A grant, not a glitch. Nothing changes until someone changes it. */
+                    retryable = false
+                    break
+                } catch (e: AgentNotInRosterException) {
+                    /* The roster analogue of the branch above, and deliberately its
+                       twin: same shape, same non-retryable reasoning, same hard stop.
+                       An ungranted target is a configuration answer, not a fault. */
+                    log.warn("[brain] agent not in roster target={}: {}", e.targetAgentId, e.message)
+                    emitEvent(config, RunEventStore.EventType.AGENT_TOOL_NOT_ALLOWED, "running",
+                        "Agent ${e.targetAgentId} is not on the roster")
+                    persistIterationComplete(iterationId, iterSpan, "failed", action, null, budget, budgetMark)
+                    state.stopReason = AgentLoopState.StopReason.AGENT_NOT_IN_ROSTER
+                    failureReason = e.message
                     retryable = false
                     break
                 }
@@ -755,6 +1138,107 @@ class AgentBrainRunner(
                                 "agent stopped rather than retrying it further: ${obs.sanitizedSummary}"
                             emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
                                 "Stopped after an identical repeated tool failure: ${obs.sanitizedSummary}")
+                        }
+                    }
+
+                    AgentAction.ActionType.DELEGATE, AgentAction.ActionType.HANDOFF -> {
+                        val outcome = executeDelegation(action, config, runtimeCtx, state)
+
+                        when (outcome) {
+                            is DelegationOutcome.Refused -> {
+                                /* A guard said no BEFORE anything was created. Each
+                                   refusal carries its own stop reason, so the run
+                                   detail names the guard rather than the category. */
+                                state.stopReason = outcome.stopReason
+                                retryable = false
+                                failureReason = outcome.reason
+                                state.addObservation(AgentObservation(
+                                    state.iteration, action.type.name, action.targetAgentId,
+                                    outcome.reason.take(300), success = false))
+                                emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
+                                    outcome.reason.take(300))
+                                persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                    outcome.reason.take(300), budget, budgetMark)
+                            }
+
+                            is DelegationOutcome.Paused -> {
+                                /* The CHILD is waiting on a person. The parent parks
+                                   with it — this is the one case where
+                                   `waiting_for_child` is a real wait rather than a
+                                   marker, because the tick ends here. */
+                                state.stopReason = AgentLoopState.StopReason.APPROVAL_REQUESTED
+                                retryable = false
+                                approvalId = outcome.approvalId
+                                approvalMessage = outcome.message
+                                emitEvent(config, RunEventStore.EventType.AGENT_APPROVAL_REQUESTED,
+                                    "waiting_for_approval", outcome.message.take(300))
+                                persistIterationComplete(iterationId, iterSpan, "completed", action,
+                                    outcome.message.take(300), budget, budgetMark)
+                            }
+
+                            is DelegationOutcome.Yielded -> {
+                                /* Stand the run down. The loop stops here with no
+                                   stop reason — a yield is not an outcome — and the
+                                   node re-executes on the next tick. */
+                                yieldedReason = outcome.reason
+                                state.stopReason = AgentLoopState.StopReason.BUDGET_EXCEEDED
+                                retryable = true
+                                failureReason = outcome.reason
+                                persistIterationComplete(iterationId, iterSpan, "completed", action,
+                                    outcome.reason.take(300), budget, budgetMark)
+                            }
+
+                            is DelegationOutcome.Returned -> {
+                                /*
+                                 * ── A FAILED DELEGATION IS A FAILED OBSERVATION ──
+                                 *
+                                 * Not a stop. §2 says an agent is a callable exactly
+                                 * like a tool, and a failed tool call does not fail
+                                 * the step — it records an unsuccessful observation
+                                 * and the loop continues. The supervisor can try a
+                                 * different worker, reformulate the contract, or
+                                 * produce a partial FINAL that states what it could
+                                 * not get; all three beat a hard stop.
+                                 *
+                                 * Nothing is unguarded by that choice. HANDOFF_LOOP
+                                 * catches the same request going down the same edge,
+                                 * and the budget tree debits the parent for
+                                 * everything its children spend — so a supervisor
+                                 * burning its budget on failed delegations hits
+                                 * BUDGET_EXCEEDED on its own account. That second one
+                                 * matters because the asymmetry is real: a failed
+                                 * tool call is one HTTP request, a failed child is a
+                                 * whole brain loop.
+                                 */
+                                state.addObservation(AgentObservation(
+                                    iterationNumber = state.iteration,
+                                    actionType = action.type.name,
+                                    toolId = action.targetAgentId,
+                                    sanitizedSummary = outcome.summary,
+                                    success = outcome.success,
+                                    payload = outcome.payload,
+                                ))
+                                state.addMemory("delegation_${state.iteration}", outcome.summary)
+                                emitEvent(config, RunEventStore.EventType.AGENT_OBSERVATION_RECORDED,
+                                    "running", outcome.summary.take(300))
+                                persistIterationComplete(iterationId, iterSpan,
+                                    if (outcome.success) "completed" else "failed",
+                                    action, outcome.summary, budget, budgetMark,
+                                    observationSuccess = outcome.success)
+
+                                /*
+                                 * HANDOFF is a tail call: control transferred, and
+                                 * this agent is done. The child's output becomes the
+                                 * step's output, and the parent's activation ends
+                                 * `handed_off` — neither succeeded nor failed, because
+                                 * a router that correctly routed did its job.
+                                 */
+                                if (action.type == AgentAction.ActionType.HANDOFF && outcome.success) {
+                                    state.finalOutput = outcome.output
+                                    state.stopReason = AgentLoopState.StopReason.FINAL_OUTPUT
+                                    handedOff = true
+                                }
+                            }
                         }
                     }
 
@@ -960,6 +1444,8 @@ class AgentBrainRunner(
             retryable          = retryable,
             approvalId         = approvalId,
             approvalMessage    = approvalMessage,
+            handedOff          = handedOff,
+            yieldedReason      = yieldedReason,
         )
     }
 
@@ -1043,10 +1529,551 @@ class AgentBrainRunner(
             "The agent tried to call a tool that is not in its allowed tool list."
         AgentLoopState.StopReason.SCHEMA_INVALID ->
             "The agent's final output did not match the required output schema."
+        AgentLoopState.StopReason.AGENT_NOT_IN_ROSTER ->
+            "The agent tried to delegate to an agent that is not on its team roster. " +
+            "Add that agent to this agent's roster, or remove it from the instructions."
+        AgentLoopState.StopReason.MAX_DEPTH_EXCEEDED ->
+            "The delegation chain went deeper than this team allows. An agent delegated " +
+            "to an agent that delegated again, past the depth limit."
+        AgentLoopState.StopReason.HANDOFF_LOOP ->
+            "The same request was delegated along the same edge repeatedly without the " +
+            "answer changing, so the agent stopped rather than spending the rest of its " +
+            "budget reproving it."
+        AgentLoopState.StopReason.CHILD_FAILED ->
+            "A delegated agent failed and this agent could not continue without its result."
+        AgentLoopState.StopReason.JOIN_DEADLOCK ->
+            "The agent was waiting on delegated work that could never finish."
+        AgentLoopState.StopReason.TEAM_BUDGET_EXCEEDED ->
+            "The agents working on this step used the whole budget allowed for the group, " +
+            "which is a separate limit from any single agent's own."
         AgentLoopState.StopReason.ERROR, null ->
             "The agent stopped with an error that was not recorded."
         AgentLoopState.StopReason.FINAL_OUTPUT -> ""
     }
+
+    /**
+     * The roster, as the prompt states it.
+     *
+     * Empty whenever delegation is off or the agent has no grant, which is what
+     * makes the prompt omit the actions AND the list together. Read fresh on every
+     * iteration rather than pinned on the config, for the same reason a tool grant
+     * is: a roster is POLICY, and an operator who removes an agent from a roster
+     * mid-run is making a decision that must take effect.
+     */
+    private fun loadRoster(config: AgentBrainConfig): List<AgentPromptBuilder.AgentDescriptor> {
+        if (!delegationEnabled || config.canDelegateTo.isEmpty()) return emptyList()
+        val ds = dataSource ?: return emptyList()
+        return runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT id, name, COALESCE(description, '') AS description
+                         FROM agents
+                        WHERE workspace_id = ? AND status = 'active' AND id = ANY(?)
+                        ORDER BY name"""
+                ).use { st ->
+                    st.setObject(1, config.workspaceId)
+                    st.setArray(2, conn.createArrayOf("uuid", config.canDelegateTo.toTypedArray()))
+                    st.executeQuery().use { rs ->
+                        val out = mutableListOf<AgentPromptBuilder.AgentDescriptor>()
+                        while (rs.next()) out += AgentPromptBuilder.AgentDescriptor(
+                            id = rs.getString("id"),
+                            name = rs.getString("name"),
+                            description = rs.getString("description"),
+                        )
+                        out
+                    }
+                }
+            }
+        }.getOrElse {
+            log.warn("[brain] roster load failed for {}: {}", config.agentId, it.message)
+            /* An empty roster in the PROMPT, not an empty roster in the CHECK. The
+               model is simply not offered delegation this iteration; the grant
+               itself still lives on the config and is still enforced. */
+            emptyList()
+        }
+    }
+
+    // ── Delegation ───────────────────────────────────────────────────────────
+
+    /** What a DELEGATE or HANDOFF produced, in the loop's vocabulary. */
+    private sealed class DelegationOutcome {
+        /** A guard or a grant said no, before anything was created. */
+        data class Refused(
+            val stopReason: AgentLoopState.StopReason,
+            val reason: String,
+        ) : DelegationOutcome()
+
+        /** The child needs a person. The tick ends here. */
+        data class Paused(val approvalId: String, val message: String) : DelegationOutcome()
+
+        /**
+         * The tick ended before the fan-out did.
+         *
+         * Nothing is wrong and no work is lost: the children that finished are
+         * durable and terminal, and the re-execution reattaches to them. Distinct
+         * from every other case here because it must NOT become a stop reason —
+         * the run has not decided anything.
+         */
+        data class Yielded(val reason: String) : DelegationOutcome()
+
+        /** The child ran. [success] false is an ordinary failed observation. */
+        data class Returned(
+            val success: Boolean,
+            val summary: String,
+            val payload: String?,
+            val output: Map<String, Any> = emptyMap(),
+        ) : DelegationOutcome()
+    }
+
+    /**
+     * Dispatch one delegation.
+     *
+     * Deliberately the same shape as [executeTool]: build the contract, derive the
+     * approval key, hand it to the executor that owns the boundary, and turn what
+     * comes back into an observation. The executor does the validating, gating and
+     * creating — this function's whole job is translation, which is why it is short
+     * and why the two paths cannot drift apart.
+     */
+    private suspend fun executeDelegation(
+        action: AgentAction,
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        state: AgentLoopState,
+    ): DelegationOutcome {
+        /* A fan-out is N of the same call, joined. Split here and NOT lower down,
+           so both shapes go through one `delegate` primitive rather than through
+           two dispatch paths that have to be kept in step. */
+        if (action.isBroadcast) return executeBroadcast(action, config, runtimeCtx, state)
+
+        val target = runCatching { UUID.fromString(action.delegationTargets.first()) }.getOrNull()
+            ?: return DelegationOutcome.Refused(
+                AgentLoopState.StopReason.AGENT_NOT_IN_ROSTER,
+                "The agent gave '${action.targetAgentId}' as a delegation target, which is not " +
+                "a valid agent id.")
+
+        val caller = agentCallExecutor
+            ?: return DelegationOutcome.Refused(
+                AgentLoopState.StopReason.ERROR,
+                "Delegation is not available on this worker, so the agent could not hand this " +
+                "task to $target.")
+
+        val parentActivation = config.activationId
+            ?: return DelegationOutcome.Refused(
+                AgentLoopState.StopReason.ERROR,
+                "This step is not running as an activation, so it cannot delegate. Delegation " +
+                "requires AGENT_ACTIVATIONS_ENABLED.")
+
+        val contract = buildContract(action, config, state)
+        val kind = when {
+            action.type == AgentAction.ActionType.HANDOFF -> HandoffStore.Kind.TRANSFER
+            action.isBroadcast -> HandoffStore.Kind.BROADCAST
+            else -> HandoffStore.Kind.DELEGATE
+        }
+
+        /*
+         * ── THE HANDOFF SPAN, AND WHY IT IS THE CHILD'S PARENT ──────────────
+         *
+         * The span covers the WHOLE delegation: the guards, the gate and the
+         * child's execution. Opening it here rather than around only the child's
+         * run is what makes "this delegation took 40 seconds, 38 of them waiting
+         * on a gate" answerable.
+         *
+         * It is bound to this step's node id, so the child's `activation` span —
+         * which resolves its parent by that id, like every other span an executor
+         * opens — nests inside it. That gives the constellation view a direct
+         * edge-to-node mapping (handoff span → child activation span) instead of
+         * one inferred by pairing timestamps.
+         */
+        val tracer = runtimeCtx.tracer
+        val spanParent = tracer?.spanForNode(config.stepId)
+        val handoffSpan = tracer?.open(
+            kind = "handoff",
+            name = "${action.type.name.lowercase()} → $target",
+            parentSpanId = spanParent ?: tracer.tickSpanId,
+        )
+        if (handoffSpan != null) tracer.bindNode(config.stepId, handoffSpan)
+
+        val result = try {
+            caller.delegate(
+            ctx = runtimeCtx,
+            stepId = config.stepId,
+            approvalNodeId = agentApprovalNodeId(config.stepId, target),
+            parentActivationId = parentActivation,
+            parentDepth = config.depth,
+            rootActivationId = rootActivationOf(parentActivation),
+            targetAgentId = target,
+            contract = contract,
+            reason = safetyGuard.sanitizeReasoningSummary(action.reasoningSummary),
+            kind = kind,
+            contextVersion = runCatching { contextStore?.currentWatermark(config.runId) }.getOrNull() ?: 0L,
+            )
+        } finally {
+            /* Closed and unbound on every path, including a throw. A handoff span
+               left open is invisible in the waterfall and silently swallows its
+               child's self-time. */
+            runCatching {
+                tracer?.close(
+                    handoffSpan, "handoff", "${action.type.name.lowercase()} → $target",
+                    status = "ok", stepId = config.stepId,
+                    attributesJson = mapper.writeValueAsString(mapOf(
+                        "kind" to kind.name,
+                        "target_agent_id" to target.toString(),
+                        "contract_hash" to contract.hash().take(16),
+                    )),
+                )
+                tracer?.bindNode(config.stepId, spanParent)
+            }
+        }
+
+        result.exceptionOrNull()?.let { e ->
+            val refusal = (e as? AgentCallExecutor.RefusedException)?.refusal
+                ?: return DelegationOutcome.Refused(
+                    AgentLoopState.StopReason.ERROR,
+                    "The delegation to $target could not be carried out: ${e.message?.take(200)}")
+            return DelegationOutcome.Refused(stopReasonOf(refusal.stopReason), refusal.reason)
+        }
+
+        return when (val outcome = result.getOrThrow()) {
+            is AgentCallExecutor.ChildOutcome.Paused ->
+                DelegationOutcome.Paused(outcome.approvalId, outcome.message)
+
+            is AgentCallExecutor.ChildOutcome.Failed -> DelegationOutcome.Returned(
+                success = false,
+                summary = outcome.reason.take(MAX_TOOL_PAYLOAD_CHARS),
+                payload = null,
+            )
+
+            is AgentCallExecutor.ChildOutcome.Completed -> {
+                val rendered = runCatching { mapper.writeValueAsString(outcome.output) }
+                    .getOrDefault(outcome.output.toString())
+                DelegationOutcome.Returned(
+                    success = true,
+                    summary = "Agent returned ${outcome.output.size} field(s): " +
+                        outcome.output.keys.take(8).joinToString().ifBlank { "none" },
+                    /* The RESULT, not a description of it. Without the payload the
+                       supervisor is told its worker succeeded and told the names of
+                       the fields, and is then expected to summarise data it has never
+                       been shown — the same bug the tool path had. */
+                    payload = safetyGuard.sanitizeToolOutput(rendered, MAX_TOOL_PAYLOAD_CHARS),
+                    output = outcome.output,
+                )
+            }
+        }
+    }
+
+    /**
+     * A fan-out, and its join.
+     *
+     * ── WHY THIS IS NOT A SCHEDULER ─────────────────────────────────────────
+     * Children run one after another, inline, on this thread — the same
+     * `delegate` primitive a single delegation uses, called N times. There is no
+     * queue, no wait set and nothing to wake, so there is nothing here that a
+     * resumed tick has to rebuild. `wait_any` "cancelling the rest" therefore
+     * means the rest are never STARTED, which is strictly better than starting
+     * and killing them: no tokens are spent on work whose answer is already in.
+     *
+     * The activations for those children are still CREATED and then cancelled, so
+     * the fan-out's shape is visible in the trace — a join that shows two children
+     * when the supervisor asked for five hides the most interesting thing about
+     * the run.
+     *
+     * ── THE JOIN IS EVALUATED AFTER EVERY CHILD ─────────────────────────────
+     * Not at the end. `wait_all` of five whose second child fails cannot succeed,
+     * and running the other three costs three agent loops to reach a conclusion
+     * already known. See [JoinEvaluator.Verdict.Impossible].
+     */
+    private suspend fun executeBroadcast(
+        action: AgentAction,
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        state: AgentLoopState,
+    ): DelegationOutcome {
+        val caller = agentCallExecutor
+            ?: return DelegationOutcome.Refused(AgentLoopState.StopReason.ERROR,
+                "Delegation is not available on this worker.")
+        val parentActivation = config.activationId
+            ?: return DelegationOutcome.Refused(AgentLoopState.StopReason.ERROR,
+                "This step is not running as an activation, so it cannot fan out.")
+
+        val targets = action.delegationTargets.mapNotNull {
+            runCatching { UUID.fromString(it) }.getOrNull()
+        }
+        if (targets.isEmpty()) return DelegationOutcome.Refused(
+            AgentLoopState.StopReason.AGENT_NOT_IN_ROSTER,
+            "None of the broadcast targets is a valid agent id.")
+
+        val join = teamPolicy?.joinPolicy ?: JoinPolicy.WaitAll
+        val onFailure = teamPolicy?.onChildFailure ?: OnChildFailure.CONTINUE
+        val contract = buildContract(action, config, state)
+
+        /*
+         * PREFLIGHT, before a single child exists. Discovering the ceiling after
+         * three of eight children have run wastes the spend on all three; an
+         * all-or-nothing refusal leaves the budget intact for a narrower plan.
+         */
+        budgetLedger?.let { l ->
+            /*
+             * ── THE PREFLIGHT ASKS A REAL QUESTION, NOT A TAUTOLOGY ─────────
+             *
+             * The obvious per-child figure is "an equal share of what is left",
+             * and it makes the check INERT: `N × (available / N) <= available` is
+             * true by construction, so the guard runs on every fan-out and refuses
+             * none. A test caught this only because the fixture starved the parent
+             * as well — with a healthy parent it would have passed silently
+             * forever, which is the worst kind of guard.
+             *
+             * The question worth asking is whether each child would get enough to
+             * DO anything. A child with a hundred tokens cannot make one model
+             * call, so a fan-out that funds five of those has not been afforded —
+             * it has been divided into five agents that will each fail with an
+             * empty answer, at the cost of five activations.
+             */
+            val verdict = l.preflightFanOut(parentActivation, targets.size, MIN_VIABLE_CHILD)
+            if (verdict is BudgetLedger.FanOutVerdict.Unaffordable) {
+                /*
+                 * ── TOLD, NOT STOPPED ────────────────────────────────────────
+                 *
+                 * A failed OBSERVATION, not a stop reason — the same choice
+                 * `BudgetLedger.allocate` makes when it clamps rather than refuses.
+                 * An agent told it cannot afford five workers can narrow to two, or
+                 * answer with what it has; an agent stopped outright fails the run
+                 * holding a completion margin it was never given the chance to
+                 * spend, which is precisely what §8 held that margin back FOR.
+                 *
+                 * No child was created, so nothing was wasted discovering this.
+                 */
+                return DelegationOutcome.Returned(
+                    success = false,
+                    summary = "This team cannot afford to send work to ${targets.size} agents at " +
+                        "once — it can afford ${verdict.affordableChildren}. Narrow the fan-out, " +
+                        "answer with what you have, or raise the team's ${verdict.dimension} budget.",
+                    payload = null,
+                )
+            }
+        }
+
+        /* One group id ties this broadcast's children together, so the debugger
+           can draw the fan-out as one thing rather than N unrelated edges. */
+        val joinGroupId = UUID.randomUUID()
+        val outcomes = mutableListOf<JoinEvaluator.Outcome>()
+        val results = mutableListOf<Pair<UUID, Map<String, Any>>>()
+        val failures = mutableListOf<String>()
+        var stopped = false
+        var yielded = false
+        var paused: DelegationOutcome.Paused? = null
+
+        for ((index, target) in targets.withIndex()) {
+            /*
+             * ── STOP STARTING CHILDREN WHEN THE TICK IS SPENT ────────────────
+             *
+             * Checked between children and nowhere else: a child already running
+             * is not interrupted, because killing an agent loop mid-flight throws
+             * away tokens already paid for and leaves an activation in a state
+             * nobody can interpret.
+             *
+             * Children already created are terminal and durable, so the resumed
+             * execution reattaches to them and replays their recorded outputs — no
+             * duplicate activations, and no repeated model calls. The ones not yet
+             * started are simply started next tick.
+             */
+            if (!stopped && runtimeCtx.tickDeadlineAtMs != null &&
+                System.currentTimeMillis() >= runtimeCtx.tickDeadlineAtMs) {
+                yielded = true
+                stopped = true
+            }
+
+            if (stopped) {
+                /* Cancel only what the JOIN made unnecessary. A child skipped
+                   because the tick ran out is still wanted — cancelling it would
+                   turn a yield into a silently narrower fan-out. */
+                if (!yielded) {
+                    caller.createAndCancel(runtimeCtx, config.stepId, parentActivation,
+                        config.depth, rootActivationOf(parentActivation), target, contract,
+                        joinGroupId, "the join was already satisfied")
+                }
+                continue
+            }
+
+            val r = caller.delegate(
+                ctx = runtimeCtx,
+                stepId = config.stepId,
+                approvalNodeId = agentApprovalNodeId(config.stepId, target),
+                parentActivationId = parentActivation,
+                parentDepth = config.depth,
+                rootActivationId = rootActivationOf(parentActivation),
+                targetAgentId = target,
+                contract = contract,
+                reason = safetyGuard.sanitizeReasoningSummary(action.reasoningSummary),
+                kind = HandoffStore.Kind.BROADCAST,
+                contextVersion = runCatching { contextStore?.currentWatermark(config.runId) }
+                    .getOrNull() ?: 0L,
+                joinGroupId = joinGroupId,
+            )
+
+            val refusal = (r.exceptionOrNull() as? AgentCallExecutor.RefusedException)?.refusal
+            when {
+                refusal != null -> {
+                    outcomes += JoinEvaluator.Outcome.FAILED
+                    failures += refusal.reason
+                }
+                r.isFailure -> {
+                    outcomes += JoinEvaluator.Outcome.FAILED
+                    failures += r.exceptionOrNull()?.message?.take(200) ?: "unknown error"
+                }
+                else -> when (val o = r.getOrThrow()) {
+                    is AgentCallExecutor.ChildOutcome.Paused -> {
+                        outcomes += JoinEvaluator.Outcome.PAUSED
+                        paused = DelegationOutcome.Paused(o.approvalId, o.message)
+                    }
+                    is AgentCallExecutor.ChildOutcome.Failed -> {
+                        outcomes += JoinEvaluator.Outcome.FAILED
+                        failures += o.reason
+                    }
+                    is AgentCallExecutor.ChildOutcome.Completed -> {
+                        outcomes += JoinEvaluator.Outcome.SUCCEEDED
+                        results += target to o.output
+                    }
+                }
+            }
+
+            when (JoinEvaluator.judge(outcomes, targets.size, join, onFailure)) {
+                is JoinEvaluator.Verdict.Continue -> Unit
+                is JoinEvaluator.Verdict.Satisfied -> stopped = true
+                is JoinEvaluator.Verdict.Impossible -> stopped = true
+                JoinEvaluator.Verdict.Paused -> {
+                    /* A child is on a human. The tick ends; the rest are NOT
+                       cancelled, because the resumed run will need them. */
+                    return paused ?: DelegationOutcome.Paused("", "waiting for approval")
+                }
+            }
+            if (index == targets.lastIndex) stopped = true
+        }
+
+        if (yielded) {
+            /* Not an outcome. The tick ended mid-fan-out; the caller stands the run
+               down and this node re-executes, reattaching to everything already
+               finished. See DelegationOutcome.Yielded. */
+            return DelegationOutcome.Yielded(
+                "This team ran out of its execution tick after " +
+                "${outcomes.size} of ${targets.size} agents; it will continue.")
+        }
+
+        val verdict = JoinEvaluator.judge(outcomes, targets.size, join, onFailure)
+        val met = verdict is JoinEvaluator.Verdict.Satisfied
+
+        if (!met && onFailure == OnChildFailure.FAIL_PARENT) {
+            /*
+             * THE ONE PLACE CHILD_FAILED IS CONSTRUCTED. It is reserved for a join
+             * that genuinely cannot proceed — the operator asked for `fail_parent`,
+             * or the arithmetic says the remaining children cannot make up the
+             * shortfall. Under the default the failure is an observation and this
+             * agent carries on, exactly as it does for one failed delegation.
+             */
+            return DelegationOutcome.Refused(
+                AgentLoopState.StopReason.CHILD_FAILED,
+                "This team needed ${join.required(targets.size)} of ${targets.size} agents to " +
+                "succeed and got ${outcomes.count { it == JoinEvaluator.Outcome.SUCCEEDED }}. " +
+                "First failure: ${failures.firstOrNull()?.take(200) ?: "unrecorded"}")
+        }
+
+        /*
+         * SURVIVING SIBLINGS' OUTPUTS ARE RECORDED EITHER WAY. A join that failed
+         * still did most of its work, and throwing away four good results because
+         * a fifth agent failed is how a team costs five agent loops and produces
+         * nothing a person can use.
+         */
+        val merged = results.associate { (id, out) -> id.toString() to out }
+        val rendered = runCatching { mapper.writeValueAsString(merged) }.getOrDefault(merged.toString())
+        val summary = buildString {
+            append("Broadcast to ${targets.size} agent(s): ")
+            append("${outcomes.count { it == JoinEvaluator.Outcome.SUCCEEDED }} succeeded, ")
+            append("${outcomes.count { it == JoinEvaluator.Outcome.FAILED }} failed")
+            if (failures.isNotEmpty()) append(". First failure: ${failures.first().take(200)}")
+        }
+
+        return DelegationOutcome.Returned(
+            success = met,
+            summary = summary,
+            payload = safetyGuard.sanitizeToolOutput(rendered, MAX_TOOL_PAYLOAD_CHARS),
+            output = merged.values.fold(emptyMap()) { acc, m -> acc + m },
+        )
+    }
+
+    /**
+     * The contract, from what the model wrote plus what the runtime knows.
+     *
+     * The model supplies the objective and the inputs. The runtime supplies the
+     * BUDGET — carved from this agent's remainder, never from what the model asked
+     * for — because a budget the model chooses is not a budget.
+     */
+    private fun buildContract(
+        action: AgentAction,
+        config: AgentBrainConfig,
+        state: AgentLoopState,
+    ): TaskContract {
+        val raw = action.contract ?: emptyMap()
+        @Suppress("UNCHECKED_CAST")
+        val refs = (raw["contextRefs"] as? List<*>)?.mapNotNull {
+            (it as? Map<String, Any?>)?.let(ContextRef::fromMap)
+        } ?: emptyList()
+
+        @Suppress("UNCHECKED_CAST")
+        val schema = raw["outputSchema"] as? Map<String, Any?>
+
+        return TaskContract(
+            objective = (raw["objective"] as? String)?.takeIf { it.isNotBlank() }
+                ?: safetyGuard.sanitizeReasoningSummary(action.reasoningSummary)
+                    .ifBlank { config.taskInstruction ?: "Complete the delegated task." },
+            inputs = (raw["inputs"] as? Map<*, *>)?.entries
+                ?.associate { (k, v) -> k.toString() to v } ?: emptyMap(),
+            contextRefs = refs,
+            outputSchema = schema,
+            successCriteria = raw["successCriteria"] as? String,
+            constraints = (raw["constraints"] as? List<*>)?.map { it.toString() } ?: emptyList(),
+            /* What is actually left, not what was asked for. */
+            budget = childBudget(config, state),
+        )
+    }
+
+    /**
+     * What a child may spend.
+     *
+     * From the ledger when there is one, so the tree is genuinely bounded. Without
+     * one — a single-agent worker with no budget tree — a proportional slice of
+     * this agent's own remaining budget, which is a bound rather than a guarantee
+     * but is strictly better than handing a child a fresh full allowance.
+     */
+    private fun childBudget(config: AgentBrainConfig, state: AgentLoopState): BudgetVector {
+        val ledger = budgetLedger
+        val parent = config.activationId
+        if (ledger != null && parent != null) {
+            ledger.remaining(parent)?.let { return it.availableToChildren }
+        }
+        val b = state.budget
+        return BudgetVector(
+            iterations = (b.maxIterations - b.iterationsUsed).coerceAtLeast(0),
+            toolCalls = (b.maxToolCalls - b.toolCallsUsed).coerceAtLeast(0),
+            tokens = (b.maxTotalTokens - b.tokensUsed).coerceAtLeast(0).toLong(),
+            costMicroCents = BudgetVector.ofCents(
+                (b.maxCostCents - b.estimatedCostCents).coerceAtLeast(0.0)),
+        )
+    }
+
+    /** The subtree root, for a child's `root_activation_id`. */
+    private fun rootActivationOf(activationId: UUID): UUID =
+        runCatching { activationStore?.lineageOf(activationId)?.lastOrNull() }.getOrNull() ?: activationId
+
+    /**
+     * A refusal's stop-reason NAME back into the enum.
+     *
+     * A string across the boundary rather than the enum itself, because
+     * `AgentCallExecutor` lives in the executor package and must not depend on the
+     * brain's model — the dependency already runs the other way. Unrecognised maps
+     * to ERROR, which is the honest answer for a name nobody defined.
+     */
+    private fun stopReasonOf(name: String): AgentLoopState.StopReason =
+        AgentLoopState.StopReason.entries.firstOrNull { it.name == name }
+            ?: AgentLoopState.StopReason.ERROR
 
     // ── LLM calling ──────────────────────────────────────────────────────────
 
@@ -1209,7 +2236,7 @@ class AgentBrainRunner(
              * the arguments. See [toolGuardNodeId] for why the two must not be one.
              */
             val syntheticNode = WorkflowNode(
-                id     = toolApprovalNodeId(config.stepId, toolId),
+                id     = toolApprovalNodeId(keyScope(config), toolId),
                 type   = "tool",
                 config = mapOf("toolId" to toolId.toString()),
             )
@@ -1235,7 +2262,7 @@ class AgentBrainRunner(
              * it moves only when a human asks for the work to happen again, so a
              * resume dedupes and a deliberate re-run genuinely re-runs.
              */
-            val guardNodeId = toolGuardNodeId(config.stepId, toolId, inputs)
+            val guardNodeId = toolGuardNodeId(keyScope(config), toolId, inputs)
             val guard       = toolGuard
             val cached      = if (guard == null) null else replayGuardedTool(
                 guard, guardNodeId, config, runtimeCtx, toolId, state)
@@ -1442,16 +2469,17 @@ class AgentBrainRunner(
 
     // ── Schema validation ─────────────────────────────────────────────────────
 
-    private fun validateFinalOutput(output: Map<String, Any?>, config: AgentBrainConfig): Boolean {
-        if (config.outputSchemaJson == "{}") return true
-        // Basic required field check — full JSON Schema validation would use a library
-        return try {
-            @Suppress("UNCHECKED_CAST")
-            val schema   = mapper.readValue(config.outputSchemaJson, Map::class.java) as Map<String, Any?>
-            val required = (schema["required"] as? List<*>)?.map { it.toString() } ?: emptyList()
-            required.all { output.containsKey(it) }
-        } catch (_: Exception) { true }
-    }
+    /**
+     * The agent's own FINAL, against its declared schema.
+     *
+     * Delegates to [OutputSchemaCheck], which is also what the CALLER'S harness
+     * uses to validate a delegated child's result. One implementation, because two
+     * that drift give you a child whose output the callee called valid and the
+     * caller called invalid — or, worse, the reverse: the parent accepts a shape it
+     * cannot use and starts reading nulls out of it three steps later.
+     */
+    private fun validateFinalOutput(output: Map<String, Any?>, config: AgentBrainConfig): Boolean =
+        OutputSchemaCheck.validateJson(output, config.outputSchemaJson).valid
 
     // ── Persistence ───────────────────────────────────────────────────────────
 
@@ -1520,12 +2548,24 @@ class AgentBrainRunner(
     ) {
         private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
 
+        /**
+         * What the context assembler had to drop to fit this iteration's prompt.
+         *
+         * Recorded on the span rather than logged, because the failure it prevents
+         * — an agent that "ignored" an instruction it was never shown — is
+         * diagnosed by looking at the iteration, not by grepping. Set before the
+         * model call; emitted whenever the span closes, on every path.
+         */
+        @Volatile
+        var contextAttributesJson: String? = null
+
         fun close(status: String) {
             if (!closed.compareAndSet(false, true)) return
             runCatching {
                 tracer.close(
                     spanId, "iteration", "iteration $index", status,
                     stepId = stepId, iterationIndex = index,
+                    attributesJson = contextAttributesJson ?: "{}",
                 )
                 tracer.bindNode(stepId, parentSpanId)
             }

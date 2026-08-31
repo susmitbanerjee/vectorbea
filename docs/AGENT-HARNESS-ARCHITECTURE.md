@@ -398,6 +398,75 @@ New stop reasons, all non-retryable, all `ORCHESTRATION` class:
 | `JOIN_DEADLOCK` | Waiting on children that can never resolve |
 | `TEAM_BUDGET_EXCEEDED` | The subtree ceiling, not this agent's own |
 
+### 5.4 What shipped, and where the analogy bent
+
+Shipped behind `AGENT_DELEGATION_ENABLED`, default off. Execution is INLINE:
+the child runs synchronously, same tick, same thread. Dispatched child runs are
+P10.
+
+**A failed delegation is a failed OBSERVATION, not a stop.** §2 governs: an agent
+is a callable exactly like a tool, and a failed tool call does not fail the step —
+it records an unsuccessful observation and the loop continues. So a supervisor
+whose worker fails can try a different worker, reformulate the contract, or
+produce a partial `FINAL` stating what it could not get. All three beat a hard
+stop, and the last is what the completion margin exists for.
+
+Nothing is unguarded by that choice. `HANDOFF_LOOP` catches the same request going
+down the same edge, and the budget tree debits the parent for everything its
+children spend — so a supervisor burning its budget on failed delegations hits
+`BUDGET_EXCEEDED` on its own account. That second backstop matters because the
+cost asymmetry is real: a failed tool call is one HTTP request, a failed child is
+a whole brain loop.
+
+Consequently **`CHILD_FAILED` and `JOIN_DEADLOCK` are defined and unconstructed.**
+`CHILD_FAILED` is reserved for `wait_all`, where the parent genuinely cannot
+proceed; `JOIN_DEADLOCK` needs a fan-out to deadlock on. Both land in P10 with
+`onChildFailure`, rather than being given a default now that would have to be
+unwound when that config arrives.
+
+**An empty roster fails CLOSED, diverging from the tool grant.**
+`validateToolAllowed` reads an empty `allowedToolIds` as "any tool is allowed".
+That must not carry over: an empty roster means nobody set one up, and reading it
+as "may delegate to any agent in the workspace" is an unbounded control-flow edge
+that undoes the grant model. Both sites are commented; see §16.7 for the tool-side
+issue this leaves open.
+
+**`waiting_for_child` under inline execution** is a durable MARKER, not a
+scheduling state: set before the child runs, cleared after, so a crash
+mid-delegation leaves a row saying what the parent was doing and the debugger
+draws it as blocked rather than idle. It is a real wait in exactly one case — the
+child pauses on approval, and the tick ends there.
+
+**Reattach semantics, for every non-terminal child status.** Terminal: replay the
+recorded outcome, run nothing — which is what makes a resumed delegation cost one
+row read instead of the child's entire brain loop. Non-terminal: run it.
+
+| Child status on reattach | Behaviour |
+|---|---|
+| `pending`, `running` | Run it. The previous attempt did not finish, and the run lease already guarantees one worker. |
+| `waiting_for_approval` | Run it; its own gate resolves the decision. |
+| `waiting_for_child` | Run it; its own delegation re-issues and reattaches. |
+| `succeeded`, `failed`, `handed_off`, `cancelled`, `superseded` | Replay the recorded outcome. |
+
+**The resume path works under both reconstruction settings, by different routes.**
+Flag off, the parent replays from iteration 1 and re-issues the DELEGATE. Flag on,
+it resumes at the delegating iteration — reconstruction takes *completed* and
+*failed* rows, the delegating iteration is `running` when the child parks, and
+P3's rule rebuilds to N−1 and lets N re-execute. Either way the DELEGATE is
+re-issued and reattaches.
+
+**Two things the contract hash excludes beyond the obvious.** Budget and deadline
+change on every hop, and so does each `contextRef`'s **watermark** — the blackboard
+advances as the team works, so the same pointer resolves to a later version each
+time. Include any of the three and A→B→A→B hashes differently every time, and the
+loop guard is present, runs on every delegation, and catches nothing. Only the
+ref's identity `(key, scope, scopeRef)` is part of the request.
+
+**The loop guard's edge is between AGENTS, not activations.** Every hop creates a
+new activation, so counting `(from_activation_id, to_activation_id, hash)` finds
+one row each time and never trips. Both sides resolve to every activation the
+agent has in the run.
+
 ---
 
 ## 6. Orchestration policies
@@ -439,6 +508,96 @@ it at the roster is cheaper and much easier to explain in the UI.
 
 Existing `agent` nodes are untouched. A team is a new node type; nothing needs
 migrating.
+
+### 6.1 What shipped
+
+Behind `AGENT_TEAMS_ENABLED`, default off. `NodeType.AGENT_TEAM` is a type
+addition: `GraphClassifier` gains `agent_team` in `AGENT_NODE_TYPES` and nothing
+else changes, so no existing version row can classify differently than it did and
+the memo on it stays valid.
+
+**The five policies are a table**, `OrchestrationPolicy`, and `OrchestrationLoop`
+is the single thing that reads it. Four of the five run the SAME code — the entry
+member starts, its own brain actions drive the delegation, and the policy's only
+remaining job is to say how to read the result. Adding a sixth policy must be a
+sixth row; if it needs a branch in the loop, the claim that a policy is
+configuration has become false.
+
+**`OrchestrationLoop` is not a second scheduler.** No queue, no wait set, no
+lease, no timer, nothing to wake. It runs inside ONE node execution, on
+`WorkflowRuntime`'s thread, under that runtime's per-tick budget. `PIPELINE` is
+the only policy where the runtime picks the next agent — the order IS the
+configuration — and that is a `for` over the same `delegate` primitive one
+delegation uses.
+
+**BROADCAST is DELEGATE with more than one target**, not an eighth brain action.
+§5.1 lists it as a handoff KIND and §5.3 puts the action set at seven; a fan-out
+is the same grant check on every target, the same contract, the same boundary.
+Children run one after another, inline, so `wait_any` "cancelling the rest" means
+the rest are never STARTED — strictly better than starting and killing them. Their
+activations are still created and cancelled, because a `wait_any` that shows one
+activation hides the most interesting fact about the run.
+
+**A TRANSFER is a tail call and does not grow the depth.** DELEGATE pushes a
+frame — the parent waits and reads the result — so the chain genuinely deepens.
+TRANSFER replaces the frame: the router is done the moment it transfers. Counting
+it as depth would cap a router chain and a pipeline at `maxDepth` stages, a limit
+nobody chose. Transfer chains stay bounded by `maxActivations`, `HANDOFF_LOOP` and
+the subtree budget.
+
+**`canDelegateTo` is per-member all the way down.** The team's roster reaches
+every child through `TeamPolicy.rosterFor`, not just the entry member. Falling
+back to the agent row would make the per-member rule look implemented and enforce
+nothing below depth 0 — a mutation test found exactly that and it is now asserted
+with the child's agent row deliberately granting what the team member does not.
+
+**The fan-out preflight asks a real question.** The obvious per-child figure is an
+equal share of what is left, and it makes the check a tautology:
+`N × (available / N) ≤ available` always. The question worth asking is whether
+each child would get enough to make a single model call —
+`AgentBrainRunner.MIN_VIABLE_CHILD` — because a fan-out that funds five agents
+that cannot each afford one call has not been afforded, it has been divided into
+five failures.
+
+**An unaffordable fan-out is an OBSERVATION, not a stop.** The same choice
+`BudgetLedger.allocate` makes when it clamps rather than refuses: an agent told it
+cannot afford five workers can narrow to two or answer with what it has, and the
+completion margin §8 held back is what it answers with. Stopping outright fails
+the run holding a margin it was never given the chance to spend.
+
+**The tick budget reaches the node.** `RuntimeContext.tickDeadlineAtMs` is
+advisory and read-only; the team checks it BETWEEN children and never interrupts
+one that is running. When it fires, the node returns `NodeResult.Throttled` with
+`retryAfterMs = 0` — the runtime's existing "nothing is wrong, give the permit
+back, re-execute this node" signal, which `RunProcessor` already parks at status
+`yielded` and describes in its own comment as "the same state a cooperative yield
+uses". Reused rather than adding a `NodeResult` variant, because a new variant
+would change what happens on resume for every node type. Children already finished
+are terminal and reattach, so the resumed execution continues instead of
+repeating.
+
+#### `handed_off`, and every place that counts an activation outcome
+
+A router that correctly transferred did its job. `handed_off` is terminal and is
+graded as **neither** success nor failure, written once in
+`OrchestrationLoop.terminaliseEntry`.
+
+The audit §6 asks for, in full — as of this phase, `agent_activations` has exactly
+four readers:
+
+| Reader | Reads status? | Effect of `handed_off` |
+|---|---|---|
+| `ActivationStore` | yes, for the reattach rule | Terminal, so a resume replays the recorded outcome. Correct. |
+| `BudgetLedger.hydrate` | yes, via `terminal` | Terminal, so the activation's unspent reservation is released. Correct. |
+| `HandoffStore` | no — ids only | None |
+| `TraceRoutes` / the Debug tab | no — SPAN kinds and span statuses | None |
+
+**No metric, dashboard or aggregate reads it at all.** Every success rate counts
+`agent_runs.status`, and `handed_off` never reaches that table: a routed run's
+STEP completes — the specialist's answer is the team's answer — so the run is
+whatever it would have been. `AgentTeamTest` asserts that boundary rather than the
+arithmetic, so it is the test that fails if something later starts aggregating
+activation outcomes and counts a handed-off router as a failure.
 
 ---
 
@@ -504,6 +663,72 @@ When the budget is hit, drop from the bottom and record what was dropped in the
 trace. A context that was silently truncated is the hardest agent failure to
 diagnose; making the truncation an observable event removes the whole category.
 
+### 7.1 What shipped, and two corrections the code forced
+
+Shipped in V043 and the `agents/context` package. `run_context_entries` is
+append-only and versioned exactly as above. Two things in the sketch turned out
+to be wrong when written down against a real reader, and both are corrected here
+rather than in the implementation only.
+
+**Correction 1 — `version` cannot serve as a snapshot point.** The table's
+`version` is monotonic *per key*, which is what makes "which version of
+`findings.pricing` did you read" answerable. It is NOT a run-wide clock: key `a`
+at version 2 and key `c` at version 1 say nothing about which was written first,
+so an as-of read filtered on `version <= 2` returns a `c` that did not exist when
+the decision was made. An as-of read that shows an agent something it could not
+have seen is worse than having no as-of read at all.
+
+So there are two numbers. `version` is the per-key version. The **watermark** is
+the row's `BIGSERIAL` id, which is already a run-wide write order and therefore
+free. `RunContextStore.currentWatermark(runId)` is what a handoff records as
+`context_version`, and `asOf(reader, watermark)` reads at it.
+
+**Correction 2 — `visibility` narrows, `scope` addresses.** The sketch listed
+`public | team | private` without saying how they compose with the scope. Read
+naively — `team` meaning "readers who are in a team" — the DEFAULT write becomes
+unreadable by the DEFAULT reader: a single agent, or a supervisor that has not
+delegated yet, has no team ref and cannot read back a value it just wrote. The
+rule that works:
+
+| | Effect |
+|---|---|
+| `public` | Widens past the scope — any activation in the run |
+| `team` | Neutral. The scope is the boundary; this adds nothing |
+| `private` | Narrows — the writer and its descendants only, whatever the scope |
+
+`private` is enforced as `written_by = ANY(reader's lineage)`, and the lineage
+runs UPWARD — so a child reads its parent's private notes and a supervisor cannot
+read its workers'. A private write with no `written_by` is **refused at the
+write**, because it would otherwise be unreadable by everyone including its
+author: a write-only black hole that costs storage and says nothing.
+
+The visibility predicate is one SQL string shared by both reads. Two
+hand-maintained copies of an access-control clause drift, and the way they drift
+is that the less-exercised one — the historical read — becomes the permissive
+one.
+
+**Workflow-scoped memory** ships behind `AGENT_WORKFLOW_MEMORY_ENABLED`, default
+off, with all three limits from day one: a per-entry byte cap, a per-(workflow,
+agent) entry-count cap enforced at write time, and a TTL swept by
+`agent_memory_prune_expired`. One row per `(workflow, agent, key)`, enforced by a
+partial unique index — run memory is a transcript and appends, a workflow fact is
+a fact and must not. `run_id` became nullable with `ON DELETE SET NULL`: the FK
+was `CASCADE`, so pruning a 30-day-old run would have taken the learning with it
+and the feature would have appeared to work and then quietly forgotten.
+
+**Context assembly** ships behind `AGENT_CONTEXT_ASSEMBLY_ENABLED`, default off.
+`ContextAssembler` is pure — no I/O, no clock — and emits the six sections in the
+order above, dropping whole sections from the bottom. Whole sections, not
+fractions: half a blackboard entry or a truncated observation reads to a model as
+a complete but wrong fact, which is worse than its absence. When the two
+protected sections alone exceed the budget it goes over and records
+`context_over_budget` rather than cutting them — an oversized prompt fails at the
+provider with a message naming the real problem, while an agent given half its
+task answers confidently and wrongly.
+
+Every drop lands on the iteration span as `context_truncated` and
+`context_dropped_sections`.
+
 ---
 
 ## 8. Budget tree
@@ -543,6 +768,58 @@ estimate `N × per-child allocation` against the remaining team budget and refus
 the fan-out if it cannot afford all of it. Discovering the ceiling after three of
 eight children have run wastes the spend on all three.
 
+### 8.1 What shipped, and the invariant the sketch was missing
+
+`BudgetLedger` and `BudgetVector` in `agents/budget`. The three invariants are
+enforced as written. Three things the sketch did not say, each of which the code
+or a test forced:
+
+**Reservation, not just accounting.** Invariant 2 — propagate consumption
+upward — does not bound a fan-out, because at the moment eight children are
+allocated *nothing has been consumed yet*. All eight see the parent's full
+remaining and the tree hands out 8× the budget, with every individual step
+looking correct. So `allocate` DEBITS the parent immediately, and `settle`
+returns whatever a finished child did not spend. Without that, invariant 1 is a
+statement about one child at a time and says nothing about the set of them.
+
+**A settled activation cannot delegate, and a late spend re-debits.** Found by
+the randomised-tree property test on its second trial. Settling hands the
+unspent reservation back, so the grandparent's books then say the child holds
+only what it actually spent; allocating a NEW child from it after that spends
+against its original allocation a second time, invisibly. It cannot happen
+through the intended call sequence — settling follows a terminal activation, and
+a terminal activation does not delegate — which is exactly why it is enforced
+rather than assumed.
+
+**Cost is an integer of micro-cents.** Floating-point addition is not
+associative, so "total consumption never exceeds the root allocation" would hold
+on a shallow tree and fail by 1e-13 on a deep one. A limit that behaves
+differently by depth is the worst kind of limit. Micro-cents rather than cents
+because a single model call can cost a fraction of a cent, and a per-call cost
+that rounds to zero is a budget that never depletes.
+
+**Wall clock is deliberately not a budget dimension.** It does not divide: eight
+children running in parallel each take the same ten seconds, so a parent handing
+out 10s × 8 has either over- or under-allocated by 8× depending on how they run,
+and it cannot know which at allocation time. Time stays a per-activation timeout
+and a run ceiling.
+
+The completion margin defaults to 10% (`AGENT_COMPLETION_MARGIN`), rounds UP —
+rounding down reserves zero on every small budget, which is every budget that
+needs the reserve — and bounds only what may be given to children. The parent may
+spend into it; that is the entire point.
+
+Preflight is all-or-nothing and reports `affordableChildren`, so a caller can
+narrow the fan-out instead of failing. `BudgetVector.times` saturates rather than
+overflowing, because the fan-out width comes from a model and an overflow that
+wraps negative makes the check pass — the one way a preflight is worse than none.
+
+There is deliberately **no ledger table**. `agent_activations` already carries
+`budget_allocated_json` and `budget_consumed_json`; `hydrate` rebuilds the tree
+from them on a resumed tick, deriving subtree totals rather than restoring them,
+because a stored total that disagrees with the sum of its parts is a budget that
+is wrong in a way nothing detects.
+
 ---
 
 ## 9. Safety and termination
@@ -580,6 +857,38 @@ tool must open two gates, or the second silently inherits the first's decision.
 The existing `(runId, nodeId)` find-then-create and the one shared
 `decideOnApproval` rule apply unchanged, including the rule that anything
 unrecognised means `WAIT` and never "open a new gate".
+
+**As shipped, the scope is chosen by DEPTH, and both tool keys take it together:**
+
+```
+depth == 0  →  guard <stepId>:tool:<toolId>:<argsHash>        approve <stepId>:tool:<toolId>
+depth  > 0  →  guard <activationId>:tool:<toolId>:<argsHash>  approve <activationId>:tool:<toolId>
+```
+
+A root keeps exactly the keys that shipped, so nothing in flight can change
+meaning — no run can be at depth > 0, because delegation did not exist. It is a
+strict widening at a boundary that has never been reachable, not a key move.
+
+**Both keys move together, or the fix is worse than the bug.** Scoping only the
+approval key gives two gates and one execution: the second worker's call finds the
+first's guard row under the shared `<stepId>:tool:<toolId>:<argsHash>`, is served
+from that cache and emits `STEP_SKIPPED`. Somebody approved something that then did
+not happen. The cross-agent dedup this gives up is real but speculative, and
+belongs in a deliberate caching feature rather than as an emergent property of key
+derivation.
+
+**What it rests on.** The activation-scoped key is stable only because
+`ActivationStore` reattaches deterministically. A delegation that produced a second
+activation row for the same work would move the key with it, and the resumed run
+would open a gate nobody could ever close. `DelegationTest` asserts both halves in
+ONE test — delegate, park on approval, resume, then one activation row and one
+approval row under the same key — because two tests would let one keep passing
+after the other's premise had quietly broken.
+
+**Convergence path**, so this does not calcify into folklore: once no run predates
+activations, a maintenance-window migration can rewrite pending `<stepId>:tool:*`
+rows to their activation scope, and `AgentBrainRunner.keyScope` collapses to
+`activationId ?: stepId`. Not now — but written down.
 
 Known limit #1 — one approval per (step, tool) — becomes one per (activation,
 tool), which is the right granularity and resolves most of the practical pain
@@ -718,6 +1027,43 @@ penalty, so a deep tree cannot jump ahead of a tenant's other work by
 manufacturing children. Also cap concurrent activations per run, per workspace,
 so one team cannot occupy the whole `runs.agent` lane.
 
+### 11.1 What shipped
+
+`agent_runs` gains `parent_run_id` and `parent_activation_id`, with **no foreign
+keys** — a child's lifecycle must not depend on its parent's row surviving
+retention, and both CASCADE and RESTRICT are worse than a dangling id the
+reconciler already treats as "parent gone".
+
+The **activation is not duplicated**. `parent_activation_id` points at the row
+`AgentCallExecutor` already created, so the trace, the budget ledger and the
+reattach rule see one activation whichever transport it took.
+
+**Placement** is `ActivationPlacement`: pure, no I/O, in the doc's clause order —
+because the order IS the specification. A short-lived activation with a deadline
+goes inline even inside a ten-wide fan-out, since the queue round-trip is what
+would miss the deadline; swapping the first two clauses silently changes which
+property wins. Thresholds default to §11's values and come from the environment.
+One addition: a floor on the remaining tick, because an activation that "fits" in
+the 40 ms left goes inline, overruns, and yields anyway — paying the dispatch
+latency *and* the yield.
+
+**The depth penalty is multiplied by depth, not added once.** A parent is at the
+head of its tenant's queue — that is why it is running — so a child inheriting its
+vtime unmodified enters at the head too, and a 20-wide fan-out places 20 runs
+ahead of that tenant's own queued work. Adding the penalty once would close the
+fan-out arbitrage and leave the nesting one open.
+
+**A cap is not a failure.** `ChildRunDispatcher` returns `Capped`, and the caller
+runs that activation inline instead — the trade the caps exist to make. Both caps
+default from `workspace_usage_policies`, and a cap that cannot be READ is
+enforced, because the fallback is inline: slower and completely safe.
+
+**Waking the parent** happens behind the terminal status CAS in `RunProcessor`,
+so a redelivered message cannot wake it twice, and only when no sibling is still
+live, so five children wake their parent once. That enqueue is best-effort — which
+is the fourth instance of the pattern §16 describes, and why the reconciler
+exists.
+
 ---
 
 ## 12. Scaling
@@ -780,6 +1126,23 @@ runs drains.
 
 `GraphClassifier` needs one line: a graph containing an `agent_team` node
 classifies as `agent`, same precedence rule as `llm`/`agent` nodes today.
+
+**Shipped.** `ExecutionClass` and `WorkerJobType` each gain `AGENT_CHILD` and
+`AGENT_INTERACTIVE`, and everything else follows from the two enums: `Main` maps
+over `WorkerJobType.entries`, so each lane gets its own consumer, its own consumer
+group and its own **dedicated Redis connection** — which is not incidental.
+`XREADGROUP BLOCK` holds a connection for the whole block window, so lanes sharing
+one would serialise behind whichever happened to be waiting, and a child lane that
+cannot be read while the agent lane blocks is worse than no child lane at all.
+
+Each lane also gets its own pool (`ExecutionSlots`), defaulting from the agent
+pool so a worker deployed before an operator sets the new variables can still run
+children — a child lane with no permits is a supervisor parked forever.
+
+Per-tenant caps treat the three agent lanes as ONE budget, deliberately: separate
+allowances would mean a tenant at its agent cap could still start unlimited work
+by fanning out, which is the cap not existing. Fan-out width is bounded by the
+per-run and per-workspace activation caps instead.
 
 ### 12.4 Provider capacity
 
@@ -905,8 +1268,8 @@ Things this design deliberately leaves open, with a recommendation.
 |---|---|---|
 | 1 | Do child activations get their own run rows from day one? | No. Inline-only in Phase 3; dispatch in Phase 4 once fan-out demand is real |
 | 2 | Is the blackboard readable across steps, or only within a team node? | Team-scoped by default, run-scoped opt-in. Run-scoped-by-default makes every agent's context grow with the whole run |
-| 3 | Should `TRANSFER` be allowed to leave the team roster? | No. A transfer outside the roster is an unbounded control-flow edge and undoes the grant model |
-| 4 | Workflow-scoped memory in this work, or separately? | In this work, but behind a flag and with a size cap and retention policy from the start |
+| 3 | Should `TRANSFER` be allowed to leave the team roster? | **Closed.** No — enforced by `validateAgentAllowed`, which every kind goes through, and by the policy's permitted kinds at the `AgentCallExecutor` boundary |
+| 4 | Workflow-scoped memory in this work, or separately? | **Closed.** Shipped in V043 behind `AGENT_WORKFLOW_MEMORY_ENABLED`, with a per-entry cap, a per-(workflow, agent) count cap and a TTL. See §7.1 |
 | 5 | Where do span payloads live? | Object storage with content-addressed refs. Postgres for anything > 8 KiB will not survive Phase 4 volumes |
 | 6 | Do we expose team composition to the AI Architect? | Yes, but only after Phase 4. Generating teams before the runtime is proven produces workflows nobody can debug |
 
@@ -925,7 +1288,38 @@ against the source before committing to it; each one would change a decision abo
    the keys: guard on `<stepId>:tool:<toolId>:<argsHash>`, approve on
    `<stepId>:tool:<toolId>`. This is independent of multi-agent and should be
    fixed regardless.
-2. **Approval resume reliability.** Observation #3 in
+2. **Approval resume reliability — CLOSED by `ResumeReconciler`.**
+   One sweep covers all four parked statuses P0 enumerated, because all four are
+   the same bug: *a durable state change followed by a best-effort enqueue.*
+
+   | Parked in | The gap |
+   |---|---|
+   | `waiting_for_approval` | decision stored, enqueue swallowed by `runCatching` |
+   | `waiting_for_child` | last child terminal, parent's resume enqueue swallowed |
+   | `recovering` | `CrashRecoveryLoop` marks the status *before* it enqueues, and does not scan `recovering` — so it can strand the run it is rescuing |
+   | `waiting_for_timer` | `TimerScheduler` marks the timer `fired` *before* it enqueues, and `findDueTimers` requires `scheduled` |
+
+   It needs **no state-machine change**: `RunProcessor` already accepts all five
+   statuses as resumable, so this is a sweep and an enqueue.
+
+   Idempotent by construction — re-enqueueing a run that is already running is
+   refused by the processor's status CAS, which is what makes it safe to run on
+   every worker and to race the real enqueue it backs up. Duplicate resumes are
+   the expected steady state.
+
+   The retry count is a TABLE, not a counter: the reconciler runs on every worker,
+   so an in-heap bound would give a failing run N attempts per worker and scale
+   with the fleet. On exhaustion the row is dead-lettered and KEPT — deleting it
+   would return the run to the next sweep — and the run stays parked rather than
+   being failed, because a run that could not be resumed has not necessarily
+   failed and telling a user their work was lost would be untrue.
+
+   Watch `resume_reconciled{reason}`: every increment is a run that was parked
+   with nothing coming for it, and the label says which of the four paths did it.
+
+   Original finding follows.
+
+   **Approval resume reliability.** Observation #3 in
    AGENTIC-WORKFLOW-EXECUTION-FLOW notes that a stored approval decision whose
    `RESUME_RUN` enqueue fails leaves a run stuck, because crash recovery does not
    scan `waiting_for_approval`. Dispatched child activations (§11) add a second
@@ -938,7 +1332,24 @@ against the source before committing to it; each one would change a decision abo
 5. **`RunEventStore` sanitization contract.** Confirm callers sanitize before
    calling, so the span writer can adopt the same contract rather than
    re-sanitizing.
-6. **Architect `setCurrentVersion` gap.** Observation #2 says Architect-created
+6. **The tool grant fails OPEN on an empty list — fix before P10.**
+   `AgentSafetyGuard.validateToolAllowed` reads
+   `allowedToolIds.isNotEmpty() && toolId !in allowedToolIds`, so an agent with
+   ZERO granted tools passes the check for every tool in the workspace. This is
+   reachable, not theoretical: `shouldUseToolLoop` routes an `iterative_agent` to
+   the loop on its type alone, and `brainEnabled` forces it in either direction.
+   It contradicts invariant 1 directly.
+
+   Deliberately NOT fixed inside P9 — it changes behaviour for agents that run
+   today. It needs a standalone change, and one that **starts with an audit, not
+   a patch**: count agents with an empty `allowed_tool_ids` that route to the
+   loop, and how many have run. If that is zero it is a one-line fix. If it is
+   not, some workspace is relying on the convenience, and the fix is an explicit
+   `allow_all_tools BOOLEAN` — intent belongs in a flag, not in an absence.
+
+   `validateAgentAllowed` deliberately does not copy the behaviour; see §5.4.
+
+7. **Architect `setCurrentVersion` gap.** Observation #2 says Architect-created
    workflows can have a version while `current_version_id` stays null. Worth
    fixing before teams become generatable.
 
@@ -949,13 +1360,13 @@ against the source before committing to it; each one would change a decision abo
 | Table | New? | Purpose |
 |---|---|---|
 | `agent_activations` | new — shipped V042 | One agent's participation in a run |
-| `agent_handoffs` | new | The delegation edges |
-| `run_context_entries` | new | Versioned team blackboard |
+| `agent_handoffs` | new — shipped V044 | The delegation edges, plus `contract_hash` for the loop guard |
+| `run_context_entries` | new — shipped V043 | Versioned team blackboard |
 | `run_spans` | new | Causal trace tree ([debugger doc](./AGENT-TRACE-AND-DEBUGGER.md)) |
 | `run_payloads` | new | Content-addressed payload refs |
 | `run_event_seq` | new | Sequence counter, off the run row |
 | `agent_iterations` | extended | `activation_id`, observation payload, parsed action, unique key |
-| `agent_memory_entries` | extended | Implement `workflow_scoped` |
+| `agent_memory_entries` | extended — shipped V043 | `workflow_id`, `expires_at`, nullable `run_id`, partial unique key. Implements `workflow_scoped` |
 | `run_events` | extended | `span_id`, `activation_id` |
 | `agent_runs` | extended | `parent_run_id`, `parent_activation_id` |
 | `run_approvals` | unchanged | New key shapes only |
@@ -967,19 +1378,19 @@ New and changed paths under
 
 | Concern | Path | Status |
 |---|---|---|
-| Team node executor | `runtime/executor/AgentTeamNodeExecutor.kt` | new |
-| Orchestration loop, joins, termination | `agents/orchestration/OrchestrationLoop.kt` | new |
+| Team node executor | `runtime/executor/AgentTeamNodeExecutor.kt` | **shipped P10** |
+| Orchestration loop, joins, termination | `agents/orchestration/OrchestrationLoop.kt`, `OrchestrationPolicy.kt`, `JoinEvaluator.kt`, `TeamConfig.kt` | **shipped P10** |
 | Activation lifecycle | `agents/orchestration/AgentHarness.kt` | **shipped P6** |
-| Roster grant + delegation gate | `runtime/executor/AgentCallExecutor.kt` | new |
+| Roster grant + delegation gate | `runtime/executor/AgentCallExecutor.kt` | **shipped P9** |
 | Activation persistence | `agents/orchestration/ActivationStore.kt` | **shipped P6** |
-| Handoff records | `agents/orchestration/HandoffStore.kt` | new |
-| Hierarchical budgets | `agents/budget/BudgetLedger.kt` | new |
-| Blackboard | `agents/context/RunContextStore.kt` | new |
-| Context assembly under budget | `agents/context/ContextAssembler.kt` | new |
+| Handoff records | `agents/orchestration/HandoffStore.kt` | **shipped P9** |
+| Hierarchical budgets | `agents/budget/BudgetLedger.kt`, `agents/budget/BudgetVector.kt` | **shipped P7-pre** |
+| Blackboard | `agents/context/RunContextStore.kt` | **shipped P7-pre** |
+| Context assembly under budget | `agents/context/ContextAssembler.kt` | **shipped P7-pre**, behind `AGENT_CONTEXT_ASSEMBLY_ENABLED` |
 | Span emission | `events/SpanWriter.kt` | **shipped P2** |
 | Payload offload | `events/PayloadStore.kt` | **shipped P2** |
-| Two new actions, durable loop state | `agents/brain/runtime/AgentBrainRunner.kt` | changed |
-| Roster in the system prompt | `agents/brain/prompts/AgentPromptBuilder.kt` | changed |
+| Two new actions, durable loop state | `agents/brain/runtime/AgentBrainRunner.kt` | **changed P9** (behind `AGENT_DELEGATION_ENABLED`) |
+| Roster in the system prompt | `agents/brain/prompts/AgentPromptBuilder.kt` | **changed P9** |
 | Delegate to harness | `runtime/executor/AgentNodeExecutor.kt` | **changed P6** (behind `AGENT_ACTIVATIONS_ENABLED`) |
 | Sequence batching | `events/RunEventStore.kt` | changed |
 | Scripted provider | `test/.../testsupport/ScriptedLlmProvider.kt` | **shipped P1** |
@@ -992,6 +1403,6 @@ API side, under `apps/api-kotlin/.../api/`:
 | Concern | Path | Status |
 |---|---|---|
 | Trace read API | `routes/TraceRoutes.kt` | **shipped P4** |
-| `agent_team` classification | `queue/GraphClassifier.kt` | changed |
+| `agent_team` classification | `queue/GraphClassifier.kt` | **changed P10** — a type addition, no rule change |
 | Child-lane enqueue | `queue/TypedStreamsWorkflowQueue.kt` | changed |
 | Resume reconciler | `schedule/ResumeReconciler.kt` | new |

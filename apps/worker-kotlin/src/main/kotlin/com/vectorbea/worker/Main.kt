@@ -114,6 +114,7 @@ fun main() {
 
     // ── 4. Event store ────────────────────────────────────────────────────────
     val eventStore = RunEventStore(database.dataSource, redis.pubSubConnection)
+    eventStore.start()   // no-op unless AGENT_EVENT_BATCH_ENABLED
     log.info("[startup] event store ready")
 
     // ── 5. Heartbeat ──────────────────────────────────────────────────────────
@@ -306,6 +307,49 @@ fun main() {
     // Resolves a run's stored execution class for continuation routing.
     val runClassLookup = com.vectorbea.worker.queue.RunClassLookup(database.dataSource)
 
+    /*
+
+     * The dispatched-child transport. §11.
+
+     *
+
+     * Enqueues onto the CHILD lane specifically, not the run's own class: a child
+
+     * is `execution_class = 'agent.child'` by construction, and putting it on the
+
+     * plain agent lane would undo the split — a parked supervisor's children would
+
+     * queue behind the cold backlog of top-level runs the lane exists to separate
+
+     * them from.
+
+     */
+
+    val childRunDispatcher = com.vectorbea.worker.agents.orchestration.ChildRunDispatcher(
+
+        dataSource = database.dataSource,
+
+        enqueue = { job ->
+
+            val stream = com.vectorbea.worker.queue.TypedStreamConsumer.streamKeyFor(
+
+                if (job.jobType == com.vectorbea.worker.queue.WorkflowRunJob.JobType.RESUME_RUN)
+
+                    runClassLookup.classOf(job.runId)
+
+                else com.vectorbea.worker.queue.WorkerJobType.AGENT_CHILD)
+
+            redis.commands.xadd(stream, job.toStreamFields())
+
+                ?: throw IllegalStateException("XADD returned null for stream=" + stream)
+
+            WorkerMetrics.redisXadd.inc()
+
+        },
+
+    )
+
+
     val processor = RunProcessor(
         dataSource      = database.dataSource,
         eventStore      = eventStore,
@@ -322,6 +366,7 @@ fun main() {
         replayRuntimeFactory = replayRuntimeFactory,
         spanWriter         = spanWriter,
         rootCause          = com.vectorbea.worker.events.RootCauseAttribution(database.dataSource),
+        childDispatcher = childRunDispatcher,
         // Durably re-enqueue continuation jobs after a yield (survives crash).
         // Routed to the run's OWN class stream, read from agent_runs — a
         // continuation must resume in the pool its first half occupied.
@@ -345,6 +390,8 @@ fun main() {
         shortPermits  = config.shortConcurrency,
         longPermits   = config.longConcurrency,
         agentPermits  = config.agentConcurrency,
+        agentChildPermits = config.agentChildConcurrency,
+        agentInteractivePermits = config.agentInteractiveConcurrency,
         systemPermits = config.systemConcurrency,
     )
     poolRouter.logConfiguration()
@@ -495,6 +542,36 @@ fun main() {
     crashRecovery.start()
 
     /*
+     * ── THE RESUME RECONCILER ────────────────────────────────────────────────
+     *
+     * Started right after crash recovery because it covers the runs crash
+     * recovery structurally cannot see: `findStaleRuns` scans
+     * ('running','yielded'), so every PARKED run — waiting on an approval, on
+     * children, on a timer, or stuck mid-recovery — is invisible to it.
+     *
+     * All four of those park by changing durable state and THEN enqueueing
+     * best-effort, so a Redis hiccup at the wrong moment strands the run with
+     * the decision already recorded and the caller already told it worked.
+     *
+     * Deliberately NOT routed through `enqueueSystemJob`: a resume must go back
+     * to the run's OWN class stream, or a recovered agent run would execute on
+     * the system pool and take a slot that timer resumes and cancellations need
+     * to stay unstarvable. Same reasoning, and the same lookup, as the
+     * continuation re-enqueue above.
+     */
+    val resumeReconciler = com.vectorbea.worker.durable.ResumeReconciler(
+        dataSource = database.dataSource,
+        enqueue = { job ->
+            val cls = runClassLookup.classOf(job.runId)
+            val stream = com.vectorbea.worker.queue.TypedStreamConsumer.streamKeyFor(cls)
+            redis.commands.xadd(stream, job.toStreamFields())
+                ?: throw IllegalStateException("XADD returned null for stream=$stream")
+            WorkerMetrics.redisXadd.inc()
+        },
+    )
+    resumeReconciler.start()
+
+    /*
      * Partition maintenance — creates next month's partitions before anything needs
      * to write into them, for BOTH run_events and run_spans.
      *
@@ -587,6 +664,11 @@ fun main() {
         tenantLimiter.close()
         tenantDbDispatcher.close()
         dbPoolManager.close()
+
+        /* Flush buffered events BEFORE Redis and the pool close. A batched
+           event still in the deque at this point is one the timeline will never
+           show, and the last events before a deploy are the interesting ones. */
+        runCatching { eventStore.stop() }
 
         // Close infrastructure
         WorkerMetrics.stopServer()

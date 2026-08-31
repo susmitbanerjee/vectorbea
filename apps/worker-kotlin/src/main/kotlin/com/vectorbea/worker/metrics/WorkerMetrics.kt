@@ -377,6 +377,20 @@ object WorkerMetrics {
     /** Leases that expired rather than being renewed or released — crash proxy. */
     internal val leaseExpiryTotal = WCounter("lease_expiry", "Run leases observed expired", listOf("source"))
 
+    // ── The resume reconciler ─────────────────────────────────────────────────
+    //
+    // `resumeReconciled` climbing steadily is not a healthy platform: every
+    // increment is a run that was parked with nothing coming for it, rescued by
+    // a sweep. The label says WHICH of the four broken enqueue paths did it, so
+    // a rise points at the one to fix rather than at "Redis was flaky".
+    internal val resumeReconciled = WCounter("resume_reconciled",
+        "Parked runs re-enqueued by the reconciler", listOf("reason"))
+    internal val resumeReconcileFailed = WCounter("resume_reconcile_failed",
+        "Reconciler enqueue attempts that threw", listOf("reason"))
+    // Any increment here is a run a person has to look at.
+    internal val resumeDeadLettered = WCounter("resume_dead_lettered",
+        "Parked runs the reconciler gave up on", listOf("reason"))
+
     // ── Exactly-once guards ───────────────────────────────────────────────────
 
     /**
@@ -740,6 +754,7 @@ object WorkerMetrics {
             tenantActiveRuns, tenantThrottledTotal, tenantAdmissionOvershoot, tenantClaimRejected, tenantLoadQuerySeconds,
             llmCallDurationSeconds, toolCallDurationSeconds, tenantDbCallDurationSeconds,
             threadBlockedSeconds, leaseExpiryTotal, xautoclaimReclaimTotal,
+            resumeReconciled, resumeReconcileFailed, resumeDeadLettered,
             claimDurationSeconds, claimedTotal, claimReclaimedTotal, claimWakeupTotal,
             claimReservedLaneTotal, ceilingBreachTotal,
             circuitOpenedTotal, circuitClosedTotal, circuitRejectedTotal,

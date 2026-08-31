@@ -467,6 +467,10 @@ fun main() {
            resolves the run through it to enforce workspace scoping, so without it
            the routes could not fail closed and must not exist at all. */
         runRepo?.let { com.vectorbea.api.routes.TraceRoutes(ds, it, redis).register(router) }
+        /* The debugger's v2 reads: the constellation, the burn-down and compare.
+           Separate from TraceRoutes because they answer a different question —
+           "who asked whom, and why" lives in agent_handoffs, not in the span tree. */
+        runRepo?.let { com.vectorbea.api.routes.ConstellationRoutes(ds, it).register(router) }
     } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
     // 7b. Cron scheduler — fires due workflow schedules onto the queue
