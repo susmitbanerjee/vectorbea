@@ -43,6 +43,22 @@ class AgentBrainFixture(
     val dataSource: javax.sql.DataSource? = null,
     /** Mirrors AGENT_LOOP_RECONSTRUCTION_ENABLED without touching process env. */
     val reconstructionEnabled: Boolean = false,
+    /** Mirrors AGENT_CONTEXT_ASSEMBLY_ENABLED. §12.5's budget only bites when on. */
+    val contextAssemblyEnabled: Boolean = false,
+    /**
+     * Lets the loop build a real `ToolNodeExecutor`.
+     *
+     * `AgentBrainRunner.toolExecutor` needs BOTH a DataSource and a pool manager;
+     * with either null it returns "Tool execution is not available on this worker"
+     * and the tool path is never entered — which is the right default for the loop
+     * tests, and useless for one that needs to see which key the guard acquired.
+     * An empty manager is enough: a tool that stops at its approval gate, or that
+     * fails to resolve a connection, still passes through the guard first.
+     */
+    val dbPoolManager: com.vectorbea.worker.connector.pool.ClientDbPoolManager? = null,
+    /** The team's bounds, including §12.5's maxContextChars. */
+    val teamLimits: com.vectorbea.worker.agents.orchestration.TeamLimits =
+        com.vectorbea.worker.agents.orchestration.TeamLimits(),
 ) {
     /* Random per fixture: the DB-backed tests insert real rows, and fixed ids would
        make two tests in one JVM collide on the primary key. */
@@ -108,13 +124,15 @@ class AgentBrainFixture(
         dataSource         = dataSource,
         eventStore         = events,
         connectionResolver = stubLlmResolver(workspaceId, environmentId),
-        dbPoolManager      = null,
+        dbPoolManager      = dbPoolManager,
         approvalStore      = approvals,
         llmHttpClient      = llm,
         payloadStore       = dataSource?.let {
             com.vectorbea.worker.events.PayloadStore(it) { 7 }
         },
         reconstructionEnabled = reconstructionEnabled,
+        teamLimits            = teamLimits,
+        contextAssemblyEnabled = contextAssemblyEnabled,
     )
 
     /**

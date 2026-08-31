@@ -78,6 +78,8 @@ class AgentNodeExecutor(
      * rows and the delegating iteration is `running` when the child parks — and
      * only one of those is what the design note describes.
      */
+    /** Shared provider token bucket. §12.4. Null disables it. */
+    private val capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
     private val reconstructionEnabled: Boolean =
         com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.RECONSTRUCTION_ENABLED,
 ) : NodeExecutor {
@@ -120,7 +122,9 @@ class AgentNodeExecutor(
             ?: (agentType in TOOL_CALLING_AGENT_TYPES || hasGrantedTools)
     }
 
-    private val llmExecutor by lazy { LlmNodeExecutor(connectionResolver, eventStore) }
+    private val llmExecutor by lazy {
+        LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity)
+    }
 
     override suspend fun execute(
         node: WorkflowNode,
@@ -500,6 +504,7 @@ class AgentNodeExecutor(
             teamLimits         = com.vectorbea.worker.agents.orchestration.TeamLimits
                 .fromNodeConfig(node.config),
             delegationEnabled  = delegationEnabled,
+            capacity           = capacity,
         )
 
         val config = AgentBrainConfig(

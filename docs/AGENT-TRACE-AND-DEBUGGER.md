@@ -585,6 +585,30 @@ Three UI-specific consequences:
 - **Warm-tier runs load asynchronously.** A 60-day-old trace comes from object
   storage; show a skeleton and stream it in rather than blocking the tab.
 
+### 8.1 What P13 actually changed, and what it means for this tab
+
+Built: partition export (`TraceArchiver`), the ledger (`run_trace_archives`), the
+drop gate, and `TraceSampler`. See
+[architecture §12.1.1 and §12.1.2](./AGENT-HARNESS-ARCHITECTURE.md).
+
+Two consequences the tab has to respect, and neither is built yet — they are UI
+work, listed here so the next person does not have to rediscover them:
+
+1. **Sampling happens at the ARCHIVE boundary, not at write time.** So a run in
+   the hot window always has a complete trace, and "reduced trace" is a state
+   that can only appear for a run whose Postgres partition has been dropped. The
+   label belongs on warm-tier reads only, and rendering it on a recent run would
+   be wrong.
+2. **`run_trace_archives` is the only record that a dropped partition existed.**
+   When a trace read finds nothing, the tab can still say *which* month the run
+   was in, how many rows it had, and whether it was archived or sampled out —
+   which is a far better empty state than "no trace found". The row count and the
+   tier are already in the table; nothing else needs to be stored to say it.
+
+Note that **`run_events` is never sampled** — only spans are. The run timeline
+therefore stays complete for every run at every age, which is what keeps the
+Overview view honest when the span tree beneath it has been reduced.
+
 ---
 
 ## 9. OpenTelemetry export
@@ -598,6 +622,134 @@ Worth building early even though nothing depends on it: any business evaluating 
 production agent runtime asks whether traces reach the observability stack they
 already pay for, and "we export OTel" ends that conversation. It also means the
 internal model is validated against an external one before the schema hardens.
+
+### 9.1 Built (P14)
+
+| Piece | Where |
+|---|---|
+| Mapping | `OtelSpanMapper` — pure, `run_spans` row → `SpanData` |
+| Ids | `OtelIds` — UUID → W3C trace/span id |
+| Destination | `TraceExportConfig` + `workspace_otel_exports` (V049) |
+| Job | `RunTraceExporter`, called behind `RunProcessor`'s terminal CAS |
+
+Off by default: `OTEL_TRACE_EXPORT_ENABLED`, **and** a per-workspace
+`workspace_otel_exports` row with `enabled = true`. Both are required.
+
+**It reads `run_spans`; it does not instrument live.** The obvious design — open
+a real OTel span alongside every `RunTracer.open()` — cannot work here, and the
+reason is structural rather than awkward: a dispatched child activation executes
+in a different worker process, minutes later. By then the parent's in-process
+span is closed and possibly on another host, so there is nothing to be a child
+of. `run_spans` already stitches the tree across processes and across time, which
+is the whole point of a durable runtime, so the export reads the durable tree.
+
+That rules out the `Tracer` API, which assigns span ids itself with no supported
+way to hand it ours. `SpanData` + `SpanExporter` is the public, stable path — no
+`IdGenerator` tricks and nothing from `io.opentelemetry.exporter.internal.*`.
+
+**Ids.** A trace id maps across exactly (both 16 bytes). A span id has to lose
+half its bits, and the fold is `msb xor lsb` rather than truncation because
+several span ids are *derived* — `SpanWriter.runSpanId`, `waitSpanId` — and a
+derived family can share structure in its high bits. Zero is remapped to one:
+`0000000000000000` is the invalid span id and a backend drops it silently.
+
+**Naming follows the convention, not our vocabulary.** `chat gpt-4o`,
+`execute_tool send_email`, `invoke_agent researcher`. Somebody's Tempo already
+has other GenAI services in it, and a span called `llm_call` groups differently
+from every one of them. Our names survive verbatim on `vectorbea.kind` and
+`vectorbea.name`. A kind with no honest operation mapping gets **no**
+`gen_ai.operation.name` rather than an invented one.
+
+**Attributes are promoted individually**, not shipped as a JSON blob:
+`vectorbea.context_truncated`, `vectorbea.context_dropped_sections`,
+`vectorbea.budget_clamped`, `vectorbea.depth`, `vectorbea.role`,
+`vectorbea.self_ms`. A backend cannot query inside an opaque string, and these are
+exactly the things somebody filters by.
+
+**What leaves the building.** A span's status description is the failure CLASS
+from the taxonomy, never `error_json`. That column is sanitized for our storage,
+which is not the same standard as forwarding it to a third party.
+
+**Security.** The endpoint is per workspace — one process-wide
+`OTEL_EXPORTER_OTLP_ENDPOINT` would send every tenant's spans to ours. Auth
+headers are a `SecretService` ref, never plaintext in the table. `service.name`
+is written last so a workspace cannot rename the service into one of its own and
+merge our spans with their application's.
+
+**Never blocks.** `exportAsync` hands the work to a two-thread pool with a
+bounded queue that drops to a counter, like `SpanWriter`. Exporting inline would
+put an HTTP round trip to somebody else's collector — up to their `timeout_ms` —
+on the completion of every run, so a slow collector would slow the fleet: an
+observability integration causing an outage, which is what invariant 7 forbids.
+
+### 9.2 The finding: a trace id is a run id
+
+`WorkflowRuntime.tracerFor` sets `traceId = runId`. A dispatched child is its own
+run, so **a five-agent team is six trace ids**, and it would land in an external
+backend as six unrelated traces.
+
+Internally "trace" and "run" are the same thing, and a logical trace spanning
+several runs has no id at all. Exporting is what made that visible — which is
+precisely the argument this section makes for building the export before the
+schema hardens.
+
+Fixed in the export rather than the schema, for now: `OtelSpanMapper.Reparent`
+re-roots every span onto the top run's id and hangs each child run's `run` span
+off the `activation` span of the agent that delegated it (child run →
+`parent_activation_id` → that activation's own parent → its `activation` span).
+Rewriting `trace_id` on child runs would change data every existing reader
+depends on, for a feature that is off by default.
+
+**The schema fix, when it happens, is to give a logical trace its own id**, and
+`Reparent` is the shape it should take. Until then the internal debugger still
+sees a team as several traces; only the export sees one.
+
+### 9.3 A second finding, and a bug it fixed
+
+Writing the export surfaced a live defect in P13's sampling. `TraceSampler` was
+being asked about one `agent_runs` row at a time, which gets two things wrong in a
+team:
+
+1. **The interesting event is almost never in the top run.** The supervisor
+   delegates and waits; the researcher is the one whose tool call fails, whose
+   approval opens, whose budget is clamped. Asking only about the top run answers
+   "did the supervisor fail" and samples out exactly the traces someone is about
+   to go looking for.
+2. **It could keep a child and drop its parent** — half a trace in the warm tier,
+   with spans whose parents do not exist. That reads as corruption, which is worse
+   than a clean absence.
+
+Both are fixed: every run is resolved to the root of its tree, the notable-event
+facts are aggregated across the whole tree, one decision is made per root, and it
+applies to every run under it. Status and duration still come from the root,
+because those are properties of the whole. Regression tests live in
+`TraceArchiverTest` and `RunTraceExportTest`.
+
+### 9.4 Verifying against a real backend
+
+Not done in the build environment — no Docker daemon — so the acceptance
+criterion is met by assertion rather than by a screenshot: `RunTraceExportTest`
+pins one trace id, exactly one root, no orphan parents and each dispatched
+child's root hanging off its delegator, and `OtlpWireTest` drives the real
+`OtlpHttpSpanExporter` against a local HTTP receiver and asserts the path,
+content type and payload bytes. The remaining untested link is a collector's own
+ingestion of a well-formed OTLP payload.
+
+To close it by hand:
+
+```
+docker run --rm -p 16686:16686 -p 4318:4318 jaegertracing/all-in-one:latest
+```
+
+then, for the workspace under test:
+
+```sql
+INSERT INTO workspace_otel_exports (workspace_id, enabled, endpoint)
+VALUES ('<workspace-id>', true, 'http://localhost:4318');
+```
+
+with `OTEL_TRACE_EXPORT_ENABLED=true` on the worker. Run a team workflow; the
+trace appears in Jaeger under `vectorbea-agents`.
 
 ---
 

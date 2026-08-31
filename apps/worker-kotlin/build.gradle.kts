@@ -57,6 +57,22 @@ dependencies {
     // Redis client — Lettuce
     implementation("io.lettuce:lettuce-core:6.3.2.RELEASE")
 
+    // ── OpenTelemetry SDK, for the run-trace EXPORTER ────────────────────────
+    // NOT a new dependency: `observability-kotlin` already resolves these exact
+    // artifacts at these exact versions, and they are already on this module's
+    // runtime classpath through it. It declares them `implementation`, so they
+    // are invisible at compile time here — which is right for a consumer that
+    // only uses `Tracing`, and wrong for one that builds `SpanData` itself.
+    //
+    // Declared here rather than promoted to `api` over there so `api-kotlin`,
+    // which genuinely only needs the `Tracing` facade, does not gain the whole
+    // SDK on its compile classpath as a side effect.
+    //
+    // Keep the versions pinned to observability-kotlin's. Two OTel versions on
+    // one classpath is a NoSuchMethodError at export time, hours after start-up.
+    implementation("io.opentelemetry:opentelemetry-sdk:1.40.0")
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp:1.40.0")
+
     // ── Coroutines: slots become permits, not threads ────────────────────────
     // An agent run spends 2-30s parked on an LLM socket doing nothing. While a
     // slot is a thread, that wait costs a thread; once it is a permit, waiting

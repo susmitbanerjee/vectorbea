@@ -4,12 +4,16 @@ import com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.Companion.tool
 import com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.Companion.toolGuardNodeId
 import com.vectorbea.worker.durable.StepExecutionGuard
 import com.vectorbea.worker.runtime.StepOutputStore
+import com.vectorbea.worker.runtime.checkpoint.ApprovalDecision
+import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
+import com.vectorbea.worker.runtime.checkpoint.decideOnApproval
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.postgresql.ds.PGSimpleDataSource
 import java.util.UUID
 import javax.sql.DataSource
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -237,5 +241,163 @@ class AgentToolGuardIntegrationTest {
                 }
             }
         } finally { cleanup(ds, ws) }
+    }
+
+    // ── The approval side of the split ────────────────────────────────────────
+
+    /**
+     * The gate survives a resume under the same key, and there is only ever one.
+     *
+     * ── WHY THIS TEST EXISTS SEPARATELY FROM THE KEY TEST ───────────────────
+     * `AgentToolGuardKeyTest` proves `toolApprovalNodeId` ignores its arguments —
+     * a property of a pure function. That is not the same claim as "a resumed
+     * step finds the decision somebody already made", which is a property of
+     * `run_approvals` and the lookup `ToolNodeExecutor.approvalGate` performs
+     * against it. The bug this guards against lives in the gap between them: the
+     * key could be argument-free and the gate could still open a second row if
+     * the lookup used a different key, or if the step's re-execution wrote rather
+     * than read.
+     *
+     * The sequence is exactly what a resumed run does. The agent step replays from
+     * iteration 1, so the model re-derives its arguments — and it does NOT
+     * reproduce them byte for byte. `{"q":"a","limit":10}` on the first pass comes
+     * back as `{"limit":10.0,"q":"a"}` on the second, because Jackson's number
+     * type follows the literal and map order follows the document. That is the
+     * whole reason the approval key must not carry them.
+     */
+    @Test
+    fun `one gate per step and tool survives a resume that re-derives its arguments`() {
+        val ds = dataSourceOrNull()
+        assumeTrue(ds != null, "no database reachable — skipping")
+        val (ws, env, run) = seedRun(ds!!)
+        try {
+            val approvals = ApprovalStore(ds)
+            val key = toolApprovalNodeId(stepId, toolId)
+
+            /* ── Pass 1: iteration 4 reaches the gated tool ───────────────── */
+            val firstArgs = mapOf<String, Any>("q" to "a", "limit" to 10)
+            assertNull(approvals.findApproval(run, key), "nothing should be on file yet")
+            val opened = approvals.createPendingApproval(
+                runId = run, workspaceId = ws, environmentId = env, nodeId = key,
+                message = "Tool 'send_email' requires approval before it runs.",
+                approvers = emptyList(), resolvedInputs = firstArgs)
+
+            /* The run parks. `WAIT` is what the gate returns while pending — and a
+               gate that returned GRANT here would send the email before anybody
+               looked at it. */
+            assertEquals(ApprovalDecision.WAIT,
+                decideOnApproval(approvals.findApproval(run, key)!!.status))
+
+            /* ── A person approves ────────────────────────────────────────── */
+            decide(ds, run, key, "APPROVED", "alice")
+
+            /* ── Pass 2: the resumed step replays from iteration 1 ────────── */
+            val reDerived = mapOf<String, Any>("limit" to 10.0, "q" to "a")
+            assertNotEquals(firstArgs.keys.toList(), reDerived.keys.toList(),
+                "the re-derived arguments must actually differ, or this proves nothing")
+
+            val found = approvals.findApproval(run, toolApprovalNodeId(stepId, toolId))
+            assertNotNull(found, "the resumed step must find the decision already made")
+            assertEquals(opened, found.id.toString(), "and it must be the SAME row")
+            assertEquals(ApprovalDecision.GRANT, decideOnApproval(found.status))
+            assertEquals("alice", found.resolvedBy)
+
+            /* ── One gate. Not two, not one per iteration. ─────────────────── */
+            assertEquals(1, approvalCount(ds, run),
+                "a resume must not open a second gate — this is the bug that made a " +
+                "run unapprovable forever")
+
+            /* The guard key for either argument spelling addresses a DIFFERENT
+               namespace, so the approval lookup can never be satisfied by a guard
+               row or vice versa. */
+            listOf(firstArgs, reDerived).forEach { args ->
+                assertNull(approvals.findApproval(run, toolGuardNodeId(stepId, toolId, args)),
+                    "an approval must never be found under a guard key")
+            }
+        } finally { cleanup(ds, ws) }
+    }
+
+    /**
+     * The approval key does not move when the arguments do — asserted against the
+     * DATABASE, not against the function.
+     *
+     * If the approval key ever carried the argument hash, this stores under one
+     * name and looks up under another, and the lookup comes back empty. That is
+     * precisely how `<stepId>:tool-<iteration>` failed: the approved row went in
+     * under `:tool-4`, the resumed run asked for `:tool-2`, and opened another.
+     */
+    @Test
+    fun `a stored decision is found again however the arguments are spelled`() {
+        val ds = dataSourceOrNull()
+        assumeTrue(ds != null, "no database reachable — skipping")
+        val (ws, env, run) = seedRun(ds!!)
+        try {
+            val approvals = ApprovalStore(ds)
+            approvals.createPendingApproval(
+                runId = run, workspaceId = ws, environmentId = env,
+                nodeId = toolApprovalNodeId(stepId, toolId),
+                message = "gate", approvers = emptyList(),
+                resolvedInputs = mapOf("q" to "a"))
+            decide(ds, run, toolApprovalNodeId(stepId, toolId), "APPROVED", "alice")
+
+            /* Every spelling a resumed pass could plausibly produce. */
+            listOf(
+                mapOf<String, Any>("q" to "a"),
+                mapOf<String, Any>("q" to "a", "limit" to 10),
+                mapOf<String, Any>("limit" to 10.0, "q" to "a"),
+                emptyMap(),
+            ).forEach { _ ->
+                assertEquals(ApprovalDecision.GRANT,
+                    decideOnApproval(approvals.findApproval(run, toolApprovalNodeId(stepId, toolId))?.status))
+            }
+            assertEquals(1, approvalCount(ds, run))
+        } finally { cleanup(ds, ws) }
+    }
+
+    /**
+     * A rejected gate stays rejected across the resume.
+     *
+     * The failure mode worth pinning is not "reject works" but "reject is not
+     * re-asked": a resumed step that opened a fresh PENDING row would quietly
+     * convert somebody's "no" into another question.
+     */
+    @Test
+    fun `a rejection is not re-asked on resume`() {
+        val ds = dataSourceOrNull()
+        assumeTrue(ds != null, "no database reachable — skipping")
+        val (ws, env, run) = seedRun(ds!!)
+        try {
+            val approvals = ApprovalStore(ds)
+            val key = toolApprovalNodeId(stepId, toolId)
+            approvals.createPendingApproval(
+                runId = run, workspaceId = ws, environmentId = env, nodeId = key,
+                message = "gate", approvers = emptyList(), resolvedInputs = mapOf("q" to "a"))
+            decide(ds, run, key, "REJECTED", "bob")
+
+            assertEquals(ApprovalDecision.REJECT,
+                decideOnApproval(approvals.findApproval(run, key)!!.status))
+            assertEquals(1, approvalCount(ds, run))
+        } finally { cleanup(ds, ws) }
+    }
+
+    /** What the API does when a person decides. */
+    private fun decide(ds: DataSource, run: UUID, nodeId: String, status: String, by: String) {
+        ds.connection.use { c ->
+            c.prepareStatement(
+                "UPDATE run_approvals SET status = UPPER(?), resolved_by = ?, resolved_at = now() " +
+                "WHERE run_id = ? AND node_id = ?"
+            ).use {
+                it.setString(1, status); it.setString(2, by)
+                it.setObject(3, run); it.setString(4, nodeId)
+                assertEquals(1, it.executeUpdate(), "the decision must land on exactly one row")
+            }
+        }
+    }
+
+    private fun approvalCount(ds: DataSource, run: UUID): Int = ds.connection.use { c ->
+        c.prepareStatement("SELECT count(*) FROM run_approvals WHERE run_id = ?").use {
+            it.setObject(1, run)
+            it.executeQuery().use { rs -> rs.next(); rs.getInt(1) }
+        }
     }
 }

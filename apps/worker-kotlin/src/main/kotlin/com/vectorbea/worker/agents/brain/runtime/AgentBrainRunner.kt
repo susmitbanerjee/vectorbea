@@ -126,6 +126,23 @@ class AgentBrainRunner(
      * other flag here is one: a test has to drive both paths in one JVM.
      */
     private val delegationEnabled: Boolean = DELEGATION_ENABLED,
+    /**
+     * Shared provider token bucket. §12.4.
+     *
+     * This is the call site that matters. One agent step is `maxIterations`
+     * provider calls, and a five-agent team multiplies that again — the plain
+     * `llm` node is a rounding error beside it.
+     */
+    private val capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
+    /**
+     * Assemble the prompt under a budget instead of concatenating it.
+     *
+     * Mirrors AGENT_CONTEXT_ASSEMBLY_ENABLED without reading process env, which
+     * is what lets a test drive both states — the same seam `reconstructionEnabled`
+     * and `delegationEnabled` use, for the same reason.
+     */
+    private val contextAssemblyEnabled: Boolean =
+        AgentPromptBuilder.CONTEXT_ASSEMBLY_ENABLED,
 ) {
     private val log = logger()
     private val mapper = jacksonObjectMapper()
@@ -672,8 +689,9 @@ class AgentBrainRunner(
            than being stubbed out and therefore untested. Null in production, where
            LlmNodeExecutor's own default (the shared, bounded OutboundHttp client)
            applies and this construction is byte-for-byte what it always was. */
-        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore)
-        else LlmNodeExecutor(connectionResolver, eventStore, httpClient = llmHttpClient)
+        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity)
+        else LlmNodeExecutor(connectionResolver, eventStore, httpClient = llmHttpClient,
+            capacity = capacity)
     }
 
     data class RunResult(
@@ -970,9 +988,17 @@ class AgentBrainRunner(
                 /* Flag off, `built.text` is byte-for-byte what buildUserPrompt has
                    always returned and `built.assembly` is null. On, the same
                    sections are assembled under a budget and every drop is named. */
-                val built = AgentPromptBuilder.buildUserPromptDetailed(config, state)
+                /* §12.5 — the team's character budget, not the global default.
+                   Every agent in a team runs through this loop with that team's
+                   limits, so passing it here covers the entry member, every
+                   delegated child and every inline hop without a per-call-site
+                   decision about which budget applies. */
+                val built = AgentPromptBuilder.buildUserPromptDetailed(
+                    config, state, charBudget = teamLimits.maxContextChars,
+                    enabled = contextAssemblyEnabled)
                 val userPrompt = built.text
                 built.assembly?.let { iterSpan?.contextAttributesJson = it.attributesJson() }
+                built.assembly?.let { reportContextBudget(config, state, it) }
 
                 val llmResult = callLlm(config, systemPrompt, userPrompt, runtimeCtx)
                 budget.addTokens(llmResult.tokensUsed, llmResult.estimatedCostCents)
@@ -2726,6 +2752,39 @@ class AgentBrainRunner(
         if (raw.isNullOrBlank()) emptyMap()
         else runCatching { mapper.readValue(raw, Map::class.java) as Map<String, Any?> }
             .getOrDefault(emptyMap())
+
+    /**
+     * Announce a context-budget breach, once per iteration that has one.
+     *
+     * Both halves of a breach are reported, and they are different problems:
+     *
+     *   • `truncated` — sections were dropped to fit. The run is fine and the
+     *     model saw less than it could have. Worth knowing when an answer looks
+     *     thin.
+     *   • `overBudget` — the PROTECTED sections alone exceeded the budget, so the
+     *     budget was not enforced at all. [ContextAssembler] refuses to cut the
+     *     objective or the inputs, which is right, but it means the limit somebody
+     *     configured is not being honoured and they should hear about it rather
+     *     than discover it from a provider error.
+     */
+    private fun reportContextBudget(
+        config: AgentBrainConfig,
+        state: AgentLoopState,
+        a: com.vectorbea.worker.agents.context.ContextAssembler.Assembled,
+    ) {
+        if (!a.truncated && !a.overBudget) return
+        val summary = if (a.overBudget)
+            "The task and its inputs alone are ${a.charsUsed} characters, over the " +
+            "${a.charBudget}-character team budget; nothing was dropped"
+        else
+            "Context trimmed to fit ${a.charBudget} characters — dropped " +
+            a.droppedSections.joinToString(", ")
+        emitEvent(config, RunEventStore.EventType.AGENT_CONTEXT_BUDGET_EXCEEDED,
+            status = "warning", summary = summary,
+            metadataJson = runCatching {
+                mapper.writeValueAsString(a.spanAttributes() + mapOf("iteration" to state.iteration))
+            }.getOrNull())
+    }
 
     // ── Event emission ────────────────────────────────────────────────────────
 

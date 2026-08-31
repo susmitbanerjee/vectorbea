@@ -97,6 +97,13 @@ class RunProcessor(
     private val spanWriter: com.vectorbea.worker.events.SpanWriter? = null,
     /** Computes is_root_cause once, at terminalisation. Null disables attribution. */
     private val rootCause: com.vectorbea.worker.events.RootCauseAttribution? = null,
+    /**
+     * Ships the finished trace to the workspace's own OTLP endpoint. §9.
+     *
+     * Null disables it, which is the shape every test uses and the shape of any
+     * deployment with OTEL_TRACE_EXPORT_ENABLED unset.
+     */
+    private val traceExporter: com.vectorbea.worker.events.otel.RunTraceExporter? = null,
 ) {
 
     /**
@@ -119,6 +126,27 @@ class RunProcessor(
             sourceRunId = source,
             replayUntilNode = run.replayUntilNode,
         ))
+    }
+
+    /**
+     * Export the finished trace, if a workspace asked for it.
+     *
+     * The workspace id is read here rather than threaded down, because this runs
+     * once per terminal run and the row is already hot from the update above.
+     */
+    private fun exportTrace(runId: java.util.UUID) {
+        val exporter = traceExporter ?: return
+        val workspaceId = runCatching {
+            dataSource.connection.use { c ->
+                c.prepareStatement("SELECT workspace_id FROM agent_runs WHERE id = ?").use { st ->
+                    st.setObject(1, runId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) rs.getObject(1) as java.util.UUID else null
+                    }
+                }
+            }
+        }.getOrNull() ?: return
+        exporter.exportAsync(runId, workspaceId)
     }
 
     /** The run's class, for per-class limit checks at claim time. */
@@ -1267,6 +1295,28 @@ class RunProcessor(
                  * what the reconciler's `children_terminal` arm looks for.
                  */
                 if (updated) runCatching { childDispatcher?.onChildTerminal(runId) }
+                /*
+                 * ── SHIP THE TRACE, ONCE, AFTER THE TREE IS COMPLETE ────────
+                 *
+                 * Behind the same CAS as everything else here, so a redelivered
+                 * message cannot export the same trace twice. The exporter itself
+                 * returns immediately for a run that has a parent — a child is
+                 * shipped as part of its parent's tree, and by the time the parent
+                 * reaches this line every child is already terminal.
+                 *
+                 * `exportAsync`, not `exportRun`: the HTTP round trip goes to
+                 * somebody else's collector, and putting it on the completion of
+                 * every run would let a slow collector slow the fleet. The queue
+                 * behind it is bounded and drops rather than blocking.
+                 *
+                 * `runCatching` is still not defensive habit: invariant 7 says
+                 * observability never blocks execution, and a customer's OTLP
+                 * endpoint being down must not turn a succeeded run into a failed
+                 * one. The exporter swallows its own errors too; this is the second
+                 * wall, because the first one is in code that a customer's config
+                 * can reach.
+                 */
+                if (updated) runCatching { exportTrace(runId) }
                 updated
             }
         }

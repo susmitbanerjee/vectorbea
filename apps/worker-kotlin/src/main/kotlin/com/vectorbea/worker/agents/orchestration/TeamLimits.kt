@@ -33,6 +33,23 @@ data class TeamLimits(
      * minutes" mean "no team may wait for a person".
      */
     val maxDurationMs: Long = DEFAULT_MAX_DURATION_MS,
+    /**
+     * Hard character budget on the assembled context, per §12.5.
+     *
+     * ── WHY THIS BELONGS TO THE TEAM AND NOT THE AGENT ──────────────────────
+     * Context growth is a property of the CHAIN, not of any member of it. Left
+     * alone, a five-hop handoff carries five accumulated contexts, and every
+     * agent in that chain is individually behaving reasonably — each one only
+     * added its own summary. The place where the total can be bounded is the
+     * team, which is the only thing that knows there is a chain.
+     *
+     * Breaching it is a BUDGET EVENT, not a failure: [ContextAssembler] drops
+     * the lowest-priority sections to fit and records what it dropped, and the
+     * run continues with a smaller context. What must never happen is that it
+     * happens quietly — an agent silently working from half its context is the
+     * failure mode this whole section exists to make visible.
+     */
+    val maxContextChars: Int = DEFAULT_MAX_CONTEXT_CHARS,
 ) {
     companion object {
         val DEFAULT_MAX_DEPTH: Int =
@@ -44,6 +61,16 @@ data class TeamLimits(
         val DEFAULT_MAX_DURATION_MS: Long =
             System.getenv("AGENT_TEAM_MAX_DURATION_MS")?.toLongOrNull() ?: 600_000L
 
+        /**
+         * Falls back to the single-agent budget, so a team with no override
+         * behaves exactly as one agent does today. A team-wide default that
+         * differed from the agent default would change every existing team's
+         * prompt the moment this shipped.
+         */
+        val DEFAULT_MAX_CONTEXT_CHARS: Int =
+            System.getenv("AGENT_TEAM_MAX_CONTEXT_CHARS")?.toIntOrNull()?.coerceAtLeast(1_000)
+                ?: com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder.CONTEXT_CHAR_BUDGET
+
         /** Read overrides off a node's config, falling back to the defaults. */
         fun fromNodeConfig(config: Map<String, Any?>): TeamLimits = TeamLimits(
             maxDepth = (config["maxDepth"] as? Number)?.toInt()?.coerceIn(1, 10) ?: DEFAULT_MAX_DEPTH,
@@ -52,6 +79,8 @@ data class TeamLimits(
             maxHandoffsPerPair = (config["maxHandoffsPerPair"] as? Number)?.toInt()?.coerceIn(1, 50)
                 ?: DEFAULT_MAX_HANDOFFS_PER_PAIR,
             maxDurationMs = (config["maxTeamDurationMs"] as? Number)?.toLong() ?: DEFAULT_MAX_DURATION_MS,
+            maxContextChars = (config["maxContextChars"] as? Number)?.toInt()?.coerceAtLeast(1_000)
+                ?: DEFAULT_MAX_CONTEXT_CHARS,
         )
     }
 }

@@ -92,6 +92,21 @@ class RuntimeContext(
      * repeating. It is not a second budget, and it is not a scheduler.
      */
     val tickDeadlineAtMs: Long? = null,
+    /**
+     * Which queue lane this run came off, or null when unknown.
+     *
+     * ── WHY A NODE NEEDS TO KNOW ────────────────────────────────────────────
+     * §12.4's provider token bucket gives interactive lanes first draw: batch
+     * work may only draw a bucket down to a reserved floor, interactive may draw
+     * it to zero. That is a property of the RUN, decided at claim time, and the
+     * only object every layer already receives is this one.
+     *
+     * Advisory and read-only, like [tickDeadlineAtMs]. Nothing decides a run
+     * outcome from it, and a null lane behaves as batch — the conservative
+     * reading, since mislabelling batch work as interactive is what would let a
+     * fan-out eat the reserve it exists to protect.
+     */
+    val executionLane: com.vectorbea.worker.queue.WorkerJobType? = null,
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()
@@ -261,6 +276,9 @@ class RuntimeContext(
             graph = graph,
             debugMode = debugMode,
             forceReexecuteNodeIds = forceReexecuteNodeIds,
+            /* A forked branch is the same run on the same lane. Dropping it here
+               would silently demote every parallel branch to batch. */
+            executionLane = executionLane,
         )
         child.sequence = sequence
         // Copy parent outputs and edge selections so child can reference prior steps

@@ -138,11 +138,18 @@ class EventWriteLoadTest {
             while (!stop.get()) {
                 runCatching {
                     ds.connection.use { c ->
-                        c.prepareStatement("SELECT count(*) FROM pg_locks WHERE NOT granted")
-                            .use { it.executeQuery().use { rs -> rs.next(); ungranted += rs.getInt(1) } }
+                        /* Two views of the same thing, unioned: an ungranted lock
+                           request, and a backend parked in a Lock wait event. The
+                           second catches tuple-level waits that pg_locks reports as
+                           granted on the transaction id rather than the row. */
+                        c.prepareStatement(
+                            "SELECT (SELECT count(*) FROM pg_locks WHERE NOT granted) " +
+                            "     + (SELECT count(*) FROM pg_stat_activity " +
+                            "         WHERE wait_event_type = 'Lock' AND pid <> pg_backend_pid())"
+                        ).use { it.executeQuery().use { rs -> rs.next(); ungranted += rs.getInt(1) } }
                     }
                 }
-                Thread.sleep(10)
+                Thread.sleep(2)
             }
         }.apply { isDaemon = true }
 
@@ -152,11 +159,23 @@ class EventWriteLoadTest {
         fun peak(): Int = ungranted.toList().maxOrNull() ?: 0
     }
 
-    private fun tupUpd(ds: DataSource): Long =
-        ds.connection.use { c ->
+    /**
+     * Cumulative row updates on `agent_runs`.
+     *
+     * `pg_stat_clear_snapshot()` first, and a pause before the second read: the
+     * statistics collector is asynchronous and a session caches its snapshot for
+     * the whole transaction, so reading it naively reports the value from before
+     * the load ran — which looks like "the change eliminated all row churn" and
+     * is simply a stale number.
+     */
+    private fun tupUpd(ds: DataSource, settle: Boolean = false): Long {
+        if (settle) Thread.sleep(1_200)
+        return ds.connection.use { c ->
+            c.prepareStatement("SELECT pg_stat_clear_snapshot()").use { it.executeQuery().use { } }
             c.prepareStatement("SELECT COALESCE(n_tup_upd,0) FROM pg_stat_all_tables WHERE relname='agent_runs'")
                 .use { it.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else 0L } }
         }
+    }
 
     private class Result(
         val label: String,
@@ -268,7 +287,7 @@ class EventWriteLoadTest {
             }
         }
         return Result(label, wall, latencies.toLongArray(), sampler.mean(), sampler.peak(),
-            tupUpd(ds) - before, written)
+            tupUpd(ds, settle = true) - before, written)
     }
 
     @Test

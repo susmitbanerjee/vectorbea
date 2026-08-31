@@ -334,6 +334,21 @@ open class RunEventStore(
 
         /** Loop state was rebuilt; the step resumed mid-loop instead of replaying. */
         AGENT_LOOP_RECONSTRUCTED("AGENT_LOOP_RECONSTRUCTED"),
+
+        /**
+         * The assembled context hit the team's `maxContextChars`. §12.5.
+         *
+         * A BUDGET event, deliberately, and not a failure: sections were dropped
+         * to fit and the iteration ran. It is named separately from
+         * AGENT_BUDGET_EXCEEDED because that one is terminal — it stops the loop —
+         * and this one is not, and a timeline that graded them the same would
+         * paint a stopped run over a working one.
+         *
+         * The dropped sections and the char counts travel in the metadata, and the
+         * same numbers are on the iteration span, so the trace and the timeline
+         * cannot disagree about what the model was shown.
+         */
+        AGENT_CONTEXT_BUDGET_EXCEEDED("AGENT_CONTEXT_BUDGET_EXCEEDED"),
     }
 
     /**

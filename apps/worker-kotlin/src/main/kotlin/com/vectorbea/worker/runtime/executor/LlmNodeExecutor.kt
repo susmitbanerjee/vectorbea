@@ -73,6 +73,11 @@ class LlmNodeExecutor(
      * Layer 0 - which is why production always supplies it.
      */
     private val contracts: com.vectorbea.worker.contract.ContractValidator? = null,
+    /**
+     * Shared provider token bucket. §12.4. Null disables it entirely, which is
+     * the behaviour of every deployment before it existed.
+     */
+    private val capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -274,6 +279,37 @@ class LlmNodeExecutor(
             )
         }
 
+        /* ── CAPACITY, BEFORE THE CALL ──────────────────────────────────────
+           Reserved on an ESTIMATE, because the real cost is only known from the
+           response and a bucket that counts afterwards limits nothing: a hundred
+           concurrent calls would all pass the check and then all report their
+           spend. Settled below against what the call actually used.
+
+           Placed after the replay branch on purpose — a replay makes no provider
+           call, so charging it would throttle a run that costs nothing. */
+        val lease: com.vectorbea.worker.net.ProviderCapacityBucket.Lease? =
+            when (val c = capacity?.reserve(provider, model, context.workspaceId,
+                estimateTokens(messages, maxTokens),
+                interactive = context.executionLane ==
+                    com.vectorbea.worker.queue.WorkerJobType.AGENT_INTERACTIVE)) {
+                is com.vectorbea.worker.net.ProviderCapacityBucket.Outcome.Granted -> c.lease
+                is com.vectorbea.worker.net.ProviderCapacityBucket.Outcome.Exhausted -> {
+                    /* Not a failure and not a provider error: nothing has been sent.
+                       Throttled releases the permit and re-enqueues on a timer, so
+                       this costs a yield — exactly what §12.4 asks for. */
+                    WorkerMetrics.providerCapacityExhaustedTotal.inc(provider, model)
+                    emitEvent(context, node.id, EventType.NODE_FAILED, "throttled",
+                        title = "Waiting for $provider capacity",
+                        summary = "The workspace's $model budget is spent; retrying in " +
+                            "${c.retryAfterMs}ms")
+                    log.info("[llm] capacity exhausted [provider={}, model={}, retryAfterMs={}]",
+                        provider, model, c.retryAfterMs)
+                    return NodeResult.Throttled(provider, c.retryAfterMs,
+                        "Waiting for $provider capacity to free up.")
+                }
+                else -> null
+            }
+
         val result = try {
             resolved.secret.use { secret ->
                 val apiKey = secret?.let { sv ->
@@ -296,11 +332,16 @@ class LlmNodeExecutor(
                     .also { circuit?.onSuccess(connectionId) }
             }
         } catch (e: ConnectionCircuit.CircuitOpenException) {
+            lease?.let { capacity?.release(it) }
             recordCall("error", error = "circuit open")
             emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
                 title = "Connection paused", summary = e.message)
             return NodeResult.Failed(e.message ?: "Connection temporarily unavailable")
         } catch (e: ProviderThrottledException) {
+            /* The provider refused, so it spent nothing on our behalf — give the
+               whole reservation back. Keeping it would compound the outage: the
+               bucket would stay drawn for a call that never happened. */
+            lease?.let { capacity?.release(it) }
             // Hand the scheduling decision up. Suspending releases the permit;
             // sleeping here would hold it for the provider's whole backoff.
             recordCall("throttled", error = "provider rate limited")
@@ -314,6 +355,12 @@ class LlmNodeExecutor(
                 decision.delayMs)
             return NodeResult.Throttled(provider, decision.delayMs, decision.userMessage(provider))
         } catch (e: LlmCallException) {
+            /* A failed call may still have consumed input tokens at the provider.
+               Returning HALF is a deliberate compromise over the two wrong
+               answers: returning everything under-counts a real spend, and
+               returning nothing over-counts a request that never reached the
+               model. The bucket self-corrects within a refill window either way. */
+            lease?.let { capacity?.settle(it, it.reserved / 2) }
             val durationMs = System.currentTimeMillis() - startMs
             recordCall("error", error = e.message?.take(500))
             circuit?.onFailure(connectionId, e.message ?: "LLM call failed")
@@ -321,6 +368,12 @@ class LlmNodeExecutor(
                 node.id, provider, durationMs, e.message)
             return NodeResult.Failed("LLM call failed for node '${node.id}': ${e.message}")
         }
+
+        /* Settle against the real cost. A surplus goes back for the next caller;
+           a shortfall is debited and can drive the bucket negative, which is a
+           legitimate state — an estimate that was badly low SHOULD make the next
+           caller wait. */
+        lease?.let { capacity?.settle(it, (result.tokenCount ?: 0).toLong()) }
 
         val durationMs = System.currentTimeMillis() - startMs
         val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }
@@ -881,6 +934,26 @@ class LlmNodeExecutor(
      * Estimate USD cost from token count and model name.
      * Rates are conservative approximations — accurate billing requires provider invoices.
      */
+    /**
+     * A pre-call token estimate for the capacity bucket.
+     *
+     * Four characters per token is the standard rough figure for English prose
+     * and is wrong for code, for CJK and for anything heavily punctuated. It does
+     * not need to be right: the reservation is settled against the real number as
+     * soon as the response arrives, so the estimate only has to be the right
+     * ORDER for the few hundred milliseconds a call is in flight. A tokeniser per
+     * provider would be more accurate and would buy nothing.
+     *
+     * `maxTokens` is added because the completion has not been generated yet and
+     * the provider counts it against the same limit. Its default matches the one
+     * `callAnthropic` sends when the node sets none, so the estimate does not
+     * silently assume zero output.
+     */
+    internal fun estimateTokens(messages: List<Map<String, Any>>, maxTokens: Int?): Long {
+        val chars = messages.sumOf { (it["content"] as? String)?.length ?: 0 }
+        return (chars / 4L) + (maxTokens ?: 1024).toLong()
+    }
+
     private fun estimateCostUsd(tokens: Int, model: String): Double {
         val usdPerMillion = when {
             model.contains("gpt-4o-mini", ignoreCase = true) -> 0.60   // $0.60/M

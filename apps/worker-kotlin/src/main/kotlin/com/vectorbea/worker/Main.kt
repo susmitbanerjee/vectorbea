@@ -212,6 +212,21 @@ fun main() {
     // touching the database.
     val confidenceGating = com.vectorbea.worker.confidence.ConfidenceGating(database.dataSource)
 
+    // Resolves a run's stored execution class — for continuation routing, and for
+    // telling the capacity bucket which runs may draw below the interactive floor.
+    val runClassLookup = com.vectorbea.worker.queue.RunClassLookup(database.dataSource)
+
+    /*
+     * §12.4 — the shared provider token bucket.
+     *
+     * Wired unconditionally and INERT unless PROVIDER_CAPACITY_ENABLED is set: a
+     * disabled bucket returns NotApplicable without touching Redis, so this costs
+     * one object and changes nothing until an operator turns it on. It sits in
+     * front of the existing circuit breaker and 429 handling rather than replacing
+     * either — those stay the backstop for a limit this does not know about.
+     */
+    val providerCapacity = com.vectorbea.worker.net.ProviderCapacityBucket(redis.commands)
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -232,6 +247,8 @@ fun main() {
         recorder           = modelCallRecorder,
         contracts          = contractValidator,
         confidence         = confidenceGating,
+        capacity           = providerCapacity,
+        runClassLookup     = runClassLookup,
     )
 
     /**
@@ -304,9 +321,6 @@ fun main() {
         workerId = config.workerId,
     )
 
-    // Resolves a run's stored execution class for continuation routing.
-    val runClassLookup = com.vectorbea.worker.queue.RunClassLookup(database.dataSource)
-
     /*
 
      * The dispatched-child transport. §11.
@@ -350,6 +364,24 @@ fun main() {
     )
 
 
+    /*
+     * §9 — per-workspace OTLP export of finished run traces.
+     *
+     * Inert unless OTEL_TRACE_EXPORT_ENABLED=true AND the workspace has an enabled
+     * `workspace_otel_exports` row. Distinct from `Tracing.init` above, which
+     * instruments this worker for OUR observability: these spans go to the
+     * customer's stack, and mixing the two destinations would leak our
+     * infrastructure spans into their Tempo and their run ids into ours.
+     */
+    val traceExportConfig = com.vectorbea.worker.events.otel.TraceExportConfig(
+        database.dataSource, secretService)
+    val runTraceExporter = com.vectorbea.worker.events.otel.RunTraceExporter(
+        dataSource = database.dataSource,
+        config = traceExportConfig,
+        sampler = com.vectorbea.worker.events.otel.RunTraceExporter
+            .samplerForExport(database.dataSource),
+    )
+
     val processor = RunProcessor(
         dataSource      = database.dataSource,
         eventStore      = eventStore,
@@ -366,6 +398,7 @@ fun main() {
         replayRuntimeFactory = replayRuntimeFactory,
         spanWriter         = spanWriter,
         rootCause          = com.vectorbea.worker.events.RootCauseAttribution(database.dataSource),
+        traceExporter      = runTraceExporter,
         childDispatcher = childRunDispatcher,
         // Durably re-enqueue continuation jobs after a yield (survives crash).
         // Routed to the run's OWN class stream, read from agent_runs — a
@@ -586,6 +619,19 @@ fun main() {
     val partitionMaintenance = com.vectorbea.worker.durable.PartitionMaintenance(
         dataSource = database.dataSource,
         redisCommands = redis.commands,
+        /* The warm tier. Null unless TRACE_ARCHIVE_DIR names somewhere to write,
+           and when it is null the drop behaves exactly as it did before §12.1 —
+           a deployment without object storage still needs its retention job. */
+        archiver = com.vectorbea.worker.durable.archive.archiveStoreFromEnv()
+            .takeIf { it !is com.vectorbea.worker.durable.archive.UnconfiguredArchiveStore }
+            ?.let { com.vectorbea.worker.durable.archive.TraceArchiver(
+                database.dataSource, it,
+                /* Sampling is a warm-tier decision, made once the run has finished
+                   and every fact about it is known. See TraceSampler for why it is
+                   not done at write time. Keeps everything until an operator lowers
+                   `trace_sample_rate` for a workspace. */
+                sampler = com.vectorbea.worker.durable.archive.TraceSampler
+                    .fromDatabase(database.dataSource)) },
     )
     partitionMaintenance.start()
 
@@ -664,6 +710,14 @@ fun main() {
         tenantLimiter.close()
         tenantDbDispatcher.close()
         dbPoolManager.close()
+
+        /* Drain in-flight exports first, THEN close the pools they are writing
+           to — the other order aborts a request that was about to succeed. */
+        runCatching { runTraceExporter.stop() }
+
+        /* Close the OTLP exporters' HTTP pools. Each holds a connection pool and
+           daemon threads; leaving them open delays the JVM's exit for no benefit. */
+        runCatching { traceExportConfig.close() }
 
         /* Flush buffered events BEFORE Redis and the pool close. A batched
            event still in the deque at this point is one the timeline will never

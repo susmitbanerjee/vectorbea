@@ -31,6 +31,18 @@ import javax.sql.DataSource
  * maintained is the one way this work can lose data that mattered. With
  * `PARTITION_DROP_ENABLED` unset, expired partitions are only NAMED in the log, so
  * a cycle of logs can be read before anything is destroyed.
+ *
+ * ── AND, SINCE §12.1, IT IS GATED ON THE EXPORT ─────────────────────────────
+ * The tiering story is hot 7 days in Postgres, warm 90 days in object storage,
+ * cold export-only. That only holds if the export happens BEFORE the drop, and a
+ * drop decided purely on age does not know whether it did. So when a
+ * [TraceArchiver] is wired in, this refuses to drop anything for a table that
+ * still has an un-exported partition past the hot window: an exporter that has
+ * been failing for a week stops the drop instead of racing it.
+ *
+ * The check is deliberately on the ARCHIVER's queue and not on "every partition
+ * has a ledger row" — the current month never does and never should, so the
+ * latter would refuse every drop forever, which reads as a bug and gets disabled.
  */
 class PartitionMaintenance(
     private val dataSource: DataSource,
@@ -44,6 +56,15 @@ class PartitionMaintenance(
      */
     private val dropEnabled: Boolean =
         System.getenv("PARTITION_DROP_ENABLED")?.lowercase() == "true",
+    /**
+     * Exports closed partitions to the warm tier before they are dropped.
+     *
+     * Null means no tiering: the drop then behaves exactly as it did before
+     * §12.1, which is the correct behaviour for a deployment that has not
+     * configured object storage — the alternative is refusing to ever drop, and
+     * a retention job that never runs fills a disk.
+     */
+    private val archiver: com.vectorbea.worker.durable.archive.TraceArchiver? = null,
 ) {
     private val log = logger()
     private val running = AtomicBoolean(false)
@@ -76,10 +97,21 @@ class PartitionMaintenance(
         executor.shutdown()
     }
 
-    private fun tick() {
+    internal fun tick() {
         if (!running.get()) return
         if (!acquireLock()) return
         try {
+            /* Export first, drop second. Both inside the same Redis lock, so two
+               workers cannot export the same partition concurrently — the write is
+               atomic and the ledger upsert is idempotent, so a race would be
+               survivable, but it would also double the egress for nothing. */
+            val exported = archiver?.let { a -> runCatching { a.runOnce() }.getOrElse {
+                log.error("[archive] export pass failed: {}", it.message); emptyList() } }
+            if (!exported.isNullOrEmpty()) {
+                log.info("[archive] exported {} partition(s): {}", exported.size,
+                    exported.joinToString { "${it.partition}(${it.rows} rows)" })
+            }
+
             TABLES.forEach { table ->
                 if (!isPartitioned(table)) {
                     /* Not partitioned is a legitimate state, not a fault: V028
@@ -118,7 +150,23 @@ class PartitionMaintenance(
             }
     }
 
-    private fun reportOrDropExpired(table: String) {
+    internal fun reportOrDropExpired(table: String) {
+        /* The export gate. Anything past the hot window that has not reached the
+           warm tier is, by definition, older than the drop cutoff would eventually
+           make it — so dropping now would destroy the only copy. */
+        val unexported = archiver?.let { runCatching { it.due(table) }.getOrElse {
+            /* A gate that fails OPEN is not a gate. If we cannot tell whether the
+               data is safe, it is not safe. */
+            log.error("[archive] cannot determine export state for {} — refusing to drop: {}",
+                table, it.message)
+            listOf(Triple("unknown", java.time.LocalDate.EPOCH, java.time.LocalDate.EPOCH))
+        } }
+        if (!unexported.isNullOrEmpty()) {
+            log.warn("[partitions] {} has {} un-exported partition(s) past the hot window " +
+                "({}) — NOT dropping anything for this table until they reach the warm tier",
+                table, unexported.size, unexported.joinToString { it.first })
+            return
+        }
         if (!dropEnabled) {
             /* Name what WOULD go, without touching it. Reads the same catalog the
                drop function does, so the log is the drop's dry run rather than an
@@ -149,7 +197,19 @@ class PartitionMaintenance(
             dataSource.connection.use { conn ->
                 conn.prepareStatement("SELECT * FROM ${table}_drop_expired_partitions()").use { st ->
                     st.executeQuery().use { rs ->
-                        while (rs.next()) log.warn("[partitions] dropped {}", rs.getString(1))
+                        val dropped = buildList { while (rs.next()) add(rs.getString(1)) }
+                        dropped.forEach { log.warn("[partitions] dropped {}", it) }
+                        /* Stamp the ledger. "Exported" and "no longer in Postgres" are
+                           different questions during an incident, and after the drop
+                           the ledger row is the only place either can be answered. */
+                        if (dropped.isNotEmpty()) conn.prepareStatement(
+                            "UPDATE run_trace_archives SET dropped_at = now() " +
+                            "WHERE source_table = ? AND partition_name = ANY(?)"
+                        ).use { up ->
+                            up.setString(1, table)
+                            up.setArray(2, conn.createArrayOf("text", dropped.toTypedArray()))
+                            up.executeUpdate()
+                        }
                     }
                 }
             }

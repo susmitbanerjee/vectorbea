@@ -38,6 +38,8 @@ class NodeExecutorRegistry(
     replay: com.vectorbea.worker.replay.ReplayContext? = null,
     /** Supplies a node's output contract, so a declared schema enables Layer 0. */
     contracts: com.vectorbea.worker.contract.ContractValidator? = null,
+    /** Shared provider token bucket. §12.4. Null disables it. */
+    capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
 ) {
 
     private val executors: Map<NodeType, NodeExecutor> = mapOf(
@@ -52,13 +54,17 @@ class NodeExecutorRegistry(
         // Connector executors (real I/O)
         NodeType.LLM       to LlmNodeExecutor(connectionResolver, eventStore,
                                   circuit = circuit, recorder = recorder, replay = replay,
-                                  contracts = contracts),
+                                  contracts = contracts, capacity = capacity),
         NodeType.HTTP      to HttpNodeExecutor(connectionResolver, eventStore, sideEffects = sideEffects),
         NodeType.DB_QUERY  to DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore),
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),
         // Reference executors — look up tool/agent definition from DB at runtime
         NodeType.TOOL      to ToolNodeExecutor(dataSource, connectionResolver, dbPoolManager, eventStore),
-        NodeType.AGENT     to AgentNodeExecutor(dataSource, connectionResolver, eventStore, dbPoolManager),
+        /* The agent path matters MORE than the plain LLM node here: an agent
+           loop is where one run becomes twenty provider calls, which is the
+           multiplier §12.4 exists for. */
+        NodeType.AGENT     to AgentNodeExecutor(dataSource, connectionResolver, eventStore,
+                                  dbPoolManager, capacity = capacity),
         /* A TYPE ADDITION and nothing more. `agent` nodes keep their executor
            unchanged, and the two are siblings over the same primitives rather
            than one type with a branch inside it. */

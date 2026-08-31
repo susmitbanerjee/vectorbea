@@ -484,6 +484,17 @@ object WorkerMetrics {
         // counter renderer, so the name here stops at `provider_429`.
         "provider_429", "Runs suspended after a provider 429", listOf("provider"))
 
+    /**
+     * Provider calls the capacity bucket refused. §12.4.
+     *
+     * Separate from `provider_429`, and the difference is the point: a 429 is the
+     * provider refusing us, this is us refusing ourselves BEFORE the request. The
+     * first rising while the second stays flat means the bucket is set too high.
+     */
+    internal val providerCapacityExhaustedTotal = WCounter(
+        "provider_capacity_exhausted", "Calls deferred by the local token bucket",
+        listOf("provider", "model"))
+
     /** Runs claimed, by class. */
     internal val claimedTotal = WCounter("claimed", "Runs claimed from Postgres", listOf("class"))
 
@@ -758,7 +769,7 @@ object WorkerMetrics {
             claimDurationSeconds, claimedTotal, claimReclaimedTotal, claimWakeupTotal,
             claimReservedLaneTotal, ceilingBreachTotal,
             circuitOpenedTotal, circuitClosedTotal, circuitRejectedTotal,
-            providerThrottleSuspendTotal,
+            providerThrottleSuspendTotal, providerCapacityExhaustedTotal,
             fencedWriteTotal, sideEffectDedupeTotal, sideEffectUndeterminedTotal,
             deadLetterTotal, leaseStolenTotal,
             tenantDbSlotsTotal, tenantDbSlotsActive, tenantDbQueueDepth, tenantDbRejectedTotal,

@@ -1087,6 +1087,65 @@ versus today's non-agent workflows.
 Trace writes must never block or fail a run. A dropped span is a degraded
 debugging experience; a blocked span write is an outage.
 
+#### 12.1.1 Tiering — built (P13)
+
+Rotation already existed (`PartitionMaintenance`, V028, V041) and already dropped
+rather than DELETEd. What was missing was the **order**: the drop decided purely
+on age and had no idea whether the data had been exported anywhere.
+
+| Piece | Where |
+|---|---|
+| Export | `TraceArchiver` — one closed monthly partition at a time, streamed with a server-side cursor, never materialised |
+| Bytes | `ArchiveStore` → `FilesystemArchiveStore` (`TRACE_ARCHIVE_DIR`). An S3 implementation is a class, not a migration |
+| Format | `ArchiveEncoder` → `NdJsonGzEncoder` |
+| Ledger | `run_trace_archives` (V047) — row count, byte count, SHA-256, tier, `dropped_at` |
+| Gate | `PartitionMaintenance.reportOrDropExpired` refuses to drop **any** partition of a table that still has an un-exported one past the hot window |
+
+The gate is on the archiver's own queue (`TraceArchiver.due`), not on "every
+partition has a ledger row" — the current month never has one and never should,
+so the latter would refuse every drop forever, read as a bug, and get switched
+off. It fails **closed**: if the export state cannot be determined, nothing is
+dropped.
+
+Windows: `TRACE_HOT_DAYS` (7), `TRACE_WARM_DAYS` (90). A partition is eligible
+for export once its whole month is past the hot window — the unit of eviction is
+a partition, so a snapshot taken while the month is still being appended to would
+silently miss its tail.
+
+**Parquet is not what ships, and this is the honest reason.** `parquet-avro`
+drags in the Hadoop client tree, and a new dependency is a question rather than a
+decision. The encoder seam is real and the `format` column records which encoder
+wrote each object, so a bucket holding both stays readable; `ParquetEncoder` is a
+class next to `NdJsonGzEncoder` the day the dependency is approved. NDJSON+gzip
+is read directly by `COPY`, DuckDB, Athena, BigQuery and Spark in the meantime.
+
+#### 12.1.2 Sampling — built (P13), and NOT at write time
+
+`TraceSampler`, applied at the **archive boundary**, deciding which runs' spans
+reach the warm tier.
+
+Write-time sampling was implemented and rejected, because it cannot satisfy the
+rule that matters. "Never sample a run that had a failed step, an approval or a
+budget clamp" is unsatisfiable at `SpanWriter.emit`: the span that proves a run
+was interesting arrives *after* the spans that would already have been dropped. A
+run can look ordinary for twenty-nine minutes and fail in the thirtieth, and no
+latch, grace window or buffer recovers what was discarded at minute three.
+
+Deciding once the run has finished makes the rule absolute, and keeps the other
+§12.1 rule intact — nothing is ever DELETEd from Postgres. The cost, stated
+plainly: **this does not reduce span write volume.** Batching, payload offload
+and content addressing are what do that.
+
+The rules, in order, every KEEP unconditional: younger than
+`TRACE_SAMPLE_GRACE_SECONDS` (60) → keep; status is anything but `succeeded` →
+keep (so a status added later is kept, not silently discarded); a failed step, an
+approval or a budget clamp → keep; shorter than
+`TRACE_SAMPLE_LONG_RUN_SECONDS` (60), or of unknown duration → keep; otherwise
+hash the run id against `workspace_usage_policies.trace_sample_rate` (V048,
+default 1.000). The hash, not a coin — an export that crashes is retried, and a
+random draw would produce a different file than the row count recorded beside it
+claims.
+
 ### 12.2 The event sequence lock
 
 `RunEventStore` assigns `sequence` under a `FOR UPDATE` lock on the run's
@@ -1107,6 +1166,61 @@ Two changes, in order:
 Spans do not need a global sequence at all — they have `parent_span_id` and
 timestamps, which is enough to build the tree. Keep sequencing for the event log
 only.
+
+#### 12.2.1 Both, built (P13)
+
+**Batching.** `RunEventStore.appendEvents(List<RunEvent>)` takes the lock once
+for N events and assigns a contiguous block. `appendEvent` is now that method
+with a list of one, so there is a single path. Behind `AGENT_EVENT_BATCH_ENABLED`
+a per-run buffer flushes at 50 events or 250 ms.
+
+The buffer applies **back-pressure, not dropping** — the opposite of `SpanWriter`,
+deliberately. A missing span is a degraded trace; a missing event is a hole in the
+timeline that `?afterSequence=` paging exposes and cannot explain, and a lost
+RUN_FAILED is an outage reported as a success. Terminal states and approval gates
+are never buffered, and a synchronous write drains the run's queue first so
+sequence order stays emission order.
+
+`appendEvent` returns `SEQ_BUFFERED` (-1) for a buffered event. No caller in the
+worker reads the return value; one that needs the number calls `appendEvents`.
+
+**The counter row.** `run_event_seq` (V046) with
+`run_events_allocate_seq(run_id, count)` — one statement that locks, advances and
+returns the block's first number. The `FOR UPDATE` on `agent_runs` is **not
+removed**; the same serialization moves to a row that carries nothing else, and
+allocation stops scanning the monthly partitions for `MAX(sequence)`.
+
+Chosen over `pg_advisory_xact_lock(hash(run_id))` for two reasons: an advisory
+lock still needs `MAX(sequence)` to find the number, and `hash(uuid)` into bigint
+collides, so two unrelated runs would serialize against each other invisibly.
+
+**`AGENT_EVENT_SEQ_COUNTER` is read identically by the worker
+(`RunEventStore.SequenceSource`) and the API (`RunEventRepository`), and defaults
+off.** A fleet with one side on the counter and the other on `MAX(sequence)`
+excludes nothing — two different rows, two writers, one duplicate sequence. Never
+set it on one service alone, not even briefly during a rollout. The seeding branch
+of the allocate function is what makes flipping it safe mid-run.
+
+**Measured** (`EventWriteLoadTest`, 100 runs × 150 events, pool of 32, eight
+competing `agent_runs` writers, local Postgres 18):
+
+| | wall | p50 | p99 | max | `agent_runs` n_tup_upd |
+|---|---|---|---|---|---|
+| run-row lock, no batch | 9192 ms | 6.39 ms | 515 ms | 2518 ms | 14 297 |
+| run-row lock + batch | 2124 ms | 0.00 ms | 381 ms | 1628 ms | 249 |
+| counter row, no batch | 6981 ms | 6.40 ms | 326 ms | 2579 ms | 14 056 |
+| counter row + batch | 1537 ms | 0.00 ms | 244 ms | 874 ms | 239 |
+
+Six times the throughput and 60× less row churn on the row that also carries
+status, the lease and the fair-queueing vtime. Two caveats worth keeping: **p50
+of 0.00 ms in the batched rows is enqueue latency, not write latency** — the
+comparable numbers are wall clock and p99. And sampled lock wait (`pg_locks` not
+granted, plus backends in a `Lock` wait event, every 2 ms) was **0.00 in all four
+passes**: with one event-writer per run, the cross-process lock is rarely
+contended in this harness, so the contention shows up as latency and row churn
+rather than as observable waits. End-to-end run latency is not measured — that
+needs Redis, a lease, a scheduler and a provider, and a number produced without
+them would be a number about the test.
 
 ### 12.3 Queue lanes
 
@@ -1158,6 +1272,43 @@ draw first; batch waits. A `Throttled` result already maps cleanly onto the
 existing timer/yield path, so exhausting the bucket costs a yield rather than an
 error.
 
+#### 12.4.1 Built (P13) — `ProviderCapacityBucket`
+
+Behind `PROVIDER_CAPACITY_ENABLED`, wired into `LlmNodeExecutor` (and therefore
+into the agent loop, which is where one run becomes twenty provider calls).
+Reserve on an estimate immediately before the call, settle against
+`result.tokenCount` after; release whole on a circuit-open or a provider 429,
+since neither consumed anything on our behalf.
+
+**Depth and rate are not the same number.** The naive bucket — depth equal to the
+per-minute limit, refilling at the per-minute limit — admits *twice* the limit in
+the first minute: the full bucket is spent at once and a whole minute of refill is
+spent on top of it. The load test found this at 19 rejections against a limit that
+should have produced none. So the configured limit is split by
+`PROVIDER_CAPACITY_BURST` (0.2): `depth = limit × burst`,
+`refill = limit × (1 − burst)` per minute. The most any 60-second window can
+admit is then `depth + refill` — exactly the limit, whatever the arrival pattern.
+Sustained throughput is `(1 − burst)` of the limit, which is the headroom every
+rate-limiting guide recommends, arrived at by construction rather than by picking
+80% and hoping.
+
+**Interactive first** is a floor, not a queue: batch may only draw down to
+`PROVIDER_CAPACITY_INTERACTIVE_FLOOR` (0.2) of depth; `AGENT_INTERACTIVE` may
+draw to zero and below. A run's lane reaches the executor as
+`RuntimeContext.executionLane`, and a null lane is treated as batch — mislabelling
+batch work as interactive is what would let a fan-out eat the reserve.
+
+**Two backends, and the second is not a test double.** `RedisCapacityBackend`
+(one Lua script per operation) for the fleet; `InProcessCapacityBackend` when
+there is no Redis, because "no Redis" is not a reason to be unmetered. The
+arithmetic lives in `BucketMath` and is transcribed into Lua; a parity test pins
+them together and **skips without a Redis**, which is a real gap — on a machine
+with no Redis the Lua is never executed by anything.
+
+Every failure mode fails **open**. A bucket that cannot be reached must not stop
+the fleet calling providers: the 429 handling that predates it is still there and
+still correct.
+
 ### 12.5 Context growth
 
 Left alone, a five-hop handoff chain carries five accumulated contexts. Mitigated
@@ -1165,6 +1316,29 @@ by three rules already stated: pass `contextRefs` not payloads (§5.2), assemble
 context under a hard budget with recorded truncation (§7), and summarise handoff
 history rather than concatenating it. Add a per-team `maxContextChars` and treat
 breaching it as a budget event, visible in the trace.
+
+#### 12.5.1 Built (P13)
+
+`TeamLimits.maxContextChars`, from node config or `AGENT_TEAM_MAX_CONTEXT_CHARS`,
+defaulting to the single-agent `AGENT_CONTEXT_CHAR_BUDGET` so a team with no
+override behaves exactly as one agent does today.
+
+It belongs to the team because context growth is a property of the **chain**, not
+of any member of it. Every agent in a five-hop handoff is behaving reasonably —
+each added only its own summary — and the team is the only thing that knows there
+is a chain. `AgentBrainRunner` passes it on every iteration, which covers the
+entry member, every delegated child and every inline hop without a per-call-site
+decision about which budget applies.
+
+A breach emits `AGENT_CONTEXT_BUDGET_EXCEEDED` and puts the same numbers on the
+iteration span. Named separately from `AGENT_BUDGET_EXCEEDED` because that one is
+terminal and this one is not: the sections were dropped, the iteration ran, and a
+timeline that graded them the same would paint a stopped run over a working one.
+Both halves are reported — `truncated` (sections dropped to fit) and `overBudget`
+(the protected sections alone exceeded the budget, so it was not enforced at
+all, and the operator should hear that from us rather than from a provider
+error). Still gated on `AGENT_CONTEXT_ASSEMBLY_ENABLED`; with assembly off the
+prompt is byte-for-byte what it was and no event fires.
 
 ### 12.6 Testing — the largest risk
 
@@ -1280,14 +1454,35 @@ Things this design deliberately leaves open, with a recommendation.
 This plan was written against the two design documents. Confirm the following
 against the source before committing to it; each one would change a decision above.
 
-1. **Tool guard key collision.** The synthetic tool node id is
-   `<stepId>:tool:<toolId>` and must be stable for approval keying. If
-   `StepExecutionGuard` uses that same id, then an agent calling the same tool
-   twice with *different arguments* in one step appears to have already completed
-   and receives the first call's cached output. If confirmed, the fix is to split
-   the keys: guard on `<stepId>:tool:<toolId>:<argsHash>`, approve on
-   `<stepId>:tool:<toolId>`. This is independent of multi-agent and should be
-   fixed regardless.
+1. **Tool guard key collision — CONFIRMED and CLOSED.**
+   The two keys were one, and it was a bug in each direction. Split, as proposed:
+
+   | Question | Key | Filed in |
+   |---|---|---|
+   | **May this run?** | `<scope>:tool:<toolId>` | `run_approvals` |
+   | **Has this already run?** | `<scope>:tool:<toolId>:<sha256(canonical args)>` | `step_executions` + `step_outputs` |
+
+   `AgentBrainRunner.toolApprovalNodeId` / `toolGuardNodeId`; `<scope>` is
+   `keyScope(config)` — the step id at depth 0, the activation id below it.
+
+   The approval key must NOT carry the arguments: a step replays from iteration 1
+   on resume and re-derives them from the model, so they need not come back byte
+   for byte. That is the same hazard the original `<stepId>:tool-<iteration>` had,
+   in slower motion — file under one name, look up under another, open a second
+   gate forever.
+
+   The guard key MUST carry them, canonicalised rather than serialised
+   (`canonicalJson`: sorted keys, `1`/`1.0`/`1.00` identical, nulls dropped, list
+   order significant). A naive hash moves between attempts, and a guard key that
+   moves stops deduplicating while still looking present.
+
+   Covered by `AgentToolGuardKeyTest` (20 tests, the derivation) and
+   `AgentToolGuardIntegrationTest` (8, the behaviour against real
+   `step_executions` and `run_approvals` — including a resume that re-derives its
+   arguments and must still find the one decision already made).
+
+   Depth on both key shapes:
+   [AGENT-BRAIN-EXECUTION.md §7](./architecture/AGENT-BRAIN-EXECUTION.md#tool-calls).
 2. **Approval resume reliability — CLOSED by `ResumeReconciler`.**
    One sweep covers all four parked statuses P0 enumerated, because all four are
    the same bug: *a durable state change followed by a best-effort enqueue.*

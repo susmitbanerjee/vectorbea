@@ -133,6 +133,19 @@ class WorkflowRuntime(
      * which is the pre-Layer-3 behaviour the unit tests rely on. Production supplies it.
      */
     private val confidence: com.vectorbea.worker.confidence.ConfidenceGating? = null,
+    /**
+     * Shared provider token bucket. §12.4. Null disables it, which is what every
+     * unit test that constructs this runtime directly wants.
+     */
+    private val capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
+    /**
+     * The run's queue lane, so a node can tell interactive work from batch.
+     *
+     * Only the capacity bucket reads it, and only to decide whether this run may
+     * draw below the reserved floor. A null lookup means every run is treated as
+     * batch — the conservative default.
+     */
+    private val runClassLookup: com.vectorbea.worker.queue.RunClassLookup? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -146,7 +159,15 @@ class WorkflowRuntime(
         recorder           = recorder,
         replay             = replay,
         contracts          = contracts,
+        capacity           = capacity,
     )
+
+    /**
+     * The lane a run was claimed on. Looked up once per run, not per node: it is
+     * a property of the claim and cannot change mid-execution.
+     */
+    private fun laneOf(runId: java.util.UUID): com.vectorbea.worker.queue.WorkerJobType? =
+        runCatching { runClassLookup?.classOf(runId) }.getOrNull()
     private val scheduler get() = GraphScheduler(WorkflowGraph(emptyList(), emptyList())) // created per-run
 
     companion object {
@@ -318,6 +339,7 @@ class WorkflowRuntime(
             debugMode = debugMode,
             tracer = tracerFor(runId, workspaceId),
             tickDeadlineAtMs = tickDeadline(),
+            executionLane = laneOf(runId),
         )
 
         // 4. Build per-run output view for cross-step template resolution
@@ -381,6 +403,7 @@ class WorkflowRuntime(
             allowLoopReconstruction = allowLoopReconstruction,
             tracer = tracerFor(runId, workspaceId),
             tickDeadlineAtMs = tickDeadline(),
+            executionLane = laneOf(runId),
         )
 
         // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)

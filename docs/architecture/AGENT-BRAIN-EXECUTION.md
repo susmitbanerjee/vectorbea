@@ -361,10 +361,20 @@ is not the enforcement.
 The synthetic node handed to `ToolNodeExecutor` is:
 
 ```
-id     = "<stepId>:tool:<toolId>"      // stable — it is also the approval key
+id     = "<stepId>:tool:<toolId>"      // stable — this is the APPROVAL key
 type   = "tool"
 config = { toolId }
 ```
+
+The idempotency guard uses a **different** key over the same call —
+`<stepId>:tool:<toolId>:<sha256(canonical args)>` — and never this one. The node
+id is what `ToolNodeExecutor` files its approval under, so it must not move; the
+guard key is what decides whether this exact call has already run, so it must.
+See [Two keys over one call](#two-keys-over-one-call) below.
+
+Both keys take a scope that is the step id at depth 0 and the activation id
+below it (`AgentBrainRunner.keyScope`), so two workers in one team calling the
+same gated tool open two gates rather than sharing one decision.
 
 Using `ToolNodeExecutor` (rather than an HTTP executor) is what makes an agent
 calling a tool and a workflow calling that tool do the same thing: type dispatch,
