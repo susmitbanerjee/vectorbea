@@ -16,7 +16,7 @@ FROM eclipse-temurin:17-jdk-alpine AS builder
 WORKDIR /workspace/apps/worker-kotlin
 
 # Install Gradle (pinned version for reproducible builds)
-ARG GRADLE_VERSION=8.10
+ARG GRADLE_VERSION=8.14
 RUN apk add --no-cache curl unzip && \
     curl -fL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
          -o /tmp/gradle.zip && \
@@ -31,6 +31,7 @@ ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotli
 # Copy build scripts first — maximises Docker layer cache.
 COPY apps/worker-kotlin/settings.gradle.kts apps/worker-kotlin/build.gradle.kts ./
 COPY packages/observability-kotlin/settings.gradle.kts packages/observability-kotlin/build.gradle.kts /workspace/packages/observability-kotlin/
+COPY packages/graph-kotlin/settings.gradle.kts packages/graph-kotlin/build.gradle.kts /workspace/packages/graph-kotlin/
 
 # Pre-resolve dependencies (separate cached layer)
 RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
@@ -40,6 +41,7 @@ RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/nu
 # cache-bust: v4
 COPY apps/worker-kotlin/src ./src
 COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
+COPY packages/graph-kotlin/src /workspace/packages/graph-kotlin/src
 RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info --stacktrace 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
