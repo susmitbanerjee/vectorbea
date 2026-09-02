@@ -1,7 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 
 /**
  * Executor for node types not yet supported by this worker (LLM, TOOL, AGENT, HTTP, DB_QUERY).

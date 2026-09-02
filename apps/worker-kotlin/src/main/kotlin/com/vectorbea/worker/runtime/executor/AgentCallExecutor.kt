@@ -17,7 +17,7 @@ import com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.decideOnApproval
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.util.UUID
 import javax.sql.DataSource
 

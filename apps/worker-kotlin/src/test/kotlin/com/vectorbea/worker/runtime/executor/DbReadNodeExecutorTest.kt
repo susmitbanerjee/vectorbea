@@ -8,8 +8,8 @@ import com.vectorbea.worker.connector.ResolvedConnection
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.sql.*

@@ -97,14 +97,26 @@ describe("constellation layout", () => {
     }
   });
 
-  it("reads top to bottom by depth", () => {
+  /**
+   * Depth runs LEFT TO RIGHT, and siblings share a column.
+   *
+   * Depth is the thing being read — who called whom. A layout that throws it
+   * away and re-derives an arrangement from edge tension has lost the point.
+   *
+   * The direction changed from top-down because a node is a circle with a name
+   * under it: stacked vertically, three levels of delegation put three names in
+   * a 150px column and they truncate. It also now matches the Flow view, so the
+   * two graph views in one tab do not disagree about which way the run runs.
+   */
+  it("reads left to right by depth", () => {
     const l = layout(twelveWithCycle());
-    const y = (id: string) => l.nodes.find((n) => n.id === id)!.y;
-    /* Depth IS the thing being read — who called whom. A layout that throws it
-       away and re-derives an arrangement from edge tension has lost the point. */
-    expect(y("sup")).toBeLessThan(y("m1"));
-    expect(y("m1")).toBeLessThan(y("leaf0"));
-    expect(y("m1")).toBe(y("m2"));
+    const at = (id: string) => l.nodes.find((n) => n.id === id)!;
+
+    expect(at("sup").x).toBeLessThan(at("m1").x);
+    expect(at("m1").x).toBeLessThan(at("leaf0").x);
+    /* Siblings share a column and are separated vertically, in creation order. */
+    expect(at("m1").x).toBe(at("m2").x);
+    expect(at("m1").y).toBeLessThan(at("m2").y);
   });
 
   it("is deterministic, so two people see the same diagram", () => {
@@ -124,9 +136,57 @@ describe("constellation layout", () => {
     const m1 = l.nodes.find((n) => n.id === "m1")!;
     expect(l.loops[0]!.x).toBe(m1.x);
 
-    // And both of its edges are marked, so neither draws as an ordinary one.
-    expect(l.edges.filter((e) => e.cyclic).map((e) => e.id).sort())
-      .toEqual(["e-cycle", "e-leaf0"]);
+    /*
+     * And both of its edges are WITHHELD from the edge list entirely.
+     *
+     * They used to be marked and still drawn, which is worse than it sounds:
+     * every repeat of a cycle has the same endpoints, so N repeats put N
+     * identical lines and N identical labels exactly on top of each other — an
+     * unreadable blob at precisely the spot the reader is looking. One arc with
+     * a hit count is the whole point of separating them.
+     */
+    const ids = l.edges.map((e) => e.id);
+    expect(ids).not.toContain("e-cycle");
+    expect(ids).not.toContain("e-leaf0");
+    expect(l.edges.some((e) => e.cyclic)).toBe(false);
+
+    /* The arc has real endpoints, so it can be drawn as a curve between the two
+       agents rather than as a decoration floating near one of them. */
+    const loop = l.loops[0]!;
+    expect([loop.x1, loop.y1]).not.toEqual([loop.x2, loop.y2]);
+  });
+
+  /**
+   * ACCEPTANCE: a 12-activation tree renders legibly with no manual layout.
+   *
+   * "Legibly" is not a matter of taste here — it means no two nodes are drawn on
+   * top of each other, which is the failure mode of any layout that places by
+   * something other than structure. Twelve nodes across three depths with an
+   * eight-wide column is the shape that would break a naive one.
+   */
+  it("never overlaps two activations", () => {
+    const l = layout(twelveWithCycle());
+    expect(l.nodes).toHaveLength(12);
+
+    for (const a of l.nodes) {
+      for (const b of l.nodes) {
+        if (a.id === b.id) continue;
+        const gap = Math.hypot(a.x - b.x, a.y - b.y) - (a.r + b.r);
+        expect(gap, `${a.agentName} overlaps ${b.agentName}`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  /** Every node sits inside the canvas the layout reports, so nothing is clipped. */
+  it("reports a canvas that contains every node and its label", () => {
+    const l = layout(twelveWithCycle());
+    for (const n of l.nodes) {
+      expect(n.x - n.r).toBeGreaterThanOrEqual(0);
+      expect(n.x + n.r).toBeLessThanOrEqual(l.width);
+      expect(n.y - n.r).toBeGreaterThanOrEqual(0);
+      /* +26 for the name and token lines drawn under the circle. */
+      expect(n.y + n.r + 26).toBeLessThanOrEqual(l.height);
+    }
   });
 
   it("scales node area with tokens, not radius", () => {
@@ -196,5 +256,68 @@ describe("join groups", () => {
     /* A "fan-out" of one is a plain delegation that happened to carry a group
        id, and bracketing it would claim something that did not happen. */
     expect(joinGroups([edge({ id: "1", to: "a", joinGroupId: "g1" })]).size).toBe(0);
+  });
+});
+
+// ── handed_off is a state, not an absence ───────────────────────────────────
+
+describe("handed off", () => {
+  const routerRun = (): Constellation => ({
+    runId: "r",
+    nodes: [
+      {
+        id: "rt", parentId: null, depth: 0, status: "handed_off", role: "router",
+        agentName: "router", stopReason: null, tokens: 800, costCents: 1, iterations: 1,
+        blockedReason: "Transferred control to another agent — neither succeeded nor failed.",
+        startedAt: null, endedAt: null,
+      },
+      {
+        id: "sp", parentId: "rt", depth: 1, status: "succeeded", role: "specialist",
+        agentName: "billing-specialist", stopReason: null, tokens: 9_600, costCents: 12,
+        iterations: 5, blockedReason: null, startedAt: null, endedAt: null,
+      },
+    ],
+    edges: [{
+      id: "e1", from: "rt", to: "sp", kind: "TRANSFER", reason: "billing, not support",
+      contractHash: "h", joinGroupId: null, createdAt: null, contract: null, output: null,
+    }],
+    cycles: [],
+  });
+
+  /**
+   * ACCEPTANCE: a router shows as handed_off and is not treated as a failure —
+   * nor as an absence.
+   *
+   * It carries a `blockedReason` because the sentence is worth showing, and the
+   * first version therefore dimmed it to 50% alongside the branches that never
+   * started. A router that correctly transferred did its job; drawing it as
+   * "produced nothing" is the opposite of what happened.
+   */
+  it("does not dim a router that handed off", () => {
+    const l = layout(routerRun());
+    const router = l.nodes.find((n) => n.id === "rt")!;
+    expect(router.blocked, "handed off is a state, not an absence").toBe(false);
+    expect(router.blockedReason).toContain("neither succeeded nor failed");
+  });
+
+  /** A branch that genuinely never started IS dimmed. */
+  it("still dims a branch that produced nothing", () => {
+    const c = routerRun();
+    c.nodes[1] = {
+      ...c.nodes[1]!, status: "cancelled", tokens: 0,
+      blockedReason: "Never started — a sibling failed and the join could not proceed without it.",
+    };
+    expect(layout(c).nodes.find((n) => n.id === "sp")!.blocked).toBe(true);
+  });
+
+  /** One activation is a valid constellation, not an empty one. */
+  it("lays out a single-agent run as one node", () => {
+    const solo = routerRun();
+    solo.nodes = [solo.nodes[0]!];
+    solo.edges = [];
+    const l = layout(solo);
+    expect(l.nodes).toHaveLength(1);
+    expect(l.width).toBeGreaterThan(0);
+    expect(l.height).toBeGreaterThan(0);
   });
 });

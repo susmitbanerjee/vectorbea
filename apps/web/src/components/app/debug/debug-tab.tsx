@@ -8,16 +8,31 @@ import { getAccessToken } from "~/lib/auth/token";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import {
   createTraceApi, subscribeToSpans,
-  type CriticalPath, type RootCause, type TraceStreamStatus, type TraceTree,
+  type CriticalPath, type RootCause, type TraceCompleteness,
+  type TraceGraph, type TraceStreamStatus, type TraceTree,
 } from "~/lib/api/trace";
-import { createDebugApi, type Constellation } from "~/lib/api/constellation";
+import {
+  createDebugApi,
+  type Burndown, type Comparison, type Constellation,
+  type ReplayAttempt, type ReplayOptions,
+} from "~/lib/api/constellation";
 import { AgentsView } from "./agents-view";
+import { FlowView } from "./flow-view";
+import { CompareView } from "./compare-view";
+import { ReplayView } from "./replay-view";
+import { CostView } from "./cost-view";
+import { CompletenessBanner, FlowSkeleton, TraceUnavailable } from "./states";
+import { useDebugSelection } from "./use-debug-selection";
 import { IterationsView } from "./iterations-view";
-import { OverviewView } from "./overview-view";
 import { RootCauseBanner } from "./root-cause-banner";
 import { TimelineView } from "./timeline-view";
 
-type View = "overview" | "timeline" | "iterations" | "agents";
+type View =
+  | "overview" | "timeline" | "iterations" | "agents" | "cost" | "compare" | "replay";
+
+const IS_VIEW = (v: string | null): v is View =>
+  v === "overview" || v === "timeline" || v === "iterations" ||
+  v === "agents" || v === "cost" || v === "compare" || v === "replay";
 
 /** True when a rejection is this component cancelling its own in-flight request. */
 function isAborted(e: unknown): boolean {
@@ -34,6 +49,9 @@ const VIEWS: Array<{ id: View; label: string; hint: string }> = [
   { id: "timeline",   label: "Timeline",   hint: "Why did it take that long?" },
   { id: "iterations", label: "Iterations", hint: "What did it call, and what came back?" },
   { id: "agents",     label: "Agents",     hint: "Who asked whom to do what, and why?" },
+  { id: "cost",       label: "Cost",       hint: "Where did the money go?" },
+  { id: "compare",    label: "Compare",    hint: "It worked yesterday — what changed?" },
+  { id: "replay",     label: "Replay",     hint: "Run it again — and say what that will do." },
 ];
 
 /**
@@ -72,10 +90,21 @@ export function DebugTab({
     [client, workspaceId],
   );
 
-  const [view, setView] = React.useState<View>("overview");
-  const [selectedSpanId, setSelectedSpanId] = React.useState<string | null>(null);
+  /*
+   * SELECTION AND VIEW LIVE IN THE URL.
+   *
+   * Debugging is a conversation: somebody finds the step that broke and sends it
+   * to whoever owns it. With selection in component state that link opens at the
+   * top of an unrelated view and the recipient has to find it again from a
+   * description — which is where most of the time in a support thread goes.
+   */
+  const selection = useDebugSelection();
+  const view: View = IS_VIEW(selection.view) ? selection.view : "overview";
+  const selectedSpanId = selection.spanId;
+  const selectedNodeId = selection.nodeId;
 
   const [tree, setTree] = React.useState<TraceTree | null>(null);
+  const [graph, setGraph] = React.useState<TraceGraph | null>(null);
   const [rootCause, setRootCause] = React.useState<RootCause | null>(null);
   const [critical, setCritical] = React.useState<CriticalPath | null>(null);
   const [loading, setLoading] = React.useState(true);
@@ -88,10 +117,78 @@ export function DebugTab({
      tab are different states and must not render the same. */
   const [constellation, setConstellation] = React.useState<Constellation | null>(null);
   const [agentsError, setAgentsError] = React.useState<string | null>(null);
+  /* The burn-down, on first visit to Cost. Same reasoning as the constellation:
+     a second request carrying every metered span, which a reader who never
+     opens the tab should not pay for. */
+  const [burndown, setBurndown] = React.useState<Burndown | null>(null);
+  const [costError, setCostError] = React.useState<string | null>(null);
+
+  /*
+   * The comparison, on first visit to Compare.
+   *
+   * Two requests, in order: who to compare against, then the comparison itself.
+   * The reader is not asked to pick a run first — that is asking them to answer
+   * the question they came with.
+   */
+  /* Replay options and history, on first visit. Both are small; one round trip
+     each, and neither is paid for by a reader who never opens the tab. */
+  const [replayOptions, setReplayOptions] = React.useState<ReplayOptions | null>(null);
+  const [replayHistory, setReplayHistory] = React.useState<ReplayAttempt[]>([]);
+  const [replayError, setReplayError] = React.useState<string | null>(null);
+
+  const [comparison, setComparison] = React.useState<Comparison | null>(null);
+  const [compareNote, setCompareNote] = React.useState<string | null>(null);
+  const [compareError, setCompareError] = React.useState<string | null>(null);
   const debugApi = React.useMemo(
     () => createDebugApi(client.transport, workspaceId),
     [client, workspaceId],
   );
+
+  React.useEffect(() => {
+    if (view !== "replay" || replayOptions || replayError) return;
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        const [opts, hist] = await Promise.all([
+          debugApi.replayOptions(runId, ac.signal),
+          debugApi.replays(runId, ac.signal).catch(() => ({ runId, attempts: [] })),
+        ]);
+        setReplayOptions(opts);
+        setReplayHistory(hist.attempts);
+      } catch (e) {
+        if (!isAborted(e)) setReplayError(messageOf(e));
+      }
+    })();
+    return () => ac.abort();
+  }, [view, replayOptions, replayError, debugApi, runId]);
+
+  React.useEffect(() => {
+    if (view !== "compare" || comparison || compareNote || compareError) return;
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        const t = await debugApi.compareTarget(runId, ac.signal);
+        if (t.target == null) { setCompareNote(t.reason); return; }
+        setComparison(await debugApi.compare(runId, t.target.runId, ac.signal));
+      } catch (e) {
+        if (!isAborted(e)) setCompareError(messageOf(e));
+      }
+    })();
+    return () => ac.abort();
+  }, [view, comparison, compareNote, compareError, debugApi, runId]);
+
+  React.useEffect(() => {
+    if (view !== "cost" || burndown || costError) return;
+    const ac = new AbortController();
+    void (async () => {
+      try {
+        setBurndown(await debugApi.burndown(runId, ac.signal));
+      } catch (e) {
+        if (!isAborted(e)) setCostError(messageOf(e));
+      }
+    })();
+    return () => ac.abort();
+  }, [view, burndown, costError, debugApi, runId]);
 
   React.useEffect(() => {
     if (view !== "agents" || constellation || agentsError) return;
@@ -121,8 +218,12 @@ export function DebugTab({
       api.tree(runId, 9, ac.signal),
       api.rootCause(runId, ac.signal),
       api.criticalPath(runId, ac.signal).catch(() => null),
+      /* The graph is the Overview's whole content, but a failure here must not
+         take the timeline and inspector down with it — they read spans and do
+         not need the workflow at all. */
+      api.graph(runId, ac.signal).catch(() => null),
     ])
-      .then(([t, rc, cp]) => { setTree(t); setRootCause(rc); setCritical(cp); })
+      .then(([t, rc, cp, g]) => { setTree(t); setRootCause(rc); setCritical(cp); setGraph(g); })
       /* An abort is this effect cleaning up after itself — a re-render, a scope
          change, or React's development double-mount — not a failure the reader
          should be shown. The transport wraps it as kind "aborted" rather than
@@ -161,10 +262,22 @@ export function DebugTab({
 
   const rootCauseSpanId = rootCause?.rootCause?.spanId ?? null;
 
-  /** Cross-navigation: pick a span here, land on it in the other views. */
-  const selectSpan = React.useCallback((spanId: string) => {
-    setSelectedSpanId(spanId);
-  }, []);
+  /**
+   * Cross-navigation, both directions.
+   *
+   * The views disagree about what a selection is: the Flow view selects a NODE,
+   * stable across executions; the timeline and inspector select a SPAN, one
+   * execution of one. Both are written, so each view can read the one it can use
+   * and a node that ran three times still highlights in the map.
+   */
+  const selectSpan = React.useCallback(
+    (spanId: string) => selection.selectSpan(spanId),
+    [selection],
+  );
+  const selectNode = React.useCallback(
+    (nodeId: string, spanId: string | null) => selection.selectNode(nodeId, spanId),
+    [selection],
+  );
 
   if (error) {
     return (
@@ -194,13 +307,24 @@ export function DebugTab({
         loading={loading}
         onReconnect={onReconnect}
         onRetryFromHere={onRetryFromHere ? () => onRetryFromHere(rootCauseSpanId) : undefined}
+        /* ONE CLICK from the failure to "what changed". "It worked yesterday" is
+           the most common report, and the banner is where the reader already is
+           when they think it. */
+        onCompare={() => selection.setView("compare")}
       />
 
-      <TraceCompleteness tree={tree} stream={stream} liveSpanCount={liveSpanCount} />
+      <CompletenessBanner completeness={tree?.completeness}>
+        {tree?.truncated ? <DepthNote tree={tree} /> : null}
+      </CompletenessBanner>
 
       {/* View switcher. Each tab is labelled with the question it answers —
-          the tab strip is the index to §1's six questions, not decoration. */}
-      <div role="tablist" aria-label="Debug views" className="flex gap-1 border-b border-subtle">
+          the tab strip is the index to §1's six questions, not decoration.
+
+          The transport indicator sits on this row, at the end: it is about how
+          the page is updating itself, which belongs beside the controls rather
+          than in a banner about the trace. */}
+      <div className="flex items-end justify-between gap-4 border-b border-subtle">
+      <div role="tablist" aria-label="Debug views" className="flex gap-1">
         {VIEWS.map((v) => (
           <button
             key={v.id}
@@ -208,7 +332,7 @@ export function DebugTab({
             aria-selected={view === v.id}
             aria-controls={`debug-panel-${v.id}`}
             id={`debug-tab-${v.id}`}
-            onClick={() => setView(v.id)}
+            onClick={() => selection.setView(v.id)}
             title={v.hint}
             className={cn(
               "-mb-px border-b-2 px-3 py-2 text-sm",
@@ -224,6 +348,10 @@ export function DebugTab({
           </button>
         ))}
       </div>
+        <div className="pb-2">
+          <TransportIndicator stream={stream} />
+        </div>
+      </div>
 
       <div
         role="tabpanel"
@@ -232,16 +360,24 @@ export function DebugTab({
         className="min-h-[24rem]"
       >
         {loading && !tree ? (
-          <LoadingSkeleton />
+          view === "overview" ? <FlowSkeleton /> : <LoadingSkeleton />
         ) : !tree || tree.totalSpans === 0 ? (
           <NoTrace />
         ) : view === "overview" ? (
-          <OverviewView
-            spans={tree.spans}
-            rootCauseSpanId={rootCauseSpanId}
-            selectedSpanId={selectedSpanId}
-            onSelectSpan={selectSpan}
-          />
+          graph ? (
+            <FlowView
+              graph={graph}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={selectNode}
+            />
+          ) : (
+            /* The spans loaded and the graph did not. Distinct from an empty
+               run, and it says which half is missing. */
+            <TraceUnavailable
+              message="The workflow structure for this run could not be loaded, so the run map cannot be drawn. The timeline and inspector still work."
+              onRetry={load}
+            />
+          )
         ) : view === "timeline" ? (
           <div className="h-[32rem]">
             <TimelineView
@@ -251,11 +387,45 @@ export function DebugTab({
               onSelectSpan={selectSpan}
             />
           </div>
+        ) : view === "replay" ? (
+          replayError ? (
+            <TraceUnavailable message={replayError} onRetry={() => setReplayError(null)} />
+          ) : replayOptions ? (
+            <ReplayView options={replayOptions} history={replayHistory} />
+          ) : (
+            <div className="h-48 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
+                 aria-busy="true" aria-label="Loading replay options" />
+          )
+        ) : view === "compare" ? (
+          compareError ? (
+            <TraceUnavailable message={compareError} onRetry={() => setCompareError(null)} />
+          ) : compareNote ? (
+            /* No counterpart exists. A real state, not an error: the first run
+               of a version has nothing to be compared with. */
+            <div className="flex min-h-48 items-center justify-center rounded-md border border-subtle bg-surface-raised p-6">
+              <Text variant="body" className="max-w-[60ch] text-center text-fg-secondary">
+                {compareNote}
+              </Text>
+            </div>
+          ) : comparison ? (
+            <CompareView comparison={comparison} />
+          ) : (
+            <div className="h-48 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
+                 aria-busy="true" aria-label="Finding a run to compare against" />
+          )
+        ) : view === "cost" ? (
+          costError ? (
+            <TraceUnavailable message={costError} onRetry={() => setCostError(null)} />
+          ) : burndown ? (
+            <CostView burndown={burndown} />
+          ) : (
+            <div className="h-64 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
+                 aria-busy="true" aria-label="Loading the burn-down" />
+          )
         ) : (
           <IterationsView
             api={api}
             runId={runId}
-            spans={tree.spans}
             selectedSpanId={selectedSpanId}
             onSelectSpan={selectSpan}
           />
@@ -265,56 +435,60 @@ export function DebugTab({
   );
 }
 
-/**
- * Say when the trace is not the whole story.
- *
- * A partial tree rendered as though it were complete is worse than no tree: the
- * reader concludes the run did less than it did, and goes looking for a step that
- * is missing only from the record. Spans are dropped under buffer pressure by
- * design, and runs from before instrumentation have none at all.
- */
-function TraceCompleteness({
-  tree, stream, liveSpanCount,
-}: {
-  tree: TraceTree | null;
-  stream: TraceStreamStatus;
-  liveSpanCount: number;
-}) {
-  const incomplete = tree && !tree.traceComplete;
-  const truncated = tree?.truncated;
-  const polling = stream === "polling";
+/** Depth truncation: a fact about this request, not about the run. */
+function DepthNote({ tree }: { tree: TraceTree }) {
+  return (
+    <Text variant="caption" className="mt-0.5 block text-fg-muted">
+      Showing {tree.returnedSpans} of {tree.totalSpans} spans. Deeper levels load
+      when you open them.
+    </Text>
+  );
+}
 
-  if (!incomplete && !truncated && !polling) return null;
+/**
+ * What the transport indicator says, or null for "say nothing".
+ *
+ * `open` is the healthy state and renders NOTHING — the old code folded this
+ * into the trace-completeness banner, so a reconnect looked like data loss. The
+ * wording avoids the word "unavailable" for polling on purpose: updates are
+ * still arriving, just on a timer, and the trace is byte-for-byte the same.
+ */
+export function transportLabel(stream: TraceStreamStatus): string | null {
+  switch (stream) {
+    case "open": return null;
+    case "connecting": return "Connecting…";
+    case "polling": return "Refreshing on a timer";
+    case "closed": return "Updates stopped";
+  }
+}
+
+/**
+ * How the page is getting its updates — a property of the TRANSPORT, not of the
+ * trace.
+ *
+ * Separated because it used to sit in the same amber box as "spans are missing",
+ * and the two say completely different things. SSE being unavailable means
+ * updates arrive on a timer; the trace itself is exactly as complete either way.
+ * Bundling them made a transport hiccup look like data loss.
+ *
+ * Quiet, inline, beside the view controls — an indicator, not a warning.
+ */
+export function TransportIndicator({ stream }: { stream: TraceStreamStatus }) {
+  const label = transportLabel(stream);
+  if (label === null) return null;
 
   return (
-    <div className="rounded-md border border-status-waiting-border bg-status-waiting-subtle px-3 py-2">
-      <ul className="space-y-1">
-        {incomplete && (
-          <li>
-            <Text variant="caption" className="text-status-waiting">
-              This trace may be incomplete — the run is still writing spans, or some
-              were dropped while the writer was under pressure.
-            </Text>
-          </li>
-        )}
-        {truncated && (
-          <li>
-            <Text variant="caption" className="text-status-waiting">
-              Showing {tree.returnedSpans} of {tree.totalSpans} spans. Deeper levels
-              load when you open them.
-            </Text>
-          </li>
-        )}
-        {polling && (
-          <li>
-            <Text variant="caption" className="text-status-waiting">
-              Live updates are unavailable, so this page is refreshing on a timer
-              instead{liveSpanCount > 0 ? "." : " — new spans may appear a few seconds late."}
-            </Text>
-          </li>
-        )}
-      </ul>
-    </div>
+    <span className="inline-flex items-center gap-1.5" title={
+      stream === "polling"
+        ? "Live updates are unavailable, so this page re-fetches every few seconds. The trace is unaffected."
+        : undefined
+    }>
+      <span aria-hidden="true" className={cn(
+        "size-1.5 shrink-0 rounded-full bg-fg-muted",
+        stream === "connecting" && "animate-pulse motion-reduce:animate-none",
+      )} />
+      <Text variant="caption" className="text-fg-muted">{label}</Text>
+    </span>
   );
 }
 

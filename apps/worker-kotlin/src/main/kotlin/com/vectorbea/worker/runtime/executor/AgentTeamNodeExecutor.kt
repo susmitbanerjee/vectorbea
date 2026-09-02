@@ -19,7 +19,7 @@ import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.runtime.budget.RunCeilings
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.util.UUID
 import javax.sql.DataSource
 

@@ -1,7 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 
 /**
  * Pluggable executor for a single workflow node type.

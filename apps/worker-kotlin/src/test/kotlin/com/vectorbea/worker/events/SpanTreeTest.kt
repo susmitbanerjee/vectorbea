@@ -165,6 +165,206 @@ class SpanTreeTest {
         } finally { writer.stop(); cleanup(ds, ws, run) }
     }
 
+    /**
+     * The run span must record that it ENDED.
+     *
+     * ── THE BUG THIS PINS ───────────────────────────────────────────────────
+     * The run span is the one span written twice: `openRunSpan` emits it
+     * `running` the moment the run starts, because the worker that opens it is
+     * frequently not the one that closes it — a yield, an approval or a crash
+     * hands the run on. `closeRunSpan` then emits the same span id again with
+     * the outcome.
+     *
+     * Both writes pin `created_at` to the run's start so the partition key is
+     * stable, which is what stopped the tab rendering every step twice. But the
+     * insert was `ON CONFLICT (span_id, created_at) DO NOTHING`, so the second
+     * write — the CLOSE — was silently discarded. Every run span in the database
+     * says `running`, with no `ended_at` and no `duration_ms`, forever.
+     *
+     * It reads as a cosmetic trace issue and is not: the waterfall's axis is the
+     * run's duration, so the view had nothing to scale against; `traceComplete`
+     * asks "is any run span still running" and was therefore false on every
+     * healthy finished run; and the run bar quietly fell back to guessing from
+     * the longest child span.
+     *
+     * Found by the coverage assertion below, which is exactly what it is for.
+     */
+    @Test
+    fun `closing the run span records its end rather than being discarded`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")
+        val (ws, run) = seed(ds!!)
+        val writer = SpanWriter(ds, null, enabled = true, flushEveryMs = 50)
+        writer.start()
+        try {
+            val t0 = Instant.now().minusMillis(5_000)
+            val tracer = RunTracer(writer, traceId = run, runId = run, workspaceId = ws)
+            tracer.openRunSpan("run", t0)
+            tracer.closeRunSpan("run", "ok", t0)
+            writer.stop()
+
+            ds.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT status, ended_at, duration_ms FROM run_spans " +
+                    "WHERE run_id=? AND kind='run'"
+                ).use { st ->
+                    st.setObject(1, run)
+                    st.executeQuery().use { rs ->
+                        assertTrue(rs.next(), "the run span must exist")
+                        assertEquals("ok", rs.getString("status"),
+                            "the close must land: a run span stuck at 'running' makes every " +
+                            "finished run look unfinished")
+                        assertNotNull(rs.getTimestamp("ended_at"), "ended_at must be recorded")
+                        assertTrue((rs.getObject("duration_ms") as? Int ?: 0) >= 5_000,
+                            "duration_ms must span from the run start to the close")
+                        assertTrue(!rs.next(), "still exactly ONE row — the close updates, never duplicates")
+                    }
+                }
+            }
+        } finally { writer.stop(); cleanup(ds, ws, run) }
+    }
+
+    /**
+     * A redelivered OPEN must not reopen a run that already finished.
+     *
+     * The queue can hand the same job to a second worker after the first closed
+     * the run. If that open overwrote the close, a succeeded run would flip back
+     * to `running` and stay there.
+     */
+    @Test
+    fun `a redelivered open does not reopen a closed run span`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")
+        val (ws, run) = seed(ds!!)
+        val writer = SpanWriter(ds, null, enabled = true, flushEveryMs = 50)
+        writer.start()
+        try {
+            val t0 = Instant.now().minusMillis(3_000)
+            val tracer = RunTracer(writer, traceId = run, runId = run, workspaceId = ws)
+            tracer.openRunSpan("run", t0)
+            tracer.closeRunSpan("run", "ok", t0)
+            tracer.openRunSpan("run", t0)          // the redelivery
+            writer.stop()
+
+            ds.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT status, ended_at FROM run_spans WHERE run_id=? AND kind='run'"
+                ).use { st ->
+                    st.setObject(1, run)
+                    st.executeQuery().use { rs ->
+                        assertTrue(rs.next())
+                        assertEquals("ok", rs.getString("status"), "the finished outcome stands")
+                        assertNotNull(rs.getTimestamp("ended_at"))
+                    }
+                }
+            }
+        } finally { writer.stop(); cleanup(ds, ws, run) }
+    }
+
+    /**
+     * ACCEPTANCE: the run's wall clock is fully accounted for, ±1%.
+     *
+     * ── WHAT THIS CATCHES, AND WHAT IT DOES NOT ─────────────────────────────
+     * It asserts the arithmetic CONTRACT on a correctly-driven tracer: given a
+     * run whose ticks and waits were all recorded, the timestamps those calls
+     * produce must tile the run span. That is a real check — it is how the
+     * discarded `closeRunSpan` above was found, because a run span with no
+     * `ended_at` has no wall clock to account for at all.
+     *
+     * It does NOT catch a caller that forgets to emit a wait: this fixture drives
+     * the tracer itself, so it can only be as complete as it is written to be.
+     * The equivalent check over REAL runs lives in the waterfall, which computes
+     * the same union and draws whatever is left over as `Unaccounted` — visible
+     * on every trace, on the screen people already open when a run looks wrong.
+     *
+     * UNION, not sum: two overlapping top-level spans would sum PAST the run
+     * duration and let a broken trace through.
+     */
+    @Test
+    fun `top-level spans and waits account for the whole run`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")
+        val (ws, run) = seed(ds!!)
+        val writer = SpanWriter(ds, null, enabled = true, flushEveryMs = 50)
+        writer.start()
+        try {
+            /* A run that was queued, then parked on an approval, then worked —
+               the ticks are stamped `now` by the tracer, so the historical
+               stretch is covered by waits, which is exactly how a real yielding
+               run records the time it was not running. */
+            val t0 = Instant.now().minusMillis(240_000)
+            val tracer = RunTracer(writer, traceId = run, runId = run, workspaceId = ws)
+            tracer.openRunSpan("run", t0)
+
+            val queueEnd = t0.plusMillis(2_000)
+            tracer.emitWait("queue", t0, queueEnd)
+            val approvalEnd = Instant.now()
+            tracer.emitWait("approval", queueEnd, approvalEnd)
+
+            tracer.openTick("tick")
+            val step = tracer.open("step", "work", tracer.tickSpanId, nodeId = "n1")
+            tracer.close(step, "step", "work", "ok", nodeId = "n1")
+            tracer.closeTick("ok")
+
+            tracer.closeRunSpan("run", "ok", t0)
+            writer.stop()
+
+            val rows = readTimes(ds, run)
+            val runSpanId = SpanWriter.runSpanId(run)
+            val runRow = assertNotNull(rows[runSpanId], "the run span")
+            val totalMs = runRow.endMs - runRow.startMs
+            assertTrue(totalMs > 0,
+                "the run span must record its end — a run stuck at 'running' has no " +
+                "wall clock to account for, and the waterfall has no axis")
+
+            /* Union of everything whose parent is the run: ticks and waits. */
+            val top = rows.values
+                .filter { it.parent == runSpanId }
+                .map { maxOf(it.startMs, runRow.startMs) to minOf(it.endMs, runRow.endMs) }
+                .filter { it.second > it.first }
+                .sortedBy { it.first }
+            assertTrue(top.isNotEmpty(), "the run must have top-level children to account for it")
+
+            var accounted = 0L
+            var cursor = runRow.startMs
+            for ((from, to) in top) {
+                if (to <= cursor) continue
+                accounted += to - maxOf(from, cursor)
+                cursor = maxOf(cursor, to)
+            }
+
+            val unaccounted = totalMs - accounted
+            assertTrue(
+                unaccounted <= totalMs / 100,
+                "unaccounted ${unaccounted}ms of ${totalMs}ms " +
+                "(${"%.1f".format(unaccounted * 100.0 / totalMs)}%) exceeds the 1% budget — " +
+                "a top-level span or a wait is missing, and the waterfall will draw " +
+                "that stretch as though the run were idle",
+            )
+        } finally { writer.stop(); cleanup(ds, ws, run) }
+    }
+
+    /** span_id -> (parent, start, end) in epoch millis, for the coverage check. */
+    private fun readTimes(ds: DataSource, run: UUID): Map<UUID, Times> =
+        ds.connection.use { c ->
+            c.prepareStatement(
+                "SELECT span_id, parent_span_id, started_at, ended_at, duration_ms " +
+                "FROM run_spans WHERE run_id=?"
+            ).use { st ->
+                st.setObject(1, run)
+                st.executeQuery().use { rs ->
+                    buildMap {
+                        while (rs.next()) {
+                            val start = rs.getTimestamp("started_at").time
+                            val end = rs.getTimestamp("ended_at")?.time
+                                ?: (start + (rs.getObject("duration_ms") as? Int ?: 0))
+                            put(rs.getObject("span_id", UUID::class.java),
+                                Times(rs.getObject("parent_span_id", UUID::class.java), start, end))
+                        }
+                    }
+                }
+            }
+        }
+
+    data class Times(val parent: UUID?, val startMs: Long, val endMs: Long)
+
     @Test
     fun `a redelivered wait span collides with itself instead of drawing the gap twice`() {
         val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")

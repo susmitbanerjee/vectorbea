@@ -381,11 +381,43 @@ Familiarity is the point: the debugger should look like the thing they built.
          └───────────────────────────────────────┘
 ```
 
-- Green ✓ succeeded, red ✗ failed, amber ⧗ waiting, grey ⊘ skipped, blue ▶ running.
-- The failing path is bolded; unreached nodes are dimmed rather than hidden, so
-  it is obvious *what did not happen*.
-- Agent and team nodes carry a ▼ that expands the activation subtree inline.
-- Click any node to jump to its span in the other views.
+Built as the **Flow view**, where structure and time are one picture.
+
+- **One card per GRAPH NODE, never per span.** A span is one EXECUTION, and a
+  node that yields, retries or resumes after an approval has several. The first
+  implementation iterated spans and rendered every step twice.
+- **`GET /api/runs/{id}/trace/graph` resolves the graph server-side.** The client
+  never parses `graph_json`: it has two historical shapes, `WorkflowGraph.parse`
+  is the only reader of both, and a second implementation in TypeScript would
+  diverge silently on the one screen people open when something is already wrong.
+- **The RUN BAR sits above the graph** — wall clock split into queued, working,
+  parked and failed, proportional and labelled with real durations. "This took 4
+  minutes" is heard as four minutes of work; usually it is 68 seconds of work and
+  2m38s parked on an approval, and those are opposite problems.
+- **Node WIDTH is duration**, square-rooted against the slowest node in the run
+  so one 10-minute model call cannot crush the rest, with a floor that keeps a
+  1ms node clickable. A node that dominates the run by more than its width can
+  show is marked, because there the number is the truth and the geometry is not.
+- **Status by fill, border, icon and word** — four redundant encodings, because
+  the whole page rests on a red/green distinction that roughly one in twelve men
+  cannot make. The failing node gets a 2px border and the words "Root cause".
+- **Unreached nodes render dashed and dimmed, never hidden,** and so do their
+  edges. A run that failed at step two and a run that was never going to reach
+  step four look identical if only what executed is drawn. The unselected branch
+  is how a reader sees what did NOT run.
+- **Edge traversal is derived and TRI-STATE.** Exact when a reached node has one
+  reached inbound source (the branch case); `null` when several could have
+  delivered control, because spans cannot say which did. Null claims nothing.
+- **Agent and team nodes carry a summary line** — activation count and the
+  failing member — and expand inline to per-member status and duration.
+- **Warnings render as markers on the node**: retries, truncated context, clamped
+  budgets, approvals. All of them leave a run green, and without them "it worked"
+  and "it worked this time" render identically.
+- **Wide graphs scroll, with a minimap. Never shrink-to-fit** — 200 nodes scaled
+  to the viewport is 200 unreadable specks. Legible beats complete. Above ~50
+  nodes only the visible window is rendered.
+- **Selection lives in the URL** (`?node=&span=&view=`), so picking a node here
+  selects it in every other view and the link is the finding.
 
 ### 5.3 Agents — the handoff constellation
 
@@ -414,7 +446,44 @@ What it makes visible in one glance:
 
 Hovering an edge shows the task contract sent and the output returned — the
 delegation's request and response, side by side. When a child returns a shape the
-parent could not use, this is where that is legible.
+parent could not use, this is where that is legible. Both come down with the
+graph, so a hover is instant rather than a request per edge.
+
+Served by `GET /api/runs/{id}/constellation` (`ConstellationRoutes`) — nodes from
+`agent_activations`, edges from `agent_handoffs`.
+
+- **Depth runs LEFT TO RIGHT**, siblings share a column, layout is deterministic
+  and O(n). Not force-directed: a force layout settles over time, produces a
+  different picture every load — so "the writer node, top right" means nothing to
+  a colleague — and throws away the one structural fact being read.
+- **Node area scales with tokens** (square root of the ratio, since the eye reads
+  AREA as magnitude), so the expensive member is obvious without opening the cost
+  view.
+- **`handed_off` is its own visual state**, on the brand ramp — the one place
+  brand is allowed near status, because the point is that there is no status. A
+  router that correctly transferred is neither a success nor a failure: given the
+  success hue it would inflate a success rate, given the failure hue it would
+  send somebody debugging a working router. It is also NOT dimmed — it carries a
+  `blockedReason` sentence, but it is a state, not an absence.
+- **A cycle is ONE arc with a hit count**, and its edges are withheld from the
+  ordinary edge list. Every repeat has the same endpoints, so drawn normally they
+  stack into an unreadable blob exactly where the reader is looking.
+- **The loop guard's real state is shown.** `HANDOFF_LOOP` is a defined stop
+  reason with no construction site in the runtime — joins, fan-out and the loop
+  guard land in a later phase — so the panel says the guard *would* catch this
+  and is not enforced yet, rather than claiming it stopped something.
+- **Blocked branches lead**, above the diagram, with the reason. The evidence is
+  an ABSENCE — no spans, no events, no output — and only the child's status and
+  the PARENT's stop reason together explain it. `CHILD_FAILED` is the runtime's
+  own word for "a child failed and the join could not proceed without it".
+- **The root cause is ringed and its chain emphasised.** `run_spans.is_root_cause`
+  marks the SPAN that broke, usually a tool call several levels below the agent
+  worth looking at; the server walks up through `activation_id` to the owning
+  activation and then to its ancestors, because the client has neither the span
+  tree nor the parent links together.
+- **A single-agent run is one node.** P6 routed the existing single-agent path
+  through the activation, so every run since has at least one. Not an error, not
+  an empty state — the model is uniform.
 
 ### 5.4 Timeline — waterfall
 
@@ -439,13 +508,59 @@ Every span on a shared time axis, indented by containment.
  └ tick 2                                            ████
 ```
 
-- The **critical path** is highlighted: the chain of spans that determined total
-  duration. Optimising anything off it is wasted effort.
-- `wait` spans render hatched and labelled, so parked time reads as parked rather
-  than as a hang.
-- Concurrent activations render as genuinely parallel bars, which is how a
-  supervisor's fan-out becomes self-explanatory.
-- Brush to zoom; click any bar to open it in the inspector.
+- **Rows are collapsible by subtree**, indented by containment, and virtualised:
+  a 2000-span trace keeps ~23 rows in the DOM and the container is sized by
+  arithmetic so the scrollbar stays honest.
+- The **critical path** is highlighted, and `Critical path only` filters to it.
+  At 2000 spans that is the only view that fits, and the only one that answers
+  what actually determined the duration — everything off the path could be made
+  instant with no effect on the total.
+- `wait` spans render hatched and labelled with their reason, so parked time
+  reads as parked rather than as a hang.
+- **Unaccounted time is drawn, never left as whitespace.** Any stretch of the run
+  covered by no span becomes an `Unaccounted` row, hatched differently from
+  parked, placed where the hole is; the header reports the total even when it is
+  too small to draw. Whitespace reads as "nothing was happening", which is
+  exactly what a lost span looks like — so the bug hides behind the shape of the
+  answer. A known contributor: `RunTracer.emitWait` drops gaps under one second
+  as scheduling noise, so short queue waits surface here rather than as `wait`
+  bars.
+- **Coverage is asserted, not assumed.** Top-level spans plus waits must account
+  for the run's wall clock within 1%, measured as a UNION rather than a sum —
+  summing would let two overlapping top-level spans exceed the run duration and
+  pass. `SpanTreeTest` asserts it against the real emitter.
+- Concurrent activations render as genuinely parallel bars, positioned by
+  absolute time, which is how a supervisor's fan-out becomes self-explanatory.
+- **Tick boundaries are marked and numbered**, so a run that yielded and resumed
+  reads as yielding rather than as one long bar with holes in it.
+- Brush to zoom (two full-width range inputs, so each handle sits under the
+  moment it selects and the control is keyboard-operable); click any bar to
+  select it in every view; hover for name, kind, status, duration and self time.
+  Payloads are never in the tooltip — they load on demand in the inspector.
+- Status and critical-path membership both carry a text equivalent alongside the
+  colour and the ring, because a coloured dot is invisible to a screen reader.
+
+#### The run span is written twice, and the second write completes the first
+
+`openRunSpan` emits the run span `running` the moment the run starts — the worker
+that opens a run is frequently not the one that closes it, so a span held only in
+memory would vanish with the process. `closeRunSpan` emits the same span id again
+with the outcome. Both pin `created_at` to the run's start so the partition key is
+stable.
+
+The insert is therefore an upsert, guarded:
+
+```sql
+ON CONFLICT (span_id, created_at) DO UPDATE SET status = ..., ended_at = ..., ...
+WHERE run_spans.ended_at IS NULL AND EXCLUDED.ended_at IS NOT NULL
+```
+
+It was `DO NOTHING`, which silently discarded every close: run spans said
+`running` with no `ended_at` forever, so the waterfall had no axis, `traceComplete`
+was false on every healthy run, and the run bar guessed from the longest child.
+The `WHERE` clause is the whole fix — without it a redelivered job's
+`openRunSpan` would flip a finished run back to `running`. With it, open→close
+completes, close→close is a no-op, and nothing can reopen a closed span.
 
 ### 5.5 Iterations — the inspector
 
@@ -474,19 +589,54 @@ The deep view. One activation, its iterations down the left, detail on the right
 └──────────────────────────┴──────────────────────────────────────────────┘
 ```
 
+Served by `GET /api/runs/{id}/trace/iterations`, which joins the four places
+this view's facts live: `agent_iterations` (the parsed action, the observation,
+the budget deltas), `run_spans` (the model and tool calls beneath each
+iteration), `agent_activations` (the granted budget) and `run_events` (whether
+resume recalled the transcript or replayed it). Joining those in the client would
+mean paging the event feed and time-matching spans to iterations, which gets the
+wrong answer on a fast loop that calls the same tool twice.
+
 Design decisions that matter here:
 
-- **Prompt and response collapsed by default.** Expanded, they drown the page;
-  hidden entirely, the tab is useless to the person who can actually fix it.
+- **Prompt and response collapsed by default AND NOT FETCHED.** Expanded they
+  drown the page; hidden entirely the tab is useless to the person who can
+  actually fix it. The panels render from metadata — size, truncation,
+  redactions — which arrives with the iteration list, and the bytes are a second
+  request made on the click that reveals them. `GET .../trace/spans/{id}?content=false`
+  exists for exactly this: a 40-iteration activation costs one request and no
+  prompt content.
 - **The truncation warning sits on the prompt**, where the missing information
-  is, not in a separate panel nobody opens.
-- **Parsed action shown next to raw response.** When the model emitted something
-  unparseable and it was repaired into a `THINK`, that repair is visible rather
-  than looking like the model chose to think.
-- **Budget gauges are per-activation and live**, so "it ran out of iterations" is
-  read, not deduced.
-- **`diff 3 ↔ 4`** shows what changed between two iterations' prompts — usually
-  the fastest route to "the model never got the data it needed".
+  is, and NAMES the dropped sections. "Context was truncated" says something is
+  missing but not what; the diagnostic value is entirely in which sections went.
+- **Parsed action shown next to raw response, and a REPAIR says so.** An
+  unparseable response is turned into a `THINK` so the loop can continue.
+  Unmarked, the stored row is identical to one where the model genuinely chose to
+  think — so the trace shows deliberation where there was a parse failure and
+  sends the reader to the prompt when the problem is the response format.
+  `agent_iterations.action_repaired` records it.
+- **A CACHED tool result says so.** The step guard replays a previous identical
+  call rather than executing, so the observation the model read is the OLD
+  result. Unmarked, a reader concludes the external system is serving stale data.
+  `agent_iterations.tool_result_cached` records it.
+- Both columns are NULLABLE, and null is not false: a row written by an older
+  worker must not claim the model chose to think or that the tool ran fresh.
+- **Budget gauges pair granted with used**, from `agent_activations`, so "it ran
+  out of iterations" is a full bar rather than an inference from a stop reason. A
+  dimension with no granted ceiling renders as a number with no bar — an invented
+  denominator is worse than an absent one.
+- **Reconstruction state is shown.** Iterations restored on resume are marked
+  recalled and dimmed; when reconstruction fell back to replay, the reason is
+  named. A reader seeing iteration 3 twice deserves to know which is which.
+  `AGENT_LOOP_RECONSTRUCTED` carries `resumeFromIteration` in its metadata for
+  this, rather than only in its prose.
+- **Prompt diff between any two iterations** — usually the fastest route to "the
+  model never got the data it needed". Summarised first (`1 line added, 0
+  removed, 5 unchanged`), because 400 unchanged lines to scroll past is the same
+  failure the diff was meant to fix.
+- **Redactions render in place as `[redacted: reason]`**, never as a gap. A gap
+  reads as a bug in the debugger and sends the reader looking for missing text;
+  a named redaction is a deliberate act with a reason.
 
 ### 5.6 Cost — burn-down
 
@@ -502,17 +652,96 @@ Stacked area over run time, one band per activation, with ceiling lines.
      0s        60s       120s      180s
 ```
 
-Answers "why did this run cost $3" with a name. Toggle between cost, tokens and
-iterations on the same axis. A workspace-level roll-up of the same data belongs
-in billing, not here, but it is the same query.
+Answers "why did this run cost $3" with a NAME. Toggle between cost, tokens and
+iterations on the same axis — all three arrive together, so the toggle is not a
+round trip. A workspace-level roll-up of the same data belongs in billing, not
+here, but it is the same query.
+
+Served by `GET /api/runs/{id}/burndown`, shaped by `BurndownReader`.
+
+- **One band per activation, cumulative, stacked on a SHARED time grid.** Each
+  band has its own sample times; stacking them index by index would put one
+  band's second point on top of another's second point regardless of when either
+  happened, which draws a plausible chart of a run that never occurred. Every
+  band is evaluated at every timestamp, carrying its last value forward.
+- **Ceilings name whose limit they are** — workspace, team budget, run. "This run
+  cost 40 of its 100" is a different sentence depending on whose 100 it was, and
+  the crossing point is where the STACK passed the line, not where any one band
+  did.
+- **The bands and the axis share one maximum.** They did not: the stack computed
+  its own peak while the axis used the highest ceiling, so a run at 36¢ of a
+  $1.00 ceiling filled the plot — "40 of its 100" rendered as a full chart.
+- **A clamp is marked, because it is the reason a worker underperformed** and is
+  otherwise invisible: the child was granted less than it asked for, did less
+  work than it was told to, and every other screen shows an agent that simply
+  stopped early. From the `budget_clamped` span attribute.
+
+#### The two records of the same money, and why the chart will not reconcile them
+
+A run's cost is written twice, by two paths, in two units:
+
+| | unit | written by |
+|---|---|---|
+| `run_spans.cost_cents` | **cents** | the agent brain, per span |
+| `agent_runs.estimated_cost` | **USD** | summed from `run_events`, which only `LlmNodeExecutor` writes |
+
+Neither is derived from the other and they do not always agree. Summing one
+against the other without conversion is a 100× error; converting and assuming
+agreement is a silent rescale that hides a real instrumentation gap.
+
+So the reader gets: bands from the spans, the run row's figure converted once,
+and the difference **named** — including a band called "Unattributed" for spend
+that belongs to no activation. "The sum of the bands equals the run's total,
+exactly" then holds by construction, and the size of the leftover is the
+interesting number.
+
+#### A categorical palette, because a band is not a status
+
+`--chart-1` … `--chart-6` were added for this. A band is an AGENT, not an
+outcome: borrowing the status ramp would make the expensive member red and say
+it failed, and borrowing iris would make one band mean "this is ours". Every hue
+is at least 40° from verdant, signal, pulse, ember and iris, so no band can be
+mistaken for a state. Graded by `npm run check:contrast` in both themes.
 
 ### 5.7 Compare
 
-Diff a failed run against a successful one on the same workflow version:
-divergence point, which spans exist in one and not the other, and attribute
-deltas (different model, different input shape, longer context, more iterations).
+Diff a failed run against a successful one on the same workflow version.
 "It worked yesterday" is the most common report, and this is the view that
 answers it.
+
+`GET /api/runs/{id}/compare` resolves the default counterpart — the most recent
+SUCCESSFUL run of the same workflow version — so the reader is not asked to pick
+one first, which would be asking them to answer the question they came with. The
+diff itself is `GET /api/runs/{id}/compare/{otherId}`, shaped by `CompareReader`.
+
+- **Lead with the divergence point.** Two runs part company ONCE and then differ
+  in everything downstream; a list of twelve deltas has buried its answer among
+  its own symptoms. The first node that differs gets the top of the page.
+- **Spans are matched on `(step_id, kind, name, occurrence)`,** never on span id
+  — an id is random per run, so an id diff is two lists that share nothing. The
+  occurrence index is what distinguishes "the retry loop got longer" from
+  "nothing changed".
+- **`output_ref` is the signal for "the tool returned something else".** It is a
+  SHA-256 of the content, so comparing refs compares RESULTS with no payload
+  moved. The first implementation compared only presence, which left the
+  commonest cause of "it worked yesterday" invisible: a run where every step ran
+  and one of them came back different had no divergence at all.
+- **Not every delta is a divergence.** Tokens wobble between two identical runs
+  and durations always differ; treating either as divergent puts the answer on
+  the first span of every comparison. Divergent: status, output ref, input ref,
+  model, and duration past BOTH an absolute (250ms) and a relative (25%) floor.
+  Reported but not divergent: tokens, cost, context length, iteration index.
+- **Across workflow versions it REFUSES**, with an explanation and an offer —
+  not a diff with a warning on top. Every difference then has two possible causes
+  (the workflow changed, or the run behaved differently) and nothing in the diff
+  can choose between them; shown anyway it reads as a behaviour change and sends
+  somebody hunting a flaky tool when a colleague edited a prompt.
+- **Reachable in one click from the root-cause banner** — "What changed since it
+  worked?" — because the banner is where the reader already is when they think
+  it.
+- Only the steps that DIFFER are listed. On a forty-step workflow two runs
+  usually agree about thirty-eight, and listing those is how the four that matter
+  get scrolled past.
 
 ---
 
@@ -529,14 +758,58 @@ debugger and a viewer.
 | **Replay with edit** | Change the prompt, agent instructions or tool result, then run from that point | Live from the edit |
 | **Retry from step** | Existing `RETRY_NODE` | Real |
 
-Replays are marked in the trace (`replayed: true`) and never counted in success
-metrics or billed as production runs. Edited replays write to a scratch trace
-that can be promoted to a workflow version change if the fix works — which closes
-the loop from "found the bug" to "shipped the fix" inside one tab.
+Replays are marked in the trace and never counted in success metrics or billed as
+production runs. `DashboardRepository.NOT_A_REPLAY` excludes them from the running
+count, the 24-hour success and failure counts, the usage totals and the run total
+— asserted by `ReplayExclusionTest`, because the failure is invisible otherwise:
+a replay of a failed run usually succeeds, so without the exclusion the more
+carefully a failure is investigated, the healthier the workspace appears.
 
-"Replay from iteration" depends on durable loop state
-([architecture §10](./AGENT-HARNESS-ARCHITECTURE.md)); it is not buildable before
-that lands.
+#### Replay from iteration N
+
+`AgentLoopReconstructor.reconstruct` takes an optional `upToIteration`: restore
+`1..N-1`, resume at `N`. Null — the default, and what every RESUME passes —
+restores everything settled, so the resume path is unchanged by construction.
+Carried on `RuntimeContext.replayFromIteration` rather than as a job type,
+because it is the same agent loop with a ceiling on how much transcript to
+restore, not a different kind of execution.
+
+Asking for an iteration the run never reached is refused
+(`ITERATION_OUT_OF_RANGE`) rather than silently restoring less: running from a
+different place than the reader chose is the wrong answer this whole feature
+exists to remove.
+
+#### Every action states its side effects before the confirmation
+
+`GET /api/runs/{id}/replay-options` returns the four actions with a
+`sideEffects` level, a SENTENCE, and — when unavailable — the reason. Three
+levels rather than a boolean, because a replay from N is recorded up to N and
+live after it, so "does this have side effects" has no honest yes or no.
+
+Availability is decided server-side. Whether a replay from an iteration can be
+honoured depends on the shape of the persisted transcript, which the client
+cannot see; a client-side guess either offers an action the worker refuses — the
+reader spends a run finding out — or hides one that would have worked. The rules
+in `ReplayOptions.loopReplayBlocker` mirror `AgentLoopReconstructor.SkipReason`
+in the same order, and each branch names its counterpart.
+
+A disabled control always carries its reason. The failure that motivates this is
+specific: "replay from iteration 4" that quietly replays from 1 leaves the reader
+believing three iterations were restored while the run makes three live model
+calls, and every conclusion drawn from the result is wrong.
+
+`GET /api/runs/{id}/replays` returns every attempt — the original included and
+marked — so three tries at a fix are comparable and a reader can tell which row
+the workspace's numbers are about.
+
+#### Not built yet
+
+**Replay with an edit** is offered and shares the loop's eligibility, but the
+worker cannot yet accept an edited tool result at iteration N — the reconstructor
+restores what was recorded and has no override path. **Promoting a scratch trace
+to a workflow version change** needs a write path into workflow versions that
+does not exist. Both are listed here rather than silently absent, because the
+action card is visible.
 
 ---
 
@@ -578,8 +851,24 @@ payload offload, content addressing, tiered storage, and sampling that keeps
 
 Three UI-specific consequences:
 
-- **Trace completeness is shown, not assumed.** If spans were dropped under
-  buffer pressure or the run predates full instrumentation, say so on the page.
+- **Trace completeness is shown, not assumed** — and it is FOUR states, not a
+  boolean. `complete` renders nothing at all; `live` is neutral because a run
+  still going is a status and not a problem; `partial` is the only state allowed
+  to claim spans are missing, and carries the count from
+  `agent_runs.dropped_spans`; `unavailable` says the trace could not be read
+  rather than rendering an empty tree as the answer.
+
+  This replaced one amber box driven by `traceComplete`, which meant "the run
+  span is closed" and was rendered as "spans were dropped while the writer was
+  under pressure" — a cause it had no signal for. It fired on healthy completed
+  runs, because the run span was written twice and the open row never went away.
+  A warning that fires on healthy runs is worse than no warning: it teaches
+  people that amber means nothing.
+
+- **Transport state is not trace state.** "Live updates unavailable, polling
+  instead" is about SSE and says nothing about fidelity. It is a quiet inline
+  indicator beside the view controls, never a banner — bundling the two made a
+  transport hiccup look like data loss.
 - **Sampled successful runs show a reduced trace** with a clear label and an
   option to enable full capture for that workflow going forward.
 - **Warm-tier runs load asynchronously.** A 60-day-old trace comes from object

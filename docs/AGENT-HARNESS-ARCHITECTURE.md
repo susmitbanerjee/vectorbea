@@ -1401,7 +1401,32 @@ current system is trustworthy, and each one is easy to break by accident.
 5. **A child can never be allocated more than its parent's remaining budget.**
 6. **A ceiling breach is not a failure.** `CeilingExceeded` stays distinct, and
    the breached limit is always named.
-7. **Trace writes never block execution.** Bounded buffer, drop to a counter.
+7. **Trace writes never block execution — but SPANS may drop and EVENTS may
+   not.** Bounded buffer both times; what happens when it fills differs, because
+   the two are not the same kind of loss.
+
+   A dropped **span** is a degraded trace: the waterfall is thinner, the run is
+   unaffected, and nothing downstream depends on span N existing. `SpanWriter`
+   therefore drops to a counter under pressure, which is correct.
+
+   A dropped **event** is a hole in the run timeline, which pages on
+   `?afterSequence=`. The reader sees a gap it cannot explain, one event is never
+   delivered to an open stream, and a lost `RUN_FAILED` is an outage reported as
+   a success. So `RunEventStore` applies BACK-PRESSURE instead: a full buffer is
+   flushed on the emitting thread.
+
+   That block is **bounded** (`AGENT_EVENT_BACKPRESSURE_TIMEOUT_MS`, 5s). Past
+   the deadline it drops and counts, loudly. Blocking indefinitely would convert
+   a degraded timeline into a stalled fleet — every thread emitting an event
+   parked on a database that is not answering — which is the outage this
+   invariant exists to prevent, reached from the other direction. "Never blocks"
+   means never blocks *indefinitely*; it never meant "never waits".
+
+   Every drop is counted and exposed: `worker_trace_spans_dropped{cause}`,
+   `worker_run_events_dropped{cause}`, `worker_trace_exports_dropped{cause}`.
+   Span drops are additionally persisted per run on `agent_runs.dropped_spans`,
+   because "was this trace complete" is asked hours later by the Debug tab and
+   an in-memory counter dies with the process.
 8. **Cross-workspace access is impossible.** Roster resolution is
    workspace-scoped at the same boundary agent and tool lookup already are.
 9. **One engine.** A new orchestration pattern is a policy, never a second

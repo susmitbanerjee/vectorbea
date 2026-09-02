@@ -27,7 +27,7 @@ import com.vectorbea.worker.runtime.executor.LlmNodeExecutor
 import com.vectorbea.worker.runtime.executor.NodeResult
 import com.vectorbea.worker.runtime.executor.ToolNodeExecutor
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
@@ -825,8 +825,12 @@ class AgentBrainRunner(
         val reconstruction = runCatching {
             reconstructor.reconstruct(
                 config = config, state = state, budget = budget,
-                allowed = runtimeCtx.allowLoopReconstruction,
+                /* A replay-from-N is a deliberate request to rebuild, so it does
+                   not need the continuation flag a resume is gated on: the
+                   caller has already said what it wants. */
+                allowed = runtimeCtx.allowLoopReconstruction || runtimeCtx.replayFromIteration != null,
                 enabled = reconstructionEnabled,
+                upToIteration = runtimeCtx.replayFromIteration,
             )
         }.getOrElse { e ->
             /* A bug in reconstruction must not be able to fail a run. */
@@ -842,7 +846,18 @@ class AgentBrainRunner(
                 emitEvent(config, RunEventStore.EventType.AGENT_LOOP_RECONSTRUCTED, "running",
                     "Resumed at iteration ${reconstruction.resumeFromIteration} — " +
                     "${reconstruction.observationsRestored} observation(s) restored, " +
-                    "no earlier work repeated")
+                    "no earlier work repeated",
+                    /* STRUCTURED, not only prose. The inspector marks iterations
+                       before `resumeFromIteration` as recalled rather than
+                       re-executed, and parsing that number back out of a sentence
+                       would break the first time the sentence is reworded. */
+                    metadataJson = runCatching {
+                        mapper.writeValueAsString(mapOf(
+                            "resumeFromIteration" to reconstruction.resumeFromIteration,
+                            "observationsRestored" to reconstruction.observationsRestored,
+                            "tokensRestored" to reconstruction.tokensRestored,
+                        ))
+                    }.getOrNull())
             }
 
             is AgentLoopReconstructor.Outcome.Skipped -> {
@@ -1112,7 +1127,8 @@ class AgentBrainRunner(
                             obs.sanitizedSummary, budget, budgetMark,
                             observationSuccess = obs.success,
                             observationPayloadRef = obsRef,
-                            toolResultRef = outcome.resultRef)
+                            toolResultRef = outcome.resultRef,
+                            toolResultCached = outcome.cached)
 
                         /* The tool needs a person. Park the whole step on that decision
                            rather than letting the agent reason around a locked door. */
@@ -2181,10 +2197,14 @@ class AgentBrainRunner(
             mapper.readValue(cleaned, AgentAction::class.java)
         } catch (e: Exception) {
             log.warn("[brain] failed to parse action iter={}: {}", state.iteration, e.message)
-            // Return a THINK action as repair so loop can continue / fail gracefully
+            /* A THINK as repair, so the loop can continue or fail gracefully —
+               MARKED as a repair, because an unmarked one is indistinguishable
+               from the model choosing to think and sends the reader to the
+               prompt when the problem is the response format. */
             AgentAction(
                 type = AgentAction.ActionType.THINK,
                 reasoningSummary = "Failed to parse action response — trying next iteration",
+                repaired = true,
             )
         }
     }
@@ -2213,6 +2233,15 @@ class AgentBrainRunner(
          * goes in [AgentObservation.payload] and into the prompt.
          */
         val resultRef: String? = null,
+        /**
+         * True when the step guard replayed a previous identical call instead of
+         * executing this one.
+         *
+         * The observation the model then reads is the OLD result. Unmarked, a
+         * reader believes the tool ran now and returned this — and concludes an
+         * external system is serving stale data.
+         */
+        val cached: Boolean = false,
     )
 
     private suspend fun executeTool(
@@ -2292,7 +2321,7 @@ class AgentBrainRunner(
             val guard       = toolGuard
             val cached      = if (guard == null) null else replayGuardedTool(
                 guard, guardNodeId, config, runtimeCtx, toolId, state)
-            if (cached != null) return cached
+            if (cached != null) return cached.copy(cached = true)
 
             /*
              * ── THE TOOL SPAN'S PARENT ──────────────────────────────────────
@@ -2650,6 +2679,11 @@ class AgentBrainRunner(
         observationSuccess: Boolean? = null,
         observationPayloadRef: String? = null,
         toolResultRef: String? = null,
+        /**
+         * Whether the guard replayed this tool call. Null when there was no tool
+         * call at all — which is not the same as "executed fresh".
+         */
+        toolResultCached: Boolean? = null,
     ) {
         span?.close(if (status == "completed") "ok" else "error")
         if (dataSource == null || iterationId == null) return
@@ -2679,7 +2713,8 @@ class AgentBrainRunner(
                          action_json_sanitized=?::jsonb, observation_success=?,
                          observation_payload_ref=?, tool_result_ref=?,
                          selected_tool_id=?, tokens_delta=?, cost_delta_cents=?,
-                         tool_calls_delta=?, loop_schema_version=?
+                         tool_calls_delta=?, loop_schema_version=?,
+                         action_repaired=?, tool_result_cached=?
                        WHERE id=?"""
                 ).use { stmt ->
                     stmt.setString(1, status)
@@ -2702,7 +2737,10 @@ class AgentBrainRunner(
                         (budget.estimatedCostCents - (mark?.costCents ?: 0.0)).coerceAtLeast(0.0)))
                     stmt.setInt(15, (budget.toolCallsUsed - (mark?.toolCalls ?: 0)).coerceAtLeast(0))
                     stmt.setInt(16, AgentLoopReconstructor.LOOP_SCHEMA_VERSION)
-                    stmt.setObject(17, iterationId)
+                    stmt.setBoolean(17, action.repaired)
+                    if (toolResultCached == null) stmt.setNull(18, java.sql.Types.BOOLEAN)
+                    else stmt.setBoolean(18, toolResultCached)
+                    stmt.setObject(19, iterationId)
                     stmt.executeUpdate()
                 }
             }

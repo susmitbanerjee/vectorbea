@@ -83,6 +83,24 @@ data class AgentAction(
      */
     @JsonProperty("contract")
     val contract: Map<String, Any?>? = null,
+
+    /**
+     * True when the runtime built this action because the model's response could
+     * not be parsed.
+     *
+     * ── WHY THIS IS NOT INFERRABLE ──────────────────────────────────────────
+     * An unparseable response is repaired into a THINK so the loop can continue.
+     * The stored iteration is then identical to one where the model genuinely
+     * chose to think — so the trace shows deliberation where there was a parse
+     * failure, and the reader goes looking at the prompt when the problem is the
+     * response format.
+     *
+     * `@JsonIgnore` because this is a runtime fact ABOUT the parse, never
+     * something the model may claim about itself: without it a model could emit
+     * `"repaired": true` and have the debugger blame the runtime.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    val repaired: Boolean = false,
 ) {
     /**
      * Seven actions. Resist an eighth.

@@ -23,12 +23,21 @@ export function RootCauseBanner({
   loading,
   onRetryFromHere,
   onReconnect,
+  onCompare,
   className,
 }: {
   rootCause: RootCause | null;
   loading?: boolean;
   onRetryFromHere?: () => void;
   onReconnect?: () => void;
+  /**
+   * Open the comparison against the last run that worked.
+   *
+   * "It worked yesterday" is the most common report there is, and this banner is
+   * where the reader already is when they think it. Making them find a tab first
+   * is a step between the question and the answer.
+   */
+  onCompare?: () => void;
   className?: string;
 }) {
   const [expanded, setExpanded] = React.useState(true);
@@ -172,6 +181,11 @@ export function RootCauseBanner({
           {retryWorthTrying && (
             <Button size="sm" variant="secondary" onClick={onRetryFromHere}>
               Retry from here
+            </Button>
+          )}
+          {onCompare && (
+            <Button size="sm" variant="secondary" onClick={onCompare}>
+              What changed since it worked?
             </Button>
           )}
         </div>

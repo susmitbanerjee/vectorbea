@@ -6,8 +6,8 @@ import com.vectorbea.worker.runtime.checkpoint.ApprovalRow
 import com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.UUID

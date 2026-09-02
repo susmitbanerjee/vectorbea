@@ -7,8 +7,8 @@ import com.vectorbea.worker.events.SpanWriter
 import com.vectorbea.worker.runtime.executor.AgentNodeExecutor
 import com.vectorbea.worker.runtime.executor.NodeResult
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
 import com.vectorbea.worker.testsupport.RecordingEventStore
 import com.vectorbea.worker.testsupport.ScriptedLlmProvider
 import com.vectorbea.worker.testsupport.stubLlmResolver

@@ -23,6 +23,12 @@ dependencies {
     // separate `apps/telemetry` service. See docs/architecture/OBSERVABILITY.md.
     implementation("com.vectorbea:observability-kotlin:0.1.0")
 
+    // The workflow graph and the one correct reader of `graph_json`.
+    // `api` rather than `implementation`: both services expose graph types
+    // (nodes, edges) on their own APIs, and a consumer that cannot name the
+    // type it is handed has to re-declare it.
+    api("com.vectorbea:graph-kotlin:0.1.0")
+
     // JSON — Jackson with Kotlin module
     // Note: recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")

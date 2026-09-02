@@ -109,6 +109,7 @@ class RunTraceExporter(
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             /* A counter, not a log line per drop: if the collector is down, every
                run drops, and a log line each would bury the incident it describes. */
+            com.vectorbea.worker.metrics.WorkerMetrics.traceExportsDropped.inc("queue_full")
             val n = dropped.incrementAndGet()
             if (n == 1L || n % 100L == 0L) {
                 log.warn("[otel-export] queue full — {} trace(s) not exported", n)

@@ -134,9 +134,17 @@ each guard exists; most were written after a production bug.
    remaining budget.
 6. A ceiling breach is not a failure. CeilingExceeded stays a distinct
    terminal state and always names the limit that was hit.
-7. Observability never blocks execution. Span and event writes use bounded
-   buffers and drop to a counter under pressure. A dropped span is a degraded
-   trace; a blocked write is an outage.
+7. Observability never blocks execution INDEFINITELY — and spans may drop,
+   events may not. Both use bounded buffers; what a full one does differs.
+   A dropped span is a degraded trace, so SpanWriter drops and counts. A dropped
+   event is a hole in a timeline that pages on `?afterSequence=`, and a lost
+   RUN_FAILED is an outage reported as a success, so RunEventStore applies
+   back-pressure and flushes on the emitting thread. That block is bounded
+   (AGENT_EVENT_BACKPRESSURE_TIMEOUT_MS); past the deadline it drops loudly,
+   because every thread parked on a database that is not answering is the
+   outage this rule exists to prevent. Every drop is counted and exposed;
+   span drops also persist to agent_runs.dropped_spans, because "was this
+   trace complete" is asked hours later.
 8. Cross-workspace access is impossible. Agent, tool and roster lookups are
    workspace-scoped at the same boundary, and fail closed if the check errors.
 9. One engine. A new orchestration pattern is a policy over the existing

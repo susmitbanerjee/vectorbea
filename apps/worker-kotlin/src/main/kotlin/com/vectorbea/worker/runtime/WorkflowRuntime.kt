@@ -22,6 +22,7 @@ import com.vectorbea.worker.runtime.executor.NodeExecutorRegistry
 import com.vectorbea.worker.runtime.executor.NodeResult
 import com.vectorbea.worker.runtime.executor.TransformNodeExecutor
 import com.vectorbea.worker.runtime.graph.*
+import com.vectorbea.graph.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -1838,7 +1839,7 @@ class WorkflowRuntime(
      * (recorded as D26).
      */
     private fun validateContract(
-        node: com.vectorbea.worker.runtime.graph.WorkflowNode,
+        node: com.vectorbea.graph.WorkflowNode,
         ctx: RuntimeContext,
         result: NodeResult.Completed,
     ): com.vectorbea.worker.contract.ContractValidator.Verdict? {
@@ -1906,7 +1907,7 @@ class WorkflowRuntime(
      * transitive graph would produce a list nobody reads.
      */
     private fun firstDownstreamSideEffect(
-        node: com.vectorbea.worker.runtime.graph.WorkflowNode,
+        node: com.vectorbea.graph.WorkflowNode,
         scheduler: GraphScheduler,
         ctx: RuntimeContext,
     ): String? = runCatching {
@@ -2110,8 +2111,32 @@ class WorkflowRuntime(
         com.vectorbea.worker.events.RunTracer? =
         spanWriter?.let {
             com.vectorbea.worker.events.RunTracer(it, traceId = runId, runId = runId,
-                workspaceId = workspaceId)
+                workspaceId = workspaceId, runCreatedAt = runCreatedAt(runId))
         }
+
+    /**
+     * The run's durable start, for the run span's partition key.
+     *
+     * One small query per tick, and it buys the thing the run span's idempotency
+     * always depended on: a `created_at` that is the same on every tick and in
+     * every process. See [com.vectorbea.worker.events.RunTracer.runCreatedAt].
+     *
+     * Falls back to now() when the row cannot be read, which reproduces the old
+     * behaviour — a row per tick — rather than failing a run over a trace detail.
+     */
+    private fun runCreatedAt(runId: java.util.UUID): java.time.Instant =
+        runCatching {
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT COALESCE(started_at, created_at) FROM agent_runs WHERE id = ?"
+                ).use { st ->
+                    st.setObject(1, runId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) rs.getTimestamp(1)?.toInstant() else null
+                    }
+                }
+            }
+        }.getOrNull() ?: java.time.Instant.now()
 }
 
 /** Extension to find the join node for a given parallel node. */

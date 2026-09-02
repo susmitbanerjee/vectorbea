@@ -177,6 +177,7 @@ class SpanWriter(
                    already queued are closer to complete, and a trace missing its tail
                    is easier to read than one missing its middle. */
                 WorkerMetrics.spansDropped.inc("buffer_full")
+                noteDropped(span.runId, 1)
             }
         } catch (e: Throwable) {
             /* Nothing above may ever see an exception from tracing. */
@@ -211,6 +212,67 @@ class SpanWriter(
                 remaining -= batch.size
             }
         }.onFailure { log.warn("[spans] explicit flush failed: {}", it.message) }
+
+        /* The drop counts too, and AFTER the writes — a write that just failed
+           notes its own drops, and this is the caller that says "make it durable
+           now". Its caller is root-cause attribution at terminalisation, which is
+           the last moment before the Debug tab reads this run and asks whether it
+           is looking at all of it. */
+        flushDroppedCounts()
+    }
+
+    /**
+     * Per-run drop counts owed to `agent_runs.dropped_spans`, not yet written.
+     *
+     * ── WHY THIS IS PERSISTED AT ALL ────────────────────────────────────────
+     * The in-memory counter answers "is this worker dropping spans right now",
+     * which is a Prometheus question. The Debug tab asks a different one, hours
+     * later, about one run: "is what I am looking at all of it". That answer has
+     * to outlive the process that knew it.
+     *
+     * Accumulated and flushed with the next batch rather than written per drop:
+     * drops arrive precisely when the database is already the bottleneck, and an
+     * UPDATE per dropped span would be the worst possible moment to add writes.
+     */
+    private val pendingDrops = java.util.concurrent.ConcurrentHashMap<java.util.UUID, java.util.concurrent.atomic.AtomicLong>()
+
+    private fun noteDropped(runId: java.util.UUID, n: Int) {
+        pendingDrops.computeIfAbsent(runId) { java.util.concurrent.atomic.AtomicLong() }
+            .addAndGet(n.toLong())
+    }
+
+    /**
+     * Push accumulated drop counts onto the runs that lost them.
+     *
+     * Best-effort and never throws: failing to RECORD a drop must not become a
+     * second failure. If this write is lost the trace simply reports what it can
+     * see, which is the behaviour that existed before the column did.
+     */
+    private fun flushDroppedCounts() {
+        if (pendingDrops.isEmpty()) return
+        val ds = dataSource ?: return
+        val batch = pendingDrops.keys.toList().mapNotNull { runId ->
+            val n = pendingDrops.remove(runId)?.get() ?: return@mapNotNull null
+            if (n <= 0) null else runId to n
+        }
+        if (batch.isEmpty()) return
+        runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement(
+                    "UPDATE agent_runs SET dropped_spans = dropped_spans + ? WHERE id = ?"
+                ).use { st ->
+                    batch.forEach { (runId, n) ->
+                        st.setLong(1, n); st.setObject(2, runId); st.addBatch()
+                    }
+                    st.executeBatch()
+                }
+            }
+        }.onFailure { e ->
+            /* Put them back, so the next flush tries again rather than losing the
+               record of the loss. */
+            batch.forEach { (runId, n) -> noteDropped(runId, n.toInt()) }
+            log.debug("[spans] could not record dropped counts: {}", e.message)
+        }
     }
 
     /** Spans lost so far, for labelling a trace incomplete. */
@@ -228,6 +290,12 @@ class SpanWriter(
     private fun drain() {
         if (!running.get()) return
         try {
+            /* Record what was dropped BEFORE writing more. This runs on the writer
+               thread every tick, so drops reach `agent_runs` within one flush
+               interval even on a run that never writes another span — which is
+               exactly the run that dropped them. */
+            flushDroppedCounts()
+
             val batch = ArrayList<SpanRecord>(batchSize)
             queue.drainTo(batch, batchSize)
             if (batch.isEmpty()) return
@@ -261,6 +329,8 @@ class SpanWriter(
              * becomes visible.
              */
             WorkerMetrics.spansDropped.inc("write_failed", delta = batch.size.toLong())
+            batch.groupingBy { it.runId }.eachCount()
+                .forEach { (runId, n) -> noteDropped(runId, n) }
             log.warn("[spans] batch of {} discarded: {}", batch.size, e.message)
         }
     }
@@ -347,15 +417,59 @@ class SpanWriter(
         } catch (e: Exception) {
             log.warn("[spans] shutdown flush failed: {}", e.message)
         }
-        val abandoned = queue.size
-        if (abandoned > 0) {
-            WorkerMetrics.spansDropped.inc("shutdown", delta = abandoned.toLong())
-            log.warn("[spans] {} span(s) abandoned at shutdown", abandoned)
+        /* Attribute the abandoned spans to the runs that lost them, not only to a
+           process-wide counter. A worker rolling during a deploy is the single most
+           likely cause of a partial trace, and it is exactly the case where the
+           in-memory counter dies before anyone reads it. */
+        val leftover = ArrayList<SpanRecord>(queue.size)
+        queue.drainTo(leftover)
+        if (leftover.isNotEmpty()) {
+            WorkerMetrics.spansDropped.inc("shutdown", delta = leftover.size.toLong())
+            leftover.groupingBy { it.runId }.eachCount()
+                .forEach { (runId, n) -> noteDropped(runId, n) }
+            log.warn("[spans] {} span(s) abandoned at shutdown across {} run(s)",
+                leftover.size, leftover.groupingBy { it.runId }.eachCount().size)
         }
+        /* Last chance to persist: after this the counts are only in this heap. */
+        flushDroppedCounts()
         writer.shutdownNow()
     }
 }
 
+/**
+ * One row per span, where a CLOSE fills in the row its OPEN left behind.
+ *
+ * ── WHY THIS IS NOT `DO NOTHING` ────────────────────────────────────────────
+ * Exactly one span is written twice: the run span. `openRunSpan` emits it
+ * `running` immediately, because the worker that opens a run is frequently not
+ * the one that closes it — a yield, an approval or a crash hands it on — and a
+ * run span held only in memory would vanish with the process. `closeRunSpan`
+ * then emits the same span id again with the outcome.
+ *
+ * Both writes pin `created_at` to the run's start so the partition key is
+ * stable, which is what stopped the Debug tab rendering every step twice. With
+ * `DO NOTHING` that stability had a second, silent effect: the CLOSE always
+ * conflicted with the OPEN and was discarded. Every run span in the database
+ * said `running`, with no `ended_at` and no `duration_ms`, forever — so the
+ * waterfall had no axis to scale against, `traceComplete` was false on every
+ * healthy run, and the run bar fell back to guessing from the longest child.
+ *
+ * ── WHY THE `WHERE` CLAUSE IS THE WHOLE FIX ─────────────────────────────────
+ * A bare `DO UPDATE` would trade one bug for a worse one. The queue can redeliver
+ * a job to a second worker after the first has already closed the run, and that
+ * worker calls `openRunSpan` again — with `status = 'running'` and a null
+ * `ended_at`. Unguarded, a finished run would flip back to running and stay
+ * there.
+ *
+ * So the update applies only when an OPEN row is being completed:
+ *   - `run_spans.ended_at IS NULL`   — the stored row is still open
+ *   - `EXCLUDED.ended_at IS NOT NULL` — the incoming write is a close
+ *
+ * Which makes every combination correct and idempotent: open→close completes it,
+ * close→close is a no-op (first close wins), open→open is a no-op, and
+ * close→open cannot reopen anything. Ordinary spans are unaffected — they are
+ * emitted once, on close, and never conflict at all.
+ */
 private const val INSERT_SQL = """
     INSERT INTO run_spans (
         span_id, trace_id, run_id, parent_span_id, workspace_id,
@@ -364,5 +478,17 @@ private const val INSERT_SQL = """
         attributes_json, input_ref, output_ref, error_json, failure_class,
         tokens_in, tokens_out, cost_cents, created_at
     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?::jsonb,?,?,?,?,?)
-    ON CONFLICT (span_id, created_at) DO NOTHING
+    ON CONFLICT (span_id, created_at) DO UPDATE SET
+        status        = EXCLUDED.status,
+        ended_at      = EXCLUDED.ended_at,
+        duration_ms   = EXCLUDED.duration_ms,
+        self_ms       = EXCLUDED.self_ms,
+        attributes_json = EXCLUDED.attributes_json,
+        output_ref    = EXCLUDED.output_ref,
+        error_json    = EXCLUDED.error_json,
+        failure_class = EXCLUDED.failure_class,
+        tokens_in     = EXCLUDED.tokens_in,
+        tokens_out    = EXCLUDED.tokens_out,
+        cost_cents    = EXCLUDED.cost_cents
+    WHERE run_spans.ended_at IS NULL AND EXCLUDED.ended_at IS NOT NULL
 """

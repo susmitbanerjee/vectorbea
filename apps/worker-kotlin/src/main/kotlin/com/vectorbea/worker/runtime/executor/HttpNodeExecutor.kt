@@ -12,7 +12,7 @@ import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.metrics.WorkerMetrics
 import com.vectorbea.worker.net.OutboundHttp
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.net.URI
 import java.net.http.HttpRequest
 import java.util.UUID

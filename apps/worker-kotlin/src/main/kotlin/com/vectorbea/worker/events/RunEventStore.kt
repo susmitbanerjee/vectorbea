@@ -48,6 +48,30 @@ open class RunEventStore(
         System.getenv("AGENT_EVENT_BATCH_SIZE")?.toIntOrNull()?.coerceIn(1, 500) ?: 50,
     private val flushEveryMs: Long =
         System.getenv("AGENT_EVENT_FLUSH_MS")?.toLongOrNull()?.coerceIn(10, 5_000) ?: 250L,
+    /**
+     * How long a full buffer may block the emitting thread before it gives up
+     * and drops.
+     *
+     * ── WHY BACK-PRESSURE IS BOUNDED AND NOT UNLIMITED ──────────────────────
+     * Blocking on a full buffer is deliberate: an event is not a span. The run
+     * timeline pages on `?afterSequence=`, so a dropped event is a hole a reader
+     * can see and cannot explain, and a lost RUN_FAILED is an outage reported as
+     * a success. Dropping to a counter — which is right for spans — is wrong
+     * here. Invariant 7 now says so explicitly.
+     *
+     * But "never drop" cannot mean "block forever". If Postgres is refusing
+     * writes, an unbounded block converts a degraded timeline into a stalled
+     * worker: every thread emitting an event parks, the pools drain, and the
+     * fleet stops executing runs. That is the outage invariant 7 exists to
+     * prevent, arrived at from the other direction.
+     *
+     * So: try to flush synchronously, and if the buffer is STILL full after this
+     * long, drop loudly. Five seconds is far longer than a healthy flush (a
+     * 50-row insert is single-digit milliseconds) and far shorter than a tick.
+     */
+    private val backPressureTimeoutMs: Long =
+        System.getenv("AGENT_EVENT_BACKPRESSURE_TIMEOUT_MS")?.toLongOrNull()
+            ?.coerceIn(100, 60_000) ?: 5_000L,
 ) {
     private val log = logger()
 
@@ -103,6 +127,12 @@ open class RunEventStore(
      * full buffer flushes on the emitting thread rather than discarding.
      */
     private val pending = java.util.concurrent.ConcurrentHashMap<UUID, ArrayDeque<RunEvent>>()
+
+    /** Events lost to a failed flush. Mirrors `SpanWriter.droppedCount()`. */
+    private val dropped = java.util.concurrent.atomic.AtomicLong()
+
+    /** How many events this store has discarded. Never expected to be non-zero. */
+    open fun droppedCount(): Long = dropped.get()
 
     private val flusher = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { r ->
         Thread(r, "run-event-flush").also { it.isDaemon = true }
@@ -414,7 +444,49 @@ open class RunEventStore(
         } finally {
             lock.unlock()
         }
-        if (full) flush(event.runId)
+        if (full) flushWithBackPressure(event.runId)
+    }
+
+    /**
+     * Flush a full buffer on the caller's thread — but not for ever.
+     *
+     * The block is the feature (see [backPressureTimeoutMs]); the bound is what
+     * keeps it from becoming an outage. Past the deadline the buffer is emptied
+     * and the events are COUNTED, so a timeline gap is always attributable.
+     */
+    private fun flushWithBackPressure(runId: UUID) {
+        val deadline = System.currentTimeMillis() + backPressureTimeoutMs
+        while (true) {
+            flush(runId)
+            val stillFull = withRunLock(runId) { (pending[runId]?.size ?: 0) >= batchSize }
+            if (!stillFull) return
+            if (System.currentTimeMillis() >= deadline) break
+            /* The database is refusing writes. Sleeping briefly rather than
+               spinning: the retry is cheap and the alternative is burning a core
+               while Postgres recovers. */
+            runCatching { Thread.sleep(25) }
+        }
+
+        val abandoned = withRunLock(runId) {
+            val q = pending[runId] ?: return@withRunLock 0
+            val n = q.size
+            q.clear()
+            n
+        }
+        if (abandoned > 0) {
+            com.vectorbea.worker.metrics.WorkerMetrics.eventsDropped
+                .inc("back_pressure_timeout", delta = abandoned.toLong())
+            dropped.addAndGet(abandoned.toLong())
+            log.error("[events] buffer still full after {}ms — dropped {} event(s) [runId={}]. " +
+                "The run timeline will have a gap; blocking longer would stall the worker.",
+                backPressureTimeoutMs, abandoned, runId)
+        }
+    }
+
+    private fun <T> withRunLock(runId: UUID, body: () -> T): T {
+        val lock = runLocks[runId] ?: return body()
+        lock.lock()
+        try { return body() } finally { lock.unlock() }
     }
 
     /**
@@ -441,6 +513,13 @@ open class RunEventStore(
         try {
             appendEvents(batch)
         } catch (e: Exception) {
+            /* COUNTED, not just logged. This is the one place events are lost, and
+               until now the only trace of it was a log line nobody aggregates —
+               while the Debug tab was separately claiming drops it had no signal
+               for. `write_failed` is the only cause that reaches here: the buffer
+               applies back-pressure rather than discarding. */
+            com.vectorbea.worker.metrics.WorkerMetrics.eventsDropped.inc("write_failed", delta = batch.size.toLong())
+            dropped.addAndGet(batch.size.toLong())
             log.error("[events] flush of {} buffered event(s) failed [runId={}]: {}",
                 batch.size, runId, e.message)
         }

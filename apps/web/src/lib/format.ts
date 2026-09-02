@@ -53,6 +53,24 @@ export function formatCost(usd: number | null | undefined): string {
   return `$${usd.toFixed(2)}`;
 }
 
+/**
+ * Cost in CENTS, which is the unit the trace API speaks.
+ *
+ * ── WHY THIS EXISTS SEPARATELY FROM formatCost ──────────────────────────────
+ * `run_spans.cost_cents` is cents; every other cost surface in the app is USD.
+ * The Debug tab had its own `formatCost` taking cents, sharing a NAME with this
+ * module's `formatCost` taking dollars — two functions, same name, different
+ * units, one import away from a bill rendered 100× wrong. Naming the unit is the
+ * fix; a comment on a collision is not.
+ *
+ * Sub-cent still gets a real number, because "$0.00" for a real charge reads as
+ * free and this is the screen where people ask what a run cost.
+ */
+export function formatCostCents(cents: number | null | undefined): string {
+  if (cents == null || !Number.isFinite(cents) || cents === 0) return EMPTY;
+  return formatCost(cents / 100);
+}
+
 /** Token counts: `842` · `12.4k` · `1.8M`. Zero renders as the em dash. */
 export function formatTokens(count: number | null | undefined): string {
   if (count == null || !Number.isFinite(count) || count === 0) return EMPTY;

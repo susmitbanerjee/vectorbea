@@ -88,6 +88,109 @@ class AgentLoopReconstructionTest {
         } finally { f.cleanup() }
     }
 
+    // ── §6 REPLAY FROM ITERATION: the debugger's own use of this machinery ────
+
+    /**
+     * ACCEPTANCE: replay from iteration 4 makes ZERO provider calls for 1–3 and
+     * live calls from 4.
+     *
+     * ── WHY THIS IS THE DIFFERENCE BETWEEN A DEBUGGER AND A VIEWER ──────────
+     * Resume restores everything settled and continues; a replay restores to a
+     * point the READER chose and runs live from there. Without a bound the only
+     * options are "carry on from where it stopped" and "start again from 1", and
+     * a tool that can only do the second cannot answer "what would it have done
+     * if the tool had returned something else".
+     *
+     * The provider is scripted with exactly the calls the replay should make. If
+     * the loop replays iterations 1–3 it runs out of script and fails loudly,
+     * which is the only way to prove a NEGATIVE — that three calls did not
+     * happen — rather than asserting a count that a silent extra call could also
+     * satisfy.
+     */
+    @Test
+    fun `replay from iteration 4 makes no provider calls for the first three`() = runBlocking {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")
+        val f = fixture(ds!!)
+        try {
+            /* A complete run of five iterations: four THINKs and a FINAL. */
+            f.llm.thenAction(THINK.format(1)).thenAction(THINK.format(2))
+                .thenAction(THINK.format(3)).thenAction(THINK.format(4)).thenAction(FINAL)
+            val original = f.runner().run(f.config(maxIterations = 10), f.runtimeContext())
+
+            assertEquals(StopReason.FINAL_OUTPUT, original.stopReason)
+            assertEquals(5, f.llm.callCount(), "five iterations, five provider calls")
+            assertEquals(5, f.iterationCount())
+
+            /*
+             * Replay from 4. Iterations 1–3 are restored from the transcript;
+             * 4 onward runs live. TWO responses scripted — the new 4 and a FINAL —
+             * so a replay from 1 exhausts the script on its fourth call.
+             */
+            f.llm.reset()
+            f.llm.thenAction(THINK.format(4)).thenAction(FINAL)
+            val replayed = f.runner().run(f.config(maxIterations = 10), f.replayContext(fromIteration = 4))
+
+            assertEquals(StopReason.FINAL_OUTPUT, replayed.stopReason)
+            assertEquals(2, f.llm.callCount(),
+                "iterations 1-3 must be restored, not re-asked: expected the new " +
+                "iteration 4 and its FINAL only")
+            assertTrue(f.events.hasType(EventType.AGENT_LOOP_RECONSTRUCTED),
+                "the replay must go through reconstruction, not through a fresh start")
+        } finally { f.cleanup() }
+    }
+
+    /** Replay from 1 is a full replay: nothing to restore, everything live. */
+    @Test
+    fun `replay from iteration 1 runs the whole loop again`() = runBlocking {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")
+        val f = fixture(ds!!)
+        try {
+            f.llm.thenAction(THINK.format(1)).thenAction(THINK.format(2)).thenAction(FINAL)
+            f.runner().run(f.config(maxIterations = 10), f.runtimeContext())
+            assertEquals(3, f.llm.callCount())
+
+            f.llm.reset()
+            f.llm.thenAction(THINK.format(1)).thenAction(THINK.format(2)).thenAction(FINAL)
+            f.runner().run(f.config(maxIterations = 10), f.replayContext(fromIteration = 1))
+
+            assertEquals(3, f.llm.callCount(),
+                "from 1 there is nothing to restore, so every iteration runs live")
+        } finally { f.cleanup() }
+    }
+
+    /**
+     * Asking to replay from an iteration the run never reached REFUSES.
+     *
+     * Restoring less than was asked for and running from a different place than
+     * the reader chose is the silent-wrong-answer this whole feature exists to
+     * remove.
+     */
+    @Test
+    fun `replay from an iteration the run never reached is refused`() = runBlocking {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping")
+        val f = fixture(ds!!)
+        try {
+            f.llm.thenAction(THINK.format(1)).thenAction(FINAL)
+            f.runner().run(f.config(maxIterations = 10), f.runtimeContext())
+            assertEquals(2, f.iterationCount())
+
+            val cfg = f.config(maxIterations = 10)
+            val budget = com.vectorbea.worker.agents.brain.model.AgentBudget(
+                maxIterations = 10, maxToolCalls = 10,
+                maxTotalTokens = 100_000, maxCostCents = 1_000, timeoutMs = 60_000)
+            val outcome = AgentLoopReconstructor(ds, null).reconstruct(
+                config = cfg,
+                state = com.vectorbea.worker.agents.brain.model.AgentLoopState(cfg, budget),
+                budget = budget,
+                allowed = true, enabled = true,
+                upToIteration = 9,
+            )
+            val skipped = outcome as AgentLoopReconstructor.Outcome.Skipped
+            assertEquals(AgentLoopReconstructor.SkipReason.ITERATION_OUT_OF_RANGE, skipped.reason)
+            assertTrue(skipped.detail!!.contains("only settled 2"))
+        } finally { f.cleanup() }
+    }
+
     @Test
     fun `a crash-loss resume mid-step also makes zero repeated calls`() = runBlocking {
         // Substituted for the tick-budget yield, which cannot interrupt an agent

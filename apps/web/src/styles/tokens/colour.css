@@ -129,6 +129,35 @@
   --pulse-600: #0c93b4;
   --pulse-700: #0a748f;
   --pulse-950: #06283a;
+
+  /* ── Chart sequence — CATEGORICAL, and never a status. ──────────────────────
+     A stacked band is an AGENT, not an outcome. Borrowing the status ramp would
+     make the expensive member red and say it failed; borrowing iris would make
+     one band mean "this is ours". Neither is a claim a chart may make about a
+     category, so the sequence is its own thing.
+
+     Six, because a seventh band on one run is a chart nobody reads anyway — the
+     view cycles and the legend names them. Ordered by hue distance rather than
+     by wheel position, so ADJACENT bands are the easiest pairs to tell apart,
+     which is the comparison a stacked chart actually asks for.
+
+     Every hue here is at least 40° from verdant (success), signal (failure),
+     pulse (running), ember (waiting) and iris (brand), so no band can be
+     mistaken for a state. */
+  --chart-1: #7c8cf8;   /* periwinkle  */
+  --chart-2: #f0a35e;   /* apricot     */
+  --chart-3: #57c8b0;   /* teal        */
+  --chart-4: #c88ae0;   /* orchid      */
+  --chart-5: #8fb339;   /* moss        */
+  --chart-6: #e07a9a;   /* rose        */
+
+  /* Light-theme steps: the same hues, darkened for contrast against paper. */
+  --chart-1-light: #4d5fd6;
+  --chart-2-light: #b96f22;
+  --chart-3-light: #1f8f79;
+  --chart-4-light: #9550b8;
+  --chart-5-light: #5f7d1c;
+  --chart-6-light: #b64a6c;
 }
 
 /* ════════════════════════════════════════════════════════════════════════════
@@ -189,6 +218,14 @@
   --accent-active: var(--iris-500);
   --accent-subtle: var(--iris-950);
   --accent-border: var(--iris-500); /* iris-800 measured 1.5:1 on the tint */
+
+  /* ── Chart bands. Categorical, never a status. ────────────────────────── */
+  --chart-band-1: var(--chart-1);
+  --chart-band-2: var(--chart-2);
+  --chart-band-3: var(--chart-3);
+  --chart-band-4: var(--chart-4);
+  --chart-band-5: var(--chart-5);
+  --chart-band-6: var(--chart-6);
 
   /* ── Status — NEVER the brand hue. ────────────────────────────────────────
      Each -subtle is the badge fill; the base colour is both the glyph colour
@@ -289,6 +326,14 @@
   --fg-disabled: var(--paper-400);
   --fg-on-accent: var(--paper-0);
   --fg-link: var(--iris-600);
+
+  /* ── Chart bands — the darker steps, for contrast against paper. ──────── */
+  --chart-band-1: var(--chart-1-light);
+  --chart-band-2: var(--chart-2-light);
+  --chart-band-3: var(--chart-3-light);
+  --chart-band-4: var(--chart-4-light);
+  --chart-band-5: var(--chart-5-light);
+  --chart-band-6: var(--chart-6-light);
 
   /* ── Brand ────────────────────────────────────────────────────────────── */
   --accent: var(--iris-600);
@@ -396,6 +441,14 @@
   --color-status-live: var(--status-live);
   --color-status-live-subtle: var(--status-live-subtle);
   --color-status-live-border: var(--status-live-border);
+  /* Chart bands → bg-chart-N / fill-chart-N. Categorical, never a status. */
+  --color-chart-1: var(--chart-band-1);
+  --color-chart-2: var(--chart-band-2);
+  --color-chart-3: var(--chart-band-3);
+  --color-chart-4: var(--chart-band-4);
+  --color-chart-5: var(--chart-band-5);
+  --color-chart-6: var(--chart-band-6);
+
   --color-status-waiting: var(--status-waiting);
   --color-status-waiting-subtle: var(--status-waiting-subtle);
   --color-status-waiting-border: var(--status-waiting-border);

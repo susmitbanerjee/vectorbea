@@ -7,7 +7,7 @@ import com.vectorbea.worker.agents.orchestration.AgentHarness
 import com.vectorbea.worker.events.RunTracer
 import com.vectorbea.worker.events.SpanWriter
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowGraph
 import com.vectorbea.worker.testsupport.RecordingEventStore
 import com.vectorbea.worker.testsupport.ScriptedLlmProvider
 import com.vectorbea.worker.testsupport.stubLlmResolver

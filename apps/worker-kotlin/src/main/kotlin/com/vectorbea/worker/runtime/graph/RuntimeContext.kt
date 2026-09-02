@@ -1,5 +1,8 @@
 package com.vectorbea.worker.runtime.graph
 
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
+
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -67,6 +70,19 @@ class RuntimeContext(
      * this parameter deleted.
      */
     val allowLoopReconstruction: Boolean = false,
+    /**
+     * Replay this agent step from iteration N, restoring 1..N-1 and running live
+     * from N onward.
+     *
+     * ── WHY THIS IS A CONTEXT FIELD AND NOT A JOB TYPE ──────────────────────
+     * It is not a different kind of execution — it is the SAME agent loop with a
+     * ceiling on how much of its transcript to restore. A separate job type would
+     * duplicate the whole dispatch path to change one integer.
+     *
+     * Null on every ordinary run and every resume, so the resume path is
+     * unchanged by construction. Only a replay request sets it.
+     */
+    val replayFromIteration: Int? = null,
     /**
      * Trace bookkeeping for this run execution, or null when tracing is off.
      *

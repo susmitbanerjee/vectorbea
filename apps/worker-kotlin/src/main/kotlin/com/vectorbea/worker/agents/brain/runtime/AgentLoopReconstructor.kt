@@ -72,6 +72,8 @@ class AgentLoopReconstructor(
         NON_CONTIGUOUS,         // a hole in the numbering: a row was lost
         MALFORMED_ROW,          // action json unreadable
         READ_FAILED,            // the query itself failed
+        /** Asked to replay from an iteration this run never reached. */
+        ITERATION_OUT_OF_RANGE,
     }
 
     sealed class Outcome {
@@ -112,12 +114,32 @@ class AgentLoopReconstructor(
      * Mutates [state] and [budget] ONLY on the success path, so a refusal leaves a
      * pristine loop for the caller to run normally.
      */
+    /**
+     * Rebuild loop state from the persisted transcript.
+     *
+     * @param upToIteration Restore only iterations `1..upToIteration` and resume at
+     *   `upToIteration + 1`. Null — the default, and what every RESUME passes —
+     *   restores everything settled, which is today's behaviour exactly.
+     *
+     *   ── WHY THIS PARAMETER EXISTS AND WHY IT IS NULLABLE ─────────────────
+     *   "Replay from iteration 4" is the debugger asking for the loop to be
+     *   restored to the state it was in BEFORE iteration 4 and then run live from
+     *   there — which is this function with a ceiling. Without it the only
+     *   choices are "resume where it stopped" and "start again from 1", and a
+     *   debugger that can only do the second is a viewer.
+     *
+     *   It defaults to null so no resume caller passes it and the resume path is
+     *   unchanged by construction. That matters: what happens on resume is on
+     *   the list of things not to alter without asking, and an optional ceiling
+     *   nobody supplies alters nothing.
+     */
     fun reconstruct(
         config: AgentBrainConfig,
         state: AgentLoopState,
         budget: AgentBudget,
         allowed: Boolean,
         enabled: Boolean,
+        upToIteration: Int? = null,
     ): Outcome {
         if (!enabled) return Outcome.Skipped(SkipReason.DISABLED)
         if (!allowed)  return Outcome.Skipped(SkipReason.NOT_A_CONTINUATION)
@@ -140,8 +162,36 @@ class AgentLoopReconstructor(
          * up to N-1 and let N execute again, where the step guard covers any tool
          * call it repeats.
          */
-        val settled = rows.filter { it.status == "completed" || it.status == "failed" }
-        if (settled.isEmpty()) return Outcome.Skipped(SkipReason.NO_ITERATIONS)
+        val allSettled = rows.filter { it.status == "completed" || it.status == "failed" }
+        if (allSettled.isEmpty()) return Outcome.Skipped(SkipReason.NO_ITERATIONS)
+
+        /*
+         * The ceiling, when the debugger asked for one.
+         *
+         * Applied BEFORE the contiguity check, so "replay from 4" on a run of ten
+         * validates 1..3 and ignores 4..10 — which is the point: everything from
+         * the chosen iteration onward is about to be re-executed live, so whether
+         * those rows are well-formed is irrelevant.
+         *
+         * Asking to replay from an iteration the run never reached is a request
+         * that cannot be honoured, and refusing loudly beats restoring less than
+         * was asked for and running from a different place than the reader chose.
+         */
+        val settled = when {
+            upToIteration == null -> allSettled
+            upToIteration <= 1 -> emptyList()
+            else -> allSettled.filter { it.iterationNumber < upToIteration }
+        }
+        if (upToIteration != null && upToIteration - 1 > allSettled.size) {
+            return Outcome.Skipped(SkipReason.ITERATION_OUT_OF_RANGE,
+                "asked to replay from iteration $upToIteration, but the run only " +
+                "settled ${allSettled.size}")
+        }
+        if (settled.isEmpty()) {
+            /* Replay from 1 IS a full replay, and the caller is entitled to it —
+               there is simply nothing to restore. */
+            return Outcome.Skipped(SkipReason.NO_ITERATIONS)
+        }
 
         /*
          * `skipped` is in the CHECK constraint and has never been written, and the

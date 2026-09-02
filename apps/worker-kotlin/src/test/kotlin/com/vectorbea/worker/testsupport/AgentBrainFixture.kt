@@ -5,7 +5,7 @@ import com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner
 import com.vectorbea.worker.runtime.checkpoint.ApprovalRow
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowGraph
 import java.util.UUID
 
 /**
@@ -149,6 +149,23 @@ class AgentBrainFixture(
         workflowInput     = emptyMap(),
         graph             = WorkflowGraph(),
         allowLoopReconstruction = allowReconstruction,
+    )
+
+    /**
+     * A REPLAY FROM ITERATION N: restore 1..N-1, run live from N.
+     *
+     * Deliberately does not set `allowLoopReconstruction` — a replay request is
+     * its own permission, and passing both would hide whether the bound alone is
+     * enough to reach the reconstruction path.
+     */
+    fun replayContext(fromIteration: Int) = RuntimeContext(
+        runId             = runId,
+        workspaceId       = workspaceId,
+        environmentId     = environmentId,
+        workflowVersionId = versionId,
+        workflowInput     = emptyMap(),
+        graph             = WorkflowGraph(),
+        replayFromIteration = fromIteration,
     )
 
     /** Iteration rows on file for this (run, step). */

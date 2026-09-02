@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 
 import com.vectorbea.worker.mapping.InMemoryStepOutputView
 import com.vectorbea.worker.runtime.graph.*
+import com.vectorbea.graph.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.UUID

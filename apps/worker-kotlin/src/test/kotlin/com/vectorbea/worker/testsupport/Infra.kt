@@ -237,9 +237,30 @@ object Infra {
             ?: jaeger!!.let { "http://${it.host}:${it.getMappedPort(4318)}" }
     }
 
-    /** Jaeger's query API, for asserting a trace was ingested and not merely sent. */
+    /**
+     * Jaeger's query API, for asserting a trace was ingested and not merely sent.
+     *
+     * ── WHY THIS DERIVES FROM THE OTLP ENDPOINT ─────────────────────────────
+     * Supplying `TEST_OTLP_ENDPOINT` means no container is started, so `jaeger`
+     * is null — and `jaeger!!` then threw a bare NullPointerException naming
+     * nothing. That is precisely the failure this file exists to replace: a test
+     * that dies without saying what is missing is only marginally better than one
+     * that skips.
+     *
+     * The compose file and the CI service both publish the collector and the
+     * query API from the same host, so deriving one from the other is right far
+     * more often than it is wrong, and `TEST_JAEGER_QUERY_URL` overrides it when
+     * it is. If neither can be worked out, DEMAND — with the variable named.
+     */
     val jaegerQueryUrl: String by lazy {
         System.getenv("TEST_JAEGER_QUERY_URL")
-            ?: jaeger!!.let { "http://${it.host}:${it.getMappedPort(16686)}" }
+            ?: System.getenv("TEST_OTLP_ENDPOINT")?.let { otlp ->
+                runCatching {
+                    val u = java.net.URI(otlp)
+                    "${u.scheme}://${u.host}:16686"
+                }.getOrNull()
+            }
+            ?: jaeger?.let { "http://${it.host}:${it.getMappedPort(16686)}" }
+            ?: demand("Jaeger's query API", "TEST_JAEGER_QUERY_URL", "jaeger")
     }
 }

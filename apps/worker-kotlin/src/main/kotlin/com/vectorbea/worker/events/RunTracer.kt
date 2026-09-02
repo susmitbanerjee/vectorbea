@@ -41,6 +41,31 @@ class RunTracer(
     val traceId: UUID,
     val runId: UUID,
     val workspaceId: UUID,
+    /**
+     * The run's DURABLE start, used as `created_at` for the run span.
+     *
+     * ── WHY THIS IS NOT `Instant.now()` ─────────────────────────────────────
+     * `run_spans` is partitioned by `created_at`, so its primary key is
+     * `(span_id, created_at)` and `ON CONFLICT (span_id, created_at) DO NOTHING`
+     * only deduplicates when `created_at` matches EXACTLY.
+     *
+     * The run span's id is derived from the run id, so every tick rewrites the
+     * same span — which is deliberate, and which the code claimed was
+     * "idempotent on its derived id". It was not: the open passed this tick's
+     * `System.currentTimeMillis()` and the close passed a different one taken a
+     * few lines earlier, so each write landed on a different `created_at` and
+     * none of them conflicted. A run that yielded twice left four `run` rows.
+     *
+     * Every one of them has `parent_span_id IS NULL`, so the trace reader saw
+     * four roots and emitted the entire tree under each — the Debug tab showing
+     * every step four times, with identical durations.
+     *
+     * Anchoring to the run's own start makes the id and the partition key equally
+     * stable, which is what the idempotency claim needed all along. Defaults to
+     * now() so a caller without the run row still works — one row per tick is the
+     * old behaviour, and the reader deduplicates regardless.
+     */
+    private val runCreatedAt: Instant = Instant.now(),
 ) {
     /** Open spans: spanId -> start instant, parent, and accumulated child time. */
     private class Open(
@@ -214,7 +239,10 @@ class RunTracer(
             spanId = runSpanId, traceId = traceId, runId = runId,
             parentSpanId = null, workspaceId = workspaceId,
             kind = "run", name = name, status = "running",
-            startedAt = startedAt, createdAt = startedAt,
+            /* startedAt is what the span SAYS; runCreatedAt is where it LIVES.
+               They are different questions and only the second one has to be
+               stable across ticks. */
+            startedAt = startedAt, createdAt = runCreatedAt,
         ))
     }
 
@@ -238,7 +266,7 @@ class RunTracer(
             durationMs = (ended.toEpochMilli() - startedAt.toEpochMilli()).coerceAtLeast(0).toInt(),
             selfMs = null,
             failureClass = failureClass,
-            createdAt = startedAt,
+            createdAt = runCreatedAt,
         ))
     }
 

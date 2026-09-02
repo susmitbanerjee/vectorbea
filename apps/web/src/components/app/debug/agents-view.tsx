@@ -38,13 +38,31 @@ import {
       hover is instant rather than a request.
    ══════════════════════════════════════════════════════════════════════════ */
 
+/*
+ * ── STATUS COLOURS, FROM TOKENS THAT ACTUALLY EXIST ─────────────────────────
+ * This table named `status-ok` and `status-warning`. Neither is a token — the
+ * status ramp is success / failed / waiting / live / queued / cancelled — so
+ * every succeeded node and every waiting node was drawn with no fill and no
+ * stroke at all. The lint rule does not catch it because the names LOOK
+ * semantic, which is exactly why the vocabulary lives in one module now.
+ */
 const STATUS_FILL: Record<string, string> = {
-  succeeded: "fill-status-ok/20 stroke-status-ok",
+  succeeded: "fill-status-success/20 stroke-status-success",
   failed: "fill-status-failed/20 stroke-status-failed",
   running: "fill-status-live/20 stroke-status-live",
-  waiting_for_approval: "fill-status-warning/20 stroke-status-warning",
-  waiting_for_child: "fill-status-warning/20 stroke-status-warning",
-  handed_off: "fill-surface-raised stroke-border-strong",
+  waiting_for_approval: "fill-status-waiting/20 stroke-status-waiting",
+  waiting_for_child: "fill-status-waiting/20 stroke-status-waiting",
+  /*
+   * HANDED OFF IS ITS OWN STATE, and deliberately neither green nor red.
+   *
+   * A router that correctly transferred did its job: it is not a success (it
+   * produced no answer) and it is emphatically not a failure. Given the success
+   * hue it would inflate a success rate; given the failure hue it would send
+   * somebody debugging a working router. So: the brand ramp, which means "this
+   * is a thing the system did" and carries no verdict — the one place brand is
+   * allowed near status, because the point is that there is no status.
+   */
+  handed_off: "fill-brand/10 stroke-brand",
   cancelled: "fill-surface-raised stroke-border-subtle",
   superseded: "fill-surface-raised stroke-border-subtle",
   pending: "fill-surface-raised stroke-border-subtle",
@@ -68,7 +86,7 @@ const KIND_STYLE: Record<string, string> = {
   TRANSFER: "stroke-brand",
   BROADCAST: "stroke-status-live",
   RETURN: "stroke-border-subtle",
-  ESCALATE: "stroke-status-warning",
+  ESCALATE: "stroke-status-waiting",
 };
 
 export function AgentsView({
@@ -85,13 +103,39 @@ export function AgentsView({
   const l = React.useMemo(() => layout(constellation), [constellation]);
   const groups = React.useMemo(() => joinGroups(constellation.edges), [constellation.edges]);
   const [hovered, setHovered] = React.useState<PlacedEdge | null>(null);
+  const guard = constellation.loopGuard;
 
+  /*
+   * ── THE PATH THAT ENDED IN THE FAILURE ──────────────────────────────────
+   * The server marks the activation that owns the root-cause span and every
+   * ancestor of it, because the failing span is usually a tool call several
+   * levels below the agent worth looking at. Emphasising the chain means the eye
+   * follows the delegation that broke instead of scanning twelve nodes.
+   */
+  const onPath = React.useMemo(
+    () => new Set(constellation.nodes.filter((n) => n.onRootCausePath).map((n) => n.id)),
+    [constellation.nodes],
+  );
+  const pathEdge = (e: PlacedEdge) =>
+    e.from != null && onPath.has(e.from) && onPath.has(e.to);
+
+  /*
+   * ── ONE NODE IS A VALID CONSTELLATION ───────────────────────────────────
+   * P6 routed the EXISTING single-agent path through the activation, so a
+   * single-agent run has exactly one activation and draws as one node. That is
+   * the model being uniform, not an empty state — and the previous copy here
+   * ("a single-agent run without activations enabled looks like this") said the
+   * opposite, which would send somebody looking for a setting that does not
+   * exist.
+   *
+   * This branch is now only reached by a run that predates activations.
+   */
   if (l.nodes.length === 0) {
     return (
       <div className={cn("rounded-lg border border-subtle p-6", className)}>
         <Text variant="body-sm" tone="secondary">
-          This run had no agent activations, so there is no constellation to draw. A
-          single-agent run without activations enabled looks like this.
+          No activations were recorded for this run. Runs from before the agent
+          harness shipped have none; every run since has at least one.
         </Text>
       </div>
     );
@@ -124,9 +168,9 @@ export function AgentsView({
         </div>
       ) : null}
 
-      {/* The cycles, with the guard that stopped them. */}
+      {/* The cycles, with the guard that is supposed to catch them. */}
       {l.loops.length > 0 ? (
-        <div className="rounded-lg border border-status-warning/40 bg-surface-raised p-3">
+        <div className="rounded-lg border border-status-waiting-border bg-surface-raised p-3">
           <Text variant="label" tone="secondary" className="block">Repeated handoffs</Text>
           <ul className="mt-1.5 grid gap-1">
             {l.loops.map((loop) => (
@@ -137,11 +181,23 @@ export function AgentsView({
                 <Text variant="body-sm" tone="secondary" className="tabular">
                   ×{loop.hits}
                 </Text>
-                {/* The GUARD, named. A hit counter alone says the loop happened;
-                    the guard's name says what ended it, which is the half that
-                    tells somebody whether to raise a limit or fix a prompt. */}
+                {/*
+                  THE GUARD, NAMED — AND ITS REAL STATE.
+
+                  A hit counter alone says the loop happened; the guard says what
+                  is supposed to end it, which is the half that tells somebody
+                  whether to raise a limit or fix a prompt.
+
+                  It used to read "stopped by HANDOFF_LOOP", which is a claim the
+                  data cannot support: HANDOFF_LOOP is a defined stop reason with
+                  no construction site in the runtime — joins, fan-out and the
+                  loop guard land in a later phase. So the server sends whether it
+                  is enforced, and this says which.
+                */}
                 <Text variant="caption" tone="secondary">
-                  stopped by HANDOFF_LOOP on the same contract hash
+                  {guard?.enforced
+                    ? `stopped by ${guard.name} — ${guard.rule}`
+                    : `${guard?.name ?? "HANDOFF_LOOP"} would catch this (${guard?.rule ?? "the same request repeated along the same edge"}), but it is not enforced yet — nothing stopped this loop`}
                 </Text>
               </li>
             ))}
@@ -155,7 +211,11 @@ export function AgentsView({
           height={l.height}
           viewBox={`0 0 ${l.width} ${l.height}`}
           role="img"
-          aria-label={`Handoff constellation: ${l.nodes.length} activations, ${l.edges.length} handoffs`}
+          aria-label={
+            `Handoff constellation: ${l.nodes.length} activation${l.nodes.length === 1 ? "" : "s"}, ` +
+            `${l.edges.length} handoff${l.edges.length === 1 ? "" : "s"}` +
+            (l.loops.length > 0 ? `, ${l.loops.length} repeated handoff loop${l.loops.length === 1 ? "" : "s"}` : "")
+          }
           className="block"
         >
           <defs>
@@ -188,17 +248,78 @@ export function AgentsView({
               <line
                 x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
                 markerEnd="url(#cst-arrow)"
-                strokeWidth={e.cyclic ? 2.5 : 1.5}
+                strokeWidth={e.cyclic ? 2.5 : pathEdge(e) ? 2.5 : 1.5}
                 strokeDasharray={e.cyclic ? "6 4" : undefined}
                 className={cn(KIND_STYLE[e.kind] ?? "stroke-border-strong",
-                  e.cyclic && "stroke-status-warning")}
+                  e.cyclic && "stroke-status-waiting",
+                  pathEdge(e) && "stroke-status-failed")}
               />
               {/* An invisible fat line so hovering a 1.5px edge is possible. */}
               <line x1={e.x1} y1={e.y1} x2={e.x2} y2={e.y2}
                     strokeWidth={14} stroke="transparent" className="cursor-help" />
+
+              {/*
+                THE LABEL, ON THE EDGE.
+
+                Kind and the model's STATED REASON, which is recorded nowhere
+                else and is the first thing anyone asks when a run went sideways.
+                In a tooltip it is invisible to anyone scanning the diagram, and
+                scanning is what this view is for — so it is drawn, with the
+                reason clipped to a length that fits between two columns and the
+                whole of it still in the hover panel below.
+              */}
+              <text
+                x={(e.x1 + e.x2) / 2} y={(e.y1 + e.y2) / 2 - 6}
+                textAnchor="middle"
+                className="pointer-events-none fill-fg-secondary font-ui text-[10px]"
+              >
+                <tspan className="fill-fg-max">{e.kind}</tspan>
+                {e.reason ? <tspan>{` · ${clip(e.reason, 28)}`}</tspan> : null}
+              </text>
               <title>{`${e.kind}${e.reason ? ` — ${e.reason}` : ""}`}</title>
             </g>
           ))}
+
+          {/*
+            THE CYCLES, DRAWN ONCE EACH.
+
+            A repeated handoff has the same endpoints every time, so as ordinary
+            edges they stack into an unreadable blob exactly where the reader is
+            looking. One curve, bowed away from the straight path so it cannot be
+            mistaken for the delegation that went the other way, with the hit
+            count on it.
+          */}
+          {l.loops.map((loop) => {
+            const mx = (loop.x1 + loop.x2) / 2;
+            const my = (loop.y1 + loop.y2) / 2;
+            /* Bow perpendicular to the line, so the arc clears both nodes. */
+            const dx = loop.x2 - loop.x1;
+            const dy = loop.y2 - loop.y1;
+            const len = Math.max(1, Math.hypot(dx, dy));
+            const bow = 48;
+            const cx = mx + (-dy / len) * bow;
+            const cy = my + (dx / len) * bow;
+            return (
+              <g key={`loop-${loop.contractHash}-${loop.fromAgent}`}>
+                <path
+                  d={`M ${loop.x1} ${loop.y1} Q ${cx} ${cy} ${loop.x2} ${loop.y2}`}
+                  fill="none"
+                  markerEnd="url(#cst-arrow)"
+                  strokeWidth={2.5}
+                  strokeDasharray="6 4"
+                  className="stroke-status-waiting"
+                />
+                <text x={cx} y={cy - 4} textAnchor="middle"
+                      className="pointer-events-none fill-status-waiting font-ui text-[10px]">
+                  {`${loop.kind} ×${loop.hits}`}
+                </text>
+                <title>
+                  {`${loop.fromAgent} → ${loop.toAgent} repeated ${loop.hits} times ` +
+                   `on the same contract`}
+                </title>
+              </g>
+            );
+          })}
 
           {l.nodes.map((n) => (
             <g key={n.id}
@@ -206,13 +327,24 @@ export function AgentsView({
                onClick={() => onSelectActivation?.(n.id)}
                tabIndex={0}
                role="button"
-               aria-label={`${n.agentName}: ${STATUS_LABEL[n.status] ?? n.status}, ${n.tokens} tokens`}
+               aria-label={
+                 `${n.agentName}: ${STATUS_LABEL[n.status] ?? n.status}, ` +
+                 `${n.tokens} tokens` +
+                 (n.isRootCause ? ". This is the root cause." : "") +
+                 (n.blockedReason ? `. ${n.blockedReason}` : "")
+               }
                onKeyDown={(ev) => {
                  if (ev.key === "Enter" || ev.key === " ") {
                    ev.preventDefault();
                    onSelectActivation?.(n.id);
                  }
                }}>
+              {/* THE ROOT-CAUSE RING, outside the node so it reads as a mark ON
+                  the node rather than as a thicker border of it. */}
+              {n.isRootCause ? (
+                <circle cx={n.x} cy={n.y} r={n.r + 5}
+                        className="fill-none stroke-status-failed" strokeWidth={2} />
+              ) : null}
               <circle
                 cx={n.x} cy={n.y} r={n.r}
                 strokeWidth={selectedActivationId === n.id ? 3 : 1.5}
@@ -295,4 +427,12 @@ function pretty(s: string): string {
   } catch {
     return s;
   }
+}
+
+/** Trim a reason to fit between two columns, without cutting mid-word if we can. */
+function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${space > max * 0.6 ? cut.slice(0, space) : cut}…`;
 }

@@ -139,6 +139,12 @@ class AgentToolKeyWiringTest {
                 "the guard must key on the arguments the model actually sent")
             assertFalse(rows.any { it == approvalKey },
                 "the loop must never guard under the approval key — that is the bug")
+
+            /* Two DIFFERENT calls are two operations. A STEP_SKIPPED here would
+               mean the guard collapsed them, which is the original bug. */
+            assertTrue(f.events.events.none {
+                it.type == com.vectorbea.worker.events.RunEventStore.EventType.STEP_SKIPPED
+            }, "search(a) and search(b) are distinct calls — neither may be skipped")
         } finally {
             cleanup(ds!!, f)
         }
@@ -168,6 +174,65 @@ class AgentToolKeyWiringTest {
         } finally {
             cleanup(ds!!, f)
         }
+    }
+
+    /**
+     * S7 — a call that already ran is skipped, and the timeline says so.
+     *
+     * ── WHY THE GUARD ROW IS PRE-SEEDED ─────────────────────────────────────
+     * The skip only fires when a PREVIOUS execution succeeded and stored its
+     * output: a failed call deliberately leaves its row `running` so the resume
+     * calls the tool again. Seeding a completed row with a stored result is
+     * exactly the state an earlier tick leaves behind, and it is the state the
+     * guard exists for — the agent step replays from iteration 1 on resume, so
+     * without this the email sent before the approval gate is sent again.
+     *
+     * The acceptance criterion is both halves: the cached result comes back AND
+     * `STEP_SKIPPED` is emitted. Only the first was asserted before; without the
+     * event a reader sees one tool call where the agent made two, with no way to
+     * tell whether the second was skipped or never attempted.
+     */
+    @Test
+    fun `a call that already ran is skipped and the timeline says so`() = runBlocking {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database reachable — skipping"); ds!!
+        val f = AgentBrainFixture(dataSource = ds,
+            dbPoolManager = com.vectorbea.worker.connector.pool.ClientDbPoolManager())
+        try {
+            f.seed()
+            seedTool(ds, f, requiresApproval = false)
+
+            val args = mapOf<String, Any>("q" to "a")
+            val guardKey = toolGuardNodeId(f.stepId, f.grantedToolId, args)
+
+            /* What the earlier tick left: a completed guard row and its output. */
+            val guard = com.vectorbea.worker.durable.StepExecutionGuard(ds)
+            val outputs = com.vectorbea.worker.runtime.StepOutputStore(ds)
+            guard.tryAcquire(f.runId, f.workspaceId, f.environmentId, guardKey, 0)
+            outputs.save(f.runId, f.workspaceId, f.environmentId, guardKey, "tool",
+                mapOf("hits" to "from-the-first-tick"), null, null)
+            guard.markCompleted(f.runId, guardKey, 0)
+
+            f.llm.thenAction(
+                """{"type":"CALL_TOOL","toolId":"${f.grantedToolId}","toolInput":{"q":"a"}}""")
+                .thenAction("""{"type":"FINAL","finalOutput":{"answer":"done"}}""")
+
+            f.runner().run(f.config(maxIterations = 3), f.runtimeContext())
+
+            val skipped = f.events.events.filter {
+                it.type == com.vectorbea.worker.events.RunEventStore.EventType.STEP_SKIPPED
+            }
+            assertEquals(1, skipped.size, "the repeat must emit exactly one STEP_SKIPPED")
+            assertEquals(f.stepId, skipped.single().stepId,
+                "filed against the step id — an event on the argument-hashed guard key " +
+                "resolves to no step on any screen")
+            assertTrue(skipped.single().summary!!.contains(f.grantedToolId.toString()),
+                "the summary must name the tool that was skipped")
+
+            /* And the stored result really came back, rather than the tool running
+               again and failing (it has no connection, so a real call fails). */
+            assertTrue(f.llm.requests().any { it.userPrompt?.contains("from-the-first-tick") == true },
+                "the cached output must reach the model's next prompt")
+        } finally { cleanup(ds, f) }
     }
 
     /**

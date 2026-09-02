@@ -1,5 +1,12 @@
 package com.vectorbea.worker.runtime.graph
 
+import com.vectorbea.graph.EdgeType
+import com.vectorbea.graph.FailurePolicy
+import com.vectorbea.graph.NodeType
+import com.vectorbea.graph.WorkflowEdge
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
+
 /**
  * Pure, stateless DAG scheduler.
  *

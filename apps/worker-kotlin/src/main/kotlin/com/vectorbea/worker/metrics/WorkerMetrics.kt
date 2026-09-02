@@ -256,6 +256,26 @@ object WorkerMetrics {
      */
     internal val spansDropped     = WCounter("worker_trace_spans_dropped",   "Spans discarded before reaching Postgres",  listOf("cause"))
     internal val spansWritten     = WCounter("worker_trace_spans_written",   "Spans durably written to run_spans",        emptyList())
+
+    /**
+     * Run events discarded, by reason.
+     *
+     * ── WHY EVENTS GET THEIR OWN COUNTER ────────────────────────────────────
+     * A dropped SPAN is a degraded trace. A dropped EVENT is a hole in the run
+     * timeline, which pages on `?afterSequence=` — the reader sees a gap it
+     * cannot explain and one event is never delivered to an open stream. The two
+     * are not the same severity and must not share a series, or an alert tuned
+     * for the tolerable one will not fire for the intolerable one.
+     *
+     * `write_failed` is the only reason that should ever appear. The buffer
+     * applies back-pressure rather than dropping (see RunEventStore), so a
+     * non-zero count here means the database refused a write, not that we were
+     * busy.
+     */
+    internal val eventsDropped    = WCounter("worker_run_events_dropped",    "Run events discarded before reaching Postgres", listOf("cause"))
+
+    /** Finished traces never shipped to a workspace's OTLP endpoint, by reason. */
+    internal val traceExportsDropped = WCounter("worker_trace_exports_dropped", "Trace exports discarded", listOf("cause"))
     internal val runReenqueued    = WCounter("worker_run_reenqueued",    "RESUME_RUN jobs re-enqueued after a yield",   emptyList())
     // Histogram: per-tick execution duration
     internal val runTickDuration  = WHistogram("worker_run_tick_duration_ms", "Duration of a single run execution tick", listOf("job_type"))
@@ -776,6 +796,11 @@ object WorkerMetrics {
             workerSlotsAvailable, jobQueueDepth, jobExecutionDurationSeconds,
             dbPoolWaitSeconds, runSuspendedTotal,
             llmTokensTotal, llmCostMicros, llmCallsTotal,
+            /* Declared since the tracing work landed and never rendered, so
+               `droppedCount()` was readable only from a debugger. The Debug tab
+               asserted drops it had no signal for while the signal sat here
+               unexposed. */
+            spansWritten, spansDropped, eventsDropped, traceExportsDropped,
             jvmThreads, jvmThreadsPeak, jvmHeapUsedBytes, jvmHeapMaxBytes, jvmCpuSeconds, jvmCpuLoad,
         ).forEach { m ->
             try {

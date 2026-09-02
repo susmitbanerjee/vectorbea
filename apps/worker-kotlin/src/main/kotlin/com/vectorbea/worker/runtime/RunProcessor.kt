@@ -13,7 +13,7 @@ import com.vectorbea.worker.queue.WorkflowRunJob
 import com.vectorbea.worker.recovery.WorkerRecoveryService
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.telemetry.TelemetryClient
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowGraph
 import org.slf4j.MDC
 import java.sql.PreparedStatement
 import java.sql.Timestamp

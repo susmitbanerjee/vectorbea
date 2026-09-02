@@ -1,4 +1,4 @@
-package com.vectorbea.worker.runtime.graph
+package com.vectorbea.graph
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.DeserializationFeature

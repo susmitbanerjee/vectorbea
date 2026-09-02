@@ -32,6 +32,10 @@ class ConstellationRoutes(
         router.get("/api/runs/:id/constellation", ::constellation)
         router.get("/api/runs/:id/burndown", ::burndown)
         router.get("/api/runs/:id/compare/:otherId", ::compare)
+        /* No target given: the view asks who to compare against first. */
+        router.get("/api/runs/:id/compare",          ::defaultTarget)
+        router.get("/api/runs/:id/replay-options",   ::replayOptions)
+        router.get("/api/runs/:id/replays",          ::replayHistory)
     }
 
     /**
@@ -109,8 +113,6 @@ class ConstellationRoutes(
                             "tokens" to rs.getLong("tokens"),
                             "costCents" to rs.getDouble("cost_cents"),
                             "iterations" to rs.getInt("iterations"),
-                            /* The absence, explained. See the KDoc. */
-                            "blockedReason" to blockedReason(status, rs.getString("stop_reason")),
                         )
                     }
                     out
@@ -177,12 +179,129 @@ class ConstellationRoutes(
                 )
             }
 
+        /*
+         * ── THE ROOT CAUSE, MARKED ON THE ACTIVATION THAT OWNS IT ───────────
+         *
+         * `run_spans.is_root_cause` is set on the SPAN that broke, which is
+         * usually a tool or model call several levels below the activation the
+         * reader needs to look at. Walking up to the owning activation is a join
+         * the client cannot do — it has no span tree here — and getting it wrong
+         * means ringing the wrong agent.
+         *
+         * `activation_id` is carried on every span written inside an activation,
+         * so the walk is a lookup rather than a traversal.
+         */
+        val rootCauseActivations = runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT DISTINCT activation_id
+                         FROM run_spans
+                        WHERE run_id = ? AND workspace_id = ?
+                          AND is_root_cause IS TRUE AND activation_id IS NOT NULL"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId)
+                    st.executeQuery().use { rs ->
+                        buildSet { while (rs.next()) add(rs.getString("activation_id")) }
+                    }
+                }
+            }
+        }.getOrDefault(emptySet())
+
+        /*
+         * ── THE PATH FROM THE ROOT TO IT ────────────────────────────────────
+         * Emphasised in the view, so the eye follows the delegation chain that
+         * ended in the failure rather than scanning every node. Computed here
+         * because the parent links are already in hand and the answer is the
+         * same for every viewer.
+         */
+        val rootCausePath = rootCausePath(
+            parentOf = nodes.associate { it["id"] as String to it["parentId"] as String? },
+            from = rootCauseActivations,
+        )
+
+        /* The parent's stop reason is what explains a sibling's absence, and it
+           is only in hand once every row has been read — so `blockedReason` is
+           resolved here rather than inside the cursor. */
+        val stopReasonOf = nodes.associate { it["id"] as String to it["stopReason"] as String? }
+
+        val nodesWithCause = nodes.map { n ->
+            n + mapOf(
+                "isRootCause" to (n["id"] in rootCauseActivations),
+                "onRootCausePath" to (n["id"] in rootCausePath),
+                "blockedReason" to blockedReason(
+                    status = n["status"] as String?,
+                    stopReason = n["stopReason"] as String?,
+                    parentStopReason = (n["parentId"] as String?)?.let { stopReasonOf[it] },
+                ),
+            )
+        }
+
         return Response.ok(mapOf(
             "runId" to runId.toString(),
-            "nodes" to nodes,
+            "nodes" to nodesWithCause,
             "edges" to edges,
             "cycles" to cycles,
+            /*
+             * ── WHAT THE GUARD ACTUALLY DOES TODAY ──────────────────────────
+             * `HANDOFF_LOOP` is a defined stop reason with NO construction site
+             * in the runtime: joins, fan-out and the loop guard land in a later
+             * phase (see AgentLoopState.StopReason). So a repeated edge is real
+             * and worth showing, but claiming a guard stopped it would be a
+             * sentence the data cannot support.
+             *
+             * Sent as a fact about the SYSTEM rather than about this run, so the
+             * view can say "the guard that would catch this is not enforced yet"
+             * instead of inventing a bound.
+             */
+            "loopGuard" to mapOf(
+                "name" to "HANDOFF_LOOP",
+                "rule" to "the same (from agent, to agent, contract) triple repeated",
+                "enforced" to false,
+            ),
         ))
+    }
+
+    companion object {
+        /**
+         * The loop-state format this build can rebuild from.
+         *
+         * Mirrors `AgentLoopReconstructor.LOOP_SCHEMA_VERSION` in the worker. They
+         * are in different modules and cannot share a constant today; a run whose
+         * rows are ahead of this cannot be replayed from an iteration here, which
+         * is the same verdict the worker reaches.
+         */
+        const val SUPPORTED_LOOP_SCHEMA_VERSION = 1
+
+        /** Mirrors `RunRoutes.RETRYABLE_STATUSES`. */
+        val RETRYABLE_RUN_STATUSES = setOf("failed", "enqueue_failed", "timed_out")
+
+        /**
+         * Every activation from the root cause up to the run's first activation.
+         *
+         * ── WHY IT WALKS UP AND NOT DOWN ────────────────────────────────────
+         * The question is "how did the run get here", and the answer is the chain
+         * of delegations that led to the failure — not everything the failing
+         * agent went on to do. Walking down from the root would emphasise
+         * siblings that had nothing to do with it.
+         *
+         * Cycle-safe: a parent chain that loops back on itself would otherwise
+         * hang the request, and a delegation graph is exactly the kind that can.
+         */
+        internal fun rootCausePath(
+            parentOf: Map<String, String?>,
+            from: Set<String>,
+        ): Set<String> {
+            val path = LinkedHashSet<String>()
+            from.forEach { start ->
+                var cur: String? = start
+                val seen = HashSet<String>()
+                while (cur != null && seen.add(cur)) {
+                    path += cur
+                    cur = parentOf[cur]
+                }
+            }
+            return path
+        }
     }
 
     /** The agent behind an activation id, so a cycle is keyed on agents. */
@@ -196,9 +315,29 @@ class ConstellationRoutes(
      * on a greyed node, and it exists because the alternative — a node with no
      * spans and no output — is indistinguishable from a rendering bug.
      */
-    private fun blockedReason(status: String?, stopReason: String?): String? = when {
+    private fun blockedReason(
+        status: String?,
+        stopReason: String?,
+        /** The parent's stop reason, which is what explains a sibling's absence. */
+        parentStopReason: String? = null,
+    ): String? = when {
+        /*
+         * ── THE SIBLING CASE, WHICH IS THE ONE PEOPLE ASK ABOUT ─────────────
+         * "Never started because its sibling failed under wait_all" is the most
+         * common "why is nothing happening" question, and the evidence is an
+         * ABSENCE: no spans, no events, no output. Only the child's status and
+         * the PARENT's stop reason together explain it.
+         *
+         * Named from the parent's actual stop reason rather than assuming a join
+         * policy: `CHILD_FAILED` is the runtime's own word for "a child failed
+         * and the join could not proceed without it".
+         */
+        status == "cancelled" && parentStopReason == "CHILD_FAILED" ->
+            "Never started — a sibling failed and the join could not proceed without it."
+        status == "cancelled" && parentStopReason == "JOIN_DEADLOCK" ->
+            "Never started — the join it belonged to could never be satisfied."
         status == "cancelled" && stopReason == null ->
-            "Never started — the join was already satisfied by its siblings."
+            "Never started — the run stopped before this branch was reached."
         status == "cancelled" ->
             "Cancelled before it finished ($stopReason)."
         status == "pending" ->
@@ -228,12 +367,16 @@ class ConstellationRoutes(
     private fun burndown(req: Request): Response {
         val (runId, wsId) = authorizedRun(req)
 
-        val points = dataSource.connection.use { conn ->
+        /*
+         * The metered spans. `iteration` spans contribute one iteration and NO
+         * tokens — the tokens are on the `llm_call` inside them, and counting
+         * both would double every figure on the chart.
+         */
+        val samples = dataSource.connection.use { conn ->
             conn.prepareStatement(
-                """SELECT s.activation_id, s.started_at, s.ended_at,
+                """SELECT s.activation_id, s.started_at, s.kind,
                           COALESCE(s.tokens_in,0) + COALESCE(s.tokens_out,0) AS tokens,
-                          COALESCE(s.cost_cents,0) AS cost_cents,
-                          s.kind
+                          COALESCE(s.cost_cents,0) AS cost_cents
                      FROM run_spans s
                     WHERE s.run_id = ? AND s.workspace_id = ?
                       AND s.kind IN ('llm_call','tool_call','iteration')
@@ -241,65 +384,458 @@ class ConstellationRoutes(
             ).use { st ->
                 st.setObject(1, runId); st.setObject(2, wsId)
                 st.executeQuery().use { rs ->
-                    val out = mutableListOf<Map<String, Any?>>()
-                    while (rs.next()) out += mapOf(
-                        "activationId" to rs.getString("activation_id"),
-                        "at" to rs.getTimestamp("started_at")?.toInstant()?.toString(),
-                        "tokens" to rs.getLong("tokens"),
-                        "costCents" to rs.getDouble("cost_cents"),
-                        /* An `iteration` span contributes one iteration and no
-                           tokens; the tokens are on the llm_call inside it, and
-                           counting both would double every figure. */
-                        "iterations" to if (rs.getString("kind") == "iteration") 1 else 0,
-                        "kind" to rs.getString("kind"),
-                    )
-                    out
+                    buildList {
+                        while (rs.next()) add(BurndownReader.Sample(
+                            activationId = rs.getString("activation_id"),
+                            at = rs.getTimestamp("started_at").toInstant(),
+                            tokens = rs.getLong("tokens"),
+                            costCents = rs.getDouble("cost_cents"),
+                            iterations = if (rs.getString("kind") == "iteration") 1 else 0,
+                        ))
+                    }
+                }
+            }
+        }
+
+        /* Who each band belongs to. A band labelled by a uuid answers nothing —
+           "why did this cost 31 cents" wants a NAME. */
+        val members = dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """SELECT a.id, a.role, a.depth, COALESCE(ag.name, 'agent') AS agent_name
+                     FROM agent_activations a
+                     LEFT JOIN agents ag ON ag.id = a.agent_id
+                    WHERE a.run_id = ? AND a.workspace_id = ?"""
+            ).use { st ->
+                st.setObject(1, runId); st.setObject(2, wsId)
+                st.executeQuery().use { rs ->
+                    buildList {
+                        while (rs.next()) add(BurndownReader.Member(
+                            id = rs.getString("id"),
+                            agentName = rs.getString("agent_name"),
+                            role = rs.getString("role"),
+                            depth = rs.getInt("depth"),
+                        ))
+                    }
                 }
             }
         }
 
         /*
-         * The CEILINGS, so the chart can draw the lines. Without them a burn-down
-         * shows a curve going up and answers nothing: the useful fact is not
-         * "this run cost 40 cents", it is "this run cost 40 of its 100".
+         * ── THE CEILINGS, FROM THE TIGHTEST BINDING SOURCE ──────────────────
+         * Three of them, and they are not interchangeable:
+         *
+         *   workspace  the usage policy — the outer limit, always present.
+         *   run        the run's own ceiling, if one was set.
+         *   team       what the ROOT activation was granted, which is the limit
+         *              a delegating run actually hits first.
+         *
+         * All three are drawn, because "this run cost 40 of its 100" is a
+         * different sentence depending on whose 100 it was, and a chart that
+         * shows only the loosest one explains nothing about a run that stopped.
          */
-        val ceilings = dataSource.connection.use { conn ->
-            conn.prepareStatement(
-                """SELECT COALESCE(p.max_cost_cents_per_run, 100) AS max_cost_cents,
-                          COALESCE(p.max_tokens_per_run, 1000000) AS max_tokens
-                     FROM workspaces w
-                     LEFT JOIN workspace_usage_policies p ON p.workspace_id = w.id
-                    WHERE w.id = ?"""
-            ).use { st ->
-                st.setObject(1, wsId)
-                st.executeQuery().use { rs ->
-                    if (rs.next()) mapOf(
-                        "maxCostCents" to rs.getInt("max_cost_cents"),
-                        "maxTokens" to rs.getLong("max_tokens"),
-                    ) else mapOf("maxCostCents" to 100, "maxTokens" to 1_000_000L)
+        val ceilings = mutableListOf<BurndownReader.Ceiling>()
+
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT COALESCE(p.max_cost_cents_per_run, 100) AS max_cost_cents,
+                              COALESCE(p.max_tokens_per_run, 1000000) AS max_tokens
+                         FROM workspaces w
+                         LEFT JOIN workspace_usage_policies p ON p.workspace_id = w.id
+                        WHERE w.id = ?"""
+                ).use { st ->
+                    st.setObject(1, wsId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            ceilings += BurndownReader.Ceiling(
+                                "cost", rs.getInt("max_cost_cents").toDouble(), "workspace", null)
+                            ceilings += BurndownReader.Ceiling(
+                                "tokens", rs.getLong("max_tokens").toDouble(), "workspace", null)
+                        }
+                    }
                 }
             }
         }
 
-        return Response.ok(mapOf("runId" to runId.toString(), "points" to points, "ceilings" to ceilings))
+        /* The team budget: what the root activation was granted. */
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT budget_allocated_json::text AS alloc
+                         FROM agent_activations
+                        WHERE run_id = ? AND workspace_id = ? AND depth = 0
+                        ORDER BY sequence LIMIT 1"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) {
+                            val alloc = flatNumbers(rs.getString("alloc"))
+                            alloc["costCents"]?.let {
+                                ceilings += BurndownReader.Ceiling("cost", it, "team budget", null)
+                            }
+                            alloc["tokens"]?.let {
+                                ceilings += BurndownReader.Ceiling("tokens", it, "team budget", null)
+                            }
+                            alloc["iterations"]?.let {
+                                ceilings += BurndownReader.Ceiling("iterations", it, "team budget", null)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        val markers = budgetMarkers(runId, wsId, samples.minOfOrNull { it.at }?.toEpochMilli() ?: 0L)
+
+        /* The run's own figure is in DOLLARS. Converted once, inside the reader,
+           where the conversion is visible — see BurndownReader's header. */
+        val recordedUsd = runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    "SELECT estimated_cost FROM agent_runs WHERE id = ? AND workspace_id = ?"
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) rs.getBigDecimal("estimated_cost")?.toDouble() else null
+                    }
+                }
+            }
+        }.getOrNull()
+
+        val b = BurndownReader.build(samples, members, ceilings, markers, recordedUsd)
+
+        return Response.ok(mapOf(
+            "runId" to runId.toString(),
+            "startedAtMs" to b.startedAtMs,
+            "durationMs" to b.durationMs,
+            "bands" to b.bands.map { band ->
+                mapOf(
+                    "activationId" to band.activationId,
+                    "agentName" to band.agentName,
+                    "role" to band.role,
+                    "depth" to band.depth,
+                    "tokens" to band.tokens,
+                    "costCents" to band.costCents,
+                    "iterations" to band.iterations,
+                    "shareOfCost" to band.shareOfCost,
+                    "points" to band.points.map {
+                        mapOf("atMs" to it.atMs, "costCents" to it.costCents,
+                              "tokens" to it.tokens, "iterations" to it.iterations)
+                    },
+                )
+            },
+            "ceilings" to b.ceilings.map {
+                mapOf("dimension" to it.dimension, "limit" to it.limit,
+                      "source" to it.source, "crossedAtMs" to it.crossedAtMs)
+            },
+            "markers" to b.markers.map {
+                mapOf("kind" to it.kind, "atMs" to it.atMs, "label" to it.label,
+                      "detail" to it.detail, "activationId" to it.activationId)
+            },
+            "reconciliation" to mapOf(
+                "attributedCents" to b.reconciliation.attributedCents,
+                "unattributedCents" to b.reconciliation.unattributedCents,
+                "recordedTotalCents" to b.reconciliation.recordedTotalCents,
+                "agrees" to b.reconciliation.agrees,
+                "note" to b.reconciliation.note,
+            ),
+        ))
+    }
+
+    /**
+     * The moments worth marking: clamps, ceiling warnings, the completion margin.
+     *
+     * ── WHY A CLAMP IS THE HEADLINE ─────────────────────────────────────────
+     * A clamp is the reason a worker underperformed, and today it is invisible.
+     * The child asked for a budget, was granted less, did less work than it was
+     * told to — and every screen shows an agent that simply stopped early. The
+     * `budget_clamped` span attribute is the only record that it was told it
+     * could not continue.
+     */
+    private fun budgetMarkers(
+        runId: java.util.UUID, wsId: java.util.UUID, t0: Long,
+    ): List<BurndownReader.Marker> = runCatching {
+        val out = mutableListOf<BurndownReader.Marker>()
+
+        dataSource.connection.use { conn ->
+            /* Clamps, from the span attribute. */
+            conn.prepareStatement(
+                """SELECT s.started_at, s.activation_id, s.name,
+                          s.attributes_json->>'budget_clamped_dimensions' AS dims
+                     FROM run_spans s
+                    WHERE s.run_id = ? AND s.workspace_id = ?
+                      AND (s.attributes_json->>'budget_clamped')::boolean IS TRUE
+                    ORDER BY s.started_at"""
+            ).use { st ->
+                st.setObject(1, runId); st.setObject(2, wsId)
+                st.executeQuery().use { rs ->
+                    while (rs.next()) out += BurndownReader.Marker(
+                        kind = "clamp",
+                        atMs = rs.getTimestamp("started_at").time - t0,
+                        label = "Budget clamped",
+                        detail = rs.getString("dims")?.let { "Reduced: $it" }
+                            ?: "This activation was granted less than it asked for.",
+                        activationId = rs.getString("activation_id"),
+                    )
+                }
+            }
+
+            /* Ceiling crossings and the completion margin, from the events that
+               name them. Both are already sentences the runtime wrote. */
+            conn.prepareStatement(
+                """SELECT timestamp, type, summary, activation_id
+                     FROM run_events
+                    WHERE run_id = ? AND workspace_id = ?
+                      AND type IN ('AGENT_BUDGET_EXCEEDED','AGENT_CONTEXT_BUDGET_EXCEEDED',
+                                   'AGENT_MAX_ITERATIONS_REACHED','RUN_CEILING_EXCEEDED')
+                    ORDER BY sequence"""
+            ).use { st ->
+                st.setObject(1, runId); st.setObject(2, wsId)
+                st.executeQuery().use { rs ->
+                    while (rs.next()) {
+                        val type = rs.getString("type")
+                        out += BurndownReader.Marker(
+                            kind = if (type == "AGENT_MAX_ITERATIONS_REACHED") "margin" else "ceiling",
+                            atMs = rs.getTimestamp("timestamp").time - t0,
+                            label = when (type) {
+                                "AGENT_BUDGET_EXCEEDED" -> "Budget exceeded"
+                                "AGENT_CONTEXT_BUDGET_EXCEEDED" -> "Context budget exceeded"
+                                "AGENT_MAX_ITERATIONS_REACHED" -> "Iteration ceiling reached"
+                                else -> "Run ceiling exceeded"
+                            },
+                            detail = rs.getString("summary"),
+                            activationId = rs.getString("activation_id"),
+                        )
+                    }
+                }
+            }
+        }
+        out.sortedBy { it.atMs }
+    }.getOrDefault(emptyList())
+
+    /** `{"tokens": 24000, "costCents": 40}` to a flat map of numbers. */
+    private fun flatNumbers(json: String?): Map<String, Double> {
+        val j = json ?: return emptyMap()
+        return Regex("\"([a-zA-Z_]{1,40})\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)")
+            .findAll(j)
+            .mapNotNull { m -> m.groupValues[2].toDoubleOrNull()?.let { m.groupValues[1] to it } }
+            .toMap()
+    }
+
+    // ── §6 replay and time travel ────────────────────────────────────────────
+
+    /**
+     * What may be done to this run, and what it will do in the world.
+     *
+     * ── WHY THE SERVER DECIDES AVAILABILITY ─────────────────────────────────
+     * Whether "replay from iteration 4" can be honoured depends on the shape of
+     * the persisted transcript — settled rows, contiguous numbering, a readable
+     * action on each, a loop-state format this build understands. The client has
+     * none of that, so a client-side guess would either offer an action the
+     * worker refuses (the reader spends a run finding out) or hide one that
+     * would have worked.
+     *
+     * `RETRYABLE_STATUSES` and the loop rules both live server-side for the same
+     * reason. See [ReplayOptions] for what each option promises.
+     */
+    private fun replayOptions(req: Request): Response {
+        val (runId, wsId) = authorizedRun(req)
+
+        val status = runCatching {
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT status FROM agent_runs WHERE id = ? AND workspace_id = ?"
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId)
+                    st.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else null }
+                }
+            }
+        }.getOrNull() ?: "unknown"
+
+        val facts = loopFacts(runId, wsId)
+
+        val options = ReplayOptions.optionsFor(
+            runStatus = status,
+            loopFacts = facts,
+            highestIteration = facts.settledIterations.maxOrNull(),
+            retryable = status in RETRYABLE_RUN_STATUSES,
+        )
+
+        return Response.ok(mapOf(
+            "runId" to runId.toString(),
+            "status" to status,
+            "highestIteration" to facts.settledIterations.maxOrNull(),
+            "options" to options.map {
+                mapOf(
+                    "id" to it.id, "label" to it.label,
+                    "sideEffects" to it.sideEffects.name,
+                    "effectSummary" to it.effectSummary,
+                    "available" to it.available,
+                    "reason" to it.reason,
+                )
+            },
+        ))
+    }
+
+    /**
+     * The iteration facts the eligibility rules run on.
+     *
+     * A malformed action is detected by looking at the stored JSON rather than by
+     * parsing it into an action type: the API does not have the worker's action
+     * model, and "is there something there that starts like an object" is exactly
+     * the check whose failure the worker reports as MALFORMED_ROW.
+     */
+    private fun loopFacts(runId: UUID, wsId: UUID): ReplayOptions.LoopFacts =
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT iteration_number, status, loop_schema_version,
+                              action_json_sanitized::text AS action
+                         FROM agent_iterations
+                        WHERE run_id = ? AND workspace_id = ?
+                        ORDER BY iteration_number"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId)
+                    st.executeQuery().use { rs ->
+                        val settled = mutableListOf<Int>()
+                        val malformed = mutableListOf<Int>()
+                        var maxVersion = 0
+                        while (rs.next()) {
+                            val n = rs.getInt("iteration_number")
+                            maxVersion = maxOf(maxVersion, rs.getInt("loop_schema_version"))
+                            if (rs.getString("status") !in setOf("completed", "failed")) continue
+                            settled += n
+                            val action = rs.getString("action")
+                            if (action.isNullOrBlank() || !action.trimStart().startsWith("{")) {
+                                malformed += n
+                            }
+                        }
+                        ReplayOptions.LoopFacts(
+                            settledIterations = settled.sorted(),
+                            malformed = malformed,
+                            maxSchemaVersion = maxVersion,
+                            supportedSchemaVersion = SUPPORTED_LOOP_SCHEMA_VERSION,
+                        )
+                    }
+                }
+            }
+        }.getOrElse {
+            /* A failed read is not "no iterations": one would offer the action and
+               the other would refuse it, and guessing wrong in either direction is
+               worse than saying the read failed. */
+            ReplayOptions.LoopFacts(emptyList(), emptyList(), 0, SUPPORTED_LOOP_SCHEMA_VERSION)
+        }
+
+    /**
+     * Every replay of this run, so three attempts at a fix are comparable.
+     *
+     * Both directions: replays OF this run, and — when this run is itself a
+     * replay — its source and its siblings. A reader who opened attempt three
+     * should not have to find attempt one by hand.
+     */
+    private fun replayHistory(req: Request): Response {
+        val (runId, wsId) = authorizedRun(req)
+
+        val rows = runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """WITH root AS (
+                         SELECT COALESCE(source_run_id, id) AS id
+                           FROM agent_runs WHERE id = ? AND workspace_id = ?
+                       )
+                       SELECT r.id, r.status, r.created_at, r.completed_at,
+                              r.source_run_id, r.replay_until_node,
+                              r.trigger_type, r.execution_mode_kind
+                         FROM agent_runs r, root
+                        WHERE r.workspace_id = ?
+                          AND (r.id = root.id OR r.source_run_id = root.id)
+                        ORDER BY r.created_at"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId); st.setObject(3, wsId)
+                    st.executeQuery().use { rs ->
+                        buildList {
+                            while (rs.next()) add(mapOf(
+                                "runId" to rs.getString("id"),
+                                "status" to rs.getString("status"),
+                                "createdAt" to rs.getTimestamp("created_at")?.toInstant()?.toString(),
+                                "completedAt" to rs.getTimestamp("completed_at")?.toInstant()?.toString(),
+                                "sourceRunId" to rs.getString("source_run_id"),
+                                "replayUntilNode" to rs.getString("replay_until_node"),
+                                /* The badge, decided once here so every surface
+                                   agrees about what a replay is. */
+                                "isReplay" to (rs.getString("source_run_id") != null ||
+                                    rs.getString("trigger_type") == "replay" ||
+                                    rs.getString("execution_mode_kind") == "replay"),
+                                "isThisRun" to (rs.getString("id") == runId.toString()),
+                            ))
+                        }
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+
+        return Response.ok(mapOf("runId" to runId.toString(), "attempts" to rows))
     }
 
     // ── §5.7 compare ─────────────────────────────────────────────────────────
 
     /**
+     * Who to compare this run against, when the reader has not said.
+     *
+     * ── WHY THE DEFAULT IS "MOST RECENT SUCCESSFUL, SAME VERSION" ───────────
+     * The question is "it worked yesterday" — so the useful counterpart is the
+     * last run that DID work, on the same version, because a diff across
+     * versions cannot separate a behaviour change from an edit. Making the
+     * reader pick a run first is asking them to answer the question they came
+     * to ask.
+     *
+     * Returns null when there is no such run, which is a real state: the very
+     * first run of a version has nothing to be compared with, and saying so
+     * beats defaulting to a run on a different version.
+     */
+    private fun defaultTarget(req: Request): Response {
+        val (runId, wsId) = authorizedRun(req)
+
+        val target = dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """SELECT other.id, other.status, other.completed_at
+                     FROM agent_runs me
+                     JOIN agent_runs other
+                       ON other.workflow_version_id = me.workflow_version_id
+                      AND other.workspace_id = me.workspace_id
+                      AND other.id <> me.id
+                    WHERE me.id = ? AND me.workspace_id = ?
+                      AND other.status = 'succeeded'
+                    ORDER BY other.completed_at DESC NULLS LAST
+                    LIMIT 1"""
+            ).use { st ->
+                st.setObject(1, runId); st.setObject(2, wsId)
+                st.executeQuery().use { rs ->
+                    if (rs.next()) mapOf(
+                        "runId" to rs.getString("id"),
+                        "status" to rs.getString("status"),
+                        "completedAt" to rs.getTimestamp("completed_at")?.toInstant()?.toString(),
+                    ) else null
+                }
+            }
+        }
+
+        return Response.ok(mapOf(
+            "runId" to runId.toString(),
+            "target" to target,
+            "reason" to if (target == null)
+                "No other successful run of this workflow version has finished yet, so there " +
+                "is nothing to compare against. A run can only be compared with another run " +
+                "of the same version."
+            else null,
+        ))
+    }
+
+    /**
      * Diff this run against another on the same workflow version.
      *
-     * ── THE DIVERGENCE POINT IS THE ANSWER ──────────────────────────────────
-     * "It worked yesterday" is the most common report there is, and the useful
-     * reply is not a list of differences — it is the FIRST one. Everything after
-     * the divergence is a consequence of it, so a view that shows twelve deltas
-     * equally has buried the answer among its own symptoms.
-     *
-     * Spans are matched on `(step_id, kind, name)` rather than on span id, which
-     * is random per run. Two runs of one workflow version execute the same steps
-     * in the same order, so that triple is stable across them and is what makes
-     * "present in one and not the other" a real statement rather than a diff of
-     * two id lists that share nothing.
+     * The shaping — matching, deltas and the divergence point — is
+     * [CompareReader], which is pure and tested without a database.
      */
     private fun compare(req: Request): Response {
         val (runId, wsId) = authorizedRun(req)
@@ -318,38 +854,18 @@ class ConstellationRoutes(
                 }
             }
         }
-        if (versions.size != 2) throw ApiError.NotFound("Run")
+        /* One row when a run is compared with itself, which is legitimate and
+           must produce "no divergence" rather than Not Found. */
+        val sameRun = runId == otherId
+        if (versions.isEmpty() || (!sameRun && versions.size != 2)) throw ApiError.NotFound("Run")
 
-        val a = spansOf(runId, wsId)
-        val b = spansOf(otherId, wsId)
-        val keysA = a.map { it.key }.toSet()
-        val keysB = b.map { it.key }.toSet()
-
-        /* The first key present in one and missing from the other, walking A in
-           execution order. Everything after it is downstream of it. */
-        val divergence = a.firstOrNull { it.key !in keysB }?.key
-            ?: b.firstOrNull { it.key !in keysA }?.key
-
-        val deltas = a.mapNotNull { sa ->
-            val sb = b.firstOrNull { it.key == sa.key } ?: return@mapNotNull null
-            val diffs = buildList {
-                if (sa.model != sb.model && (sa.model != null || sb.model != null))
-                    add(mapOf("field" to "model", "a" to sa.model, "b" to sb.model))
-                if (sa.status != sb.status)
-                    add(mapOf("field" to "status", "a" to sa.status, "b" to sb.status))
-                /* Duration only when it moved enough to mean something. A 3 ms
-                   difference on every span is noise that buries the 40-second one. */
-                if (sa.durationMs != null && sb.durationMs != null &&
-                    Math.abs(sa.durationMs - sb.durationMs) > 250)
-                    add(mapOf("field" to "durationMs", "a" to sa.durationMs, "b" to sb.durationMs))
-                if (sa.tokens != sb.tokens && Math.abs(sa.tokens - sb.tokens) > 0)
-                    add(mapOf("field" to "tokens", "a" to sa.tokens, "b" to sb.tokens))
-                if (sa.iterationIndex != sb.iterationIndex)
-                    add(mapOf("field" to "iterationIndex", "a" to sa.iterationIndex, "b" to sb.iterationIndex))
-            }
-            if (diffs.isEmpty()) null
-            else mapOf("key" to sa.key, "name" to sa.name, "kind" to sa.kind, "deltas" to diffs)
-        }
+        val c = CompareReader.compare(
+            a = cmpSpans(runId, wsId),
+            b = if (sameRun) cmpSpans(runId, wsId) else cmpSpans(otherId, wsId),
+            versionA = versions[runId.toString()]?.first,
+            versionB = versions[otherId.toString()]?.first,
+            sameRun = sameRun,
+        )
 
         return Response.ok(mapOf(
             "a" to mapOf("runId" to runId.toString(),
@@ -358,58 +874,61 @@ class ConstellationRoutes(
             "b" to mapOf("runId" to otherId.toString(),
                 "workflowVersionId" to versions[otherId.toString()]?.first,
                 "status" to versions[otherId.toString()]?.second),
-            /* Stated, not hidden: comparing across versions is legitimate — "it
-               worked before we shipped" is the same question — but the answer
-               means something different, and the view has to say which it is. */
-            "sameVersion" to (versions[runId.toString()]?.first == versions[otherId.toString()]?.first),
-            "divergenceKey" to divergence,
-            "onlyInA" to a.filter { it.key !in keysB }.map { it.summary() },
-            "onlyInB" to b.filter { it.key !in keysA }.map { it.summary() },
-            "deltas" to deltas,
+            "sameVersion" to c.sameVersion,
+            /* Present means the comparison was REFUSED and why — not a diff with
+               a warning on top. See CompareReader.Refusal. */
+            "refusal" to c.refusal?.let {
+                mapOf("reason" to it.reason, "explanation" to it.explanation, "offer" to it.offer)
+            },
+            "divergenceKey" to c.divergenceKey,
+            "onlyInA" to c.onlyInA,
+            "onlyInB" to c.onlyInB,
+            "nodes" to c.nodes.map { n ->
+                mapOf(
+                    "key" to n.key, "name" to n.name, "kind" to n.kind, "stepId" to n.stepId,
+                    "presence" to n.presence,
+                    "statusA" to n.statusA, "statusB" to n.statusB,
+                    "divergent" to n.divergent,
+                    "deltas" to n.deltas.map {
+                        mapOf("field" to it.field, "a" to it.a, "b" to it.b, "note" to it.note)
+                    },
+                )
+            },
         ))
     }
 
-    private data class CmpSpan(
-        val key: String, val name: String, val kind: String, val status: String,
-        val durationMs: Int?, val tokens: Long, val model: String?, val iterationIndex: Int?,
-    ) {
-        fun summary(): Map<String, Any?> =
-            mapOf("key" to key, "name" to name, "kind" to kind, "status" to status,
-                  "durationMs" to durationMs)
-    }
-
-    private fun spansOf(runId: UUID, wsId: UUID): List<CmpSpan> =
+    /** The spans of one run, narrowed to what a comparison can use. */
+    private fun cmpSpans(runId: UUID, wsId: UUID): List<CompareReader.Span> =
         dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT step_id, kind, name, status, duration_ms, iteration_index,
                           COALESCE(tokens_in,0) + COALESCE(tokens_out,0) AS tokens,
-                          attributes_json->>'model' AS model
+                          COALESCE(cost_cents,0) AS cost_cents,
+                          input_ref, output_ref,
+                          attributes_json->>'model' AS model,
+                          (attributes_json->>'context_chars')::int AS context_chars
                      FROM run_spans
                     WHERE run_id = ? AND workspace_id = ?
-                    ORDER BY started_at"""
+                    ORDER BY started_at, span_id"""
             ).use { st ->
                 st.setObject(1, runId); st.setObject(2, wsId)
                 st.executeQuery().use { rs ->
-                    val out = mutableListOf<CmpSpan>()
-                    while (rs.next()) {
-                        val stepId = rs.getString("step_id") ?: ""
-                        val kind = rs.getString("kind")
-                        val name = rs.getString("name")
-                        val iter = rs.getObject("iteration_index")?.let { (it as Number).toInt() }
-                        out += CmpSpan(
-                            /* Span ids are random per run; this triple is what two
-                               runs of one version have in common. The iteration
-                               index joins it so iteration 3 compares against
-                               iteration 3 rather than against the first one found. */
-                            key = "$stepId|$kind|$name|${iter ?: ""}",
-                            name = name, kind = kind, status = rs.getString("status"),
-                            durationMs = rs.getObject("duration_ms")?.let { (it as Number).toInt() },
+                    buildList {
+                        while (rs.next()) add(CompareReader.Span(
+                            stepId = rs.getString("step_id"),
+                            kind = rs.getString("kind"),
+                            name = rs.getString("name"),
+                            status = rs.getString("status"),
+                            durationMs = rs.getObject("duration_ms") as? Int,
                             tokens = rs.getLong("tokens"),
+                            costCents = rs.getDouble("cost_cents"),
                             model = rs.getString("model"),
-                            iterationIndex = iter,
-                        )
+                            iterationIndex = rs.getObject("iteration_index") as? Int,
+                            inputRef = rs.getString("input_ref"),
+                            outputRef = rs.getString("output_ref"),
+                            contextChars = rs.getObject("context_chars") as? Int,
+                        ))
                     }
-                    out
                 }
             }
         }

@@ -12,3 +12,14 @@ rootProject.name = "vectorbea-api"
 // encoders) and must be byte-identical in both services, so it is included properly and
 // depended on as `implementation("com.vectorbea:observability-kotlin")`.
 includeBuild("../../packages/observability-kotlin")
+
+/*
+ * The workflow graph and its `graph_json` parser.
+ *
+ * Shared because BOTH services now read a stored graph: the worker executes
+ * it, and the API resolves it to answer "one card per graph node" for the
+ * Debug tab. `graph_json` has two historical shapes and `WorkflowGraph.parse`
+ * is the only thing that reads both — a second implementation would diverge
+ * the first time a third shape appears.
+ */
+includeBuild("../../packages/graph-kotlin")

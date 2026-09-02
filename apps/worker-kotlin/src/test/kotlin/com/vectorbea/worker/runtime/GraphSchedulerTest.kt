@@ -1,6 +1,7 @@
 package com.vectorbea.worker.runtime
 
 import com.vectorbea.worker.runtime.graph.*
+import com.vectorbea.graph.*
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.UUID

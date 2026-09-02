@@ -6,7 +6,7 @@ import com.vectorbea.worker.mapping.MappingException
 import com.vectorbea.worker.mapping.MappingResolver
 import com.vectorbea.worker.mapping.StepOutputView
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import com.vectorbea.worker.validation.JsonSchemaValidator
 
 /**

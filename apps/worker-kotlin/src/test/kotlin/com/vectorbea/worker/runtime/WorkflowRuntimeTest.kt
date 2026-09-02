@@ -8,6 +8,7 @@ import com.vectorbea.worker.runtime.checkpoint.ApprovalGateConfig
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.checkpoint.CheckpointStore
 import com.vectorbea.worker.runtime.graph.*
+import com.vectorbea.graph.*
 import java.util.UUID as JvmUUID
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test

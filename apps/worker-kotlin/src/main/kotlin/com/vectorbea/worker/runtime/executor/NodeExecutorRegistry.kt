@@ -4,8 +4,8 @@ import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
-import com.vectorbea.worker.runtime.graph.NodeType
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.NodeType
+import com.vectorbea.graph.WorkflowNode
 import javax.sql.DataSource
 
 /**

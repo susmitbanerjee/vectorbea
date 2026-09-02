@@ -1,5 +1,7 @@
 package com.vectorbea.worker.runtime.graph
 
+import com.vectorbea.graph.WorkflowGraph
+
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
