@@ -99,8 +99,7 @@ export function TraceUnavailable({
           className={cn(
             "mt-2 block rounded-xs px-1 text-sm text-fg-link",
             "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-            "focus-visible:outline-border-focus",
+            "focus-visible:focus-ring",
           )}
         >
           Try again

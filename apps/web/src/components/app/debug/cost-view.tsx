@@ -208,8 +208,7 @@ function Header({
               className={cn(
                 "rounded-xs px-2 py-0.5 text-xs",
                 "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-                "focus-visible:outline-border-focus",
+                "focus-visible:focus-ring",
                 axis === a
                   ? "bg-surface-selected font-medium text-fg-max"
                   : "text-fg-secondary",
@@ -453,8 +452,7 @@ function BandTable({
                   className={cn(
                     "inline-flex items-center gap-1 rounded-xs text-fg-secondary",
                     "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-                    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-                    "focus-visible:outline-border-focus",
+                    "focus-visible:focus-ring",
                     sort.key === c.key && "text-fg-max",
                   )}
                 >

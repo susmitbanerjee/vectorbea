@@ -1231,7 +1231,54 @@ class RunProcessor(
         runCatching {
             spanWriter?.flush()
             rootCause?.attribute(runId)
+            recordFailureClass(runId)
         }.onFailure { log.debug("[root-cause] skipped for {}: {}", runId, it.message) }
+    }
+
+    /**
+     * Stamp the run with the class of the failure that ended it.
+     *
+     * ── WHY THE RUN CARRIES THIS AND NOT JUST THE SPAN ──────────────────────
+     * "How did this workspace fail last week" is a group-by over a time window.
+     * With the class only on the root-cause span it is a join into a partitioned
+     * `run_spans` with no index on `is_root_cause`, once per run — which does not
+     * come close to the second the failures page is allowed.
+     *
+     * And it is not only speed. Only ACTIVATION spans carry a class, so a run
+     * that failed in an HTTP node has no classified span at all. "Every failed
+     * run appears in exactly one class" cannot hold while the class is a property
+     * of a span that may not exist.
+     *
+     * ── WHY UNCLASSIFIED IS WRITTEN RATHER THAN LEFT NULL ───────────────────
+     * A failed run with no class would vanish from a page whose whole job is to
+     * account for failures — the counts would look tidy and be wrong. An explicit
+     * UNCLASSIFIED is a row somebody can see and go and fix, and its size is the
+     * measure of how good the taxonomy currently is.
+     *
+     * Best-effort: this runs after the terminal CAS has already won, so a failure
+     * here loses a roll-up row and never a run's outcome.
+     */
+    private fun recordFailureClass(runId: UUID) {
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """UPDATE agent_runs r SET failure_class = COALESCE(
+                           (SELECT s.failure_class
+                              FROM run_spans s
+                             WHERE s.run_id = r.id
+                               AND s.workspace_id = r.workspace_id
+                               AND s.is_root_cause
+                               AND s.failure_class IS NOT NULL
+                             ORDER BY s.started_at DESC
+                             LIMIT 1),
+                           'UNCLASSIFIED')
+                       WHERE r.id = ? AND r.failure_class IS NULL"""
+                ).use { st ->
+                    st.setObject(1, runId)
+                    st.executeUpdate()
+                }
+            }
+        }.onFailure { log.debug("[root-cause] failure class not recorded for {}: {}", runId, it.message) }
     }
 
     private fun updateRunCompleted(
@@ -1242,7 +1289,10 @@ class RunProcessor(
         outputJson: String?,
         errorJson: String? = null,
     ): Boolean {
-        return dataSource.connection.use { conn ->
+        /* The CAS, and NOTHING else, inside the connection. Everything that
+           follows a won transition is in [onTerminalTransition], which explains
+           why that separation is load-bearing. */
+        val won = dataSource.connection.use { conn ->
             // Aggregate token_count and estimated_cost from run_events so the
             // agent_runs row reflects total usage for the entire run.
             // run_events stores per-LLM-call tokens; SUM collapses them here.
@@ -1278,49 +1328,84 @@ class RunProcessor(
                     log.warn("[processor] terminal update skipped — run already terminal [runId={}, attemptedStatus={}]",
                         runId, status)
                 }
-                /* Only when THIS call won the transition. The CAS is what makes
-                   attribution run exactly once even under redelivery. */
-                if (updated) attributeRootCause(runId, status)
-                /*
-                 * ── WAKE THE PARENT, IF THIS RUN HAS ONE ────────────────────
-                 *
-                 * Behind the same CAS, and for the same reason: the transition is
-                 * what makes "this child just became terminal" true exactly once,
-                 * so a redelivered message cannot wake the parent twice.
-                 *
-                 * `onChildTerminal` itself only enqueues when NO sibling is still
-                 * live, so a five-child fan-out wakes its parent once rather than
-                 * five times — and if that enqueue is lost, the parent is left
-                 * `waiting_for_child` with every child terminal, which is exactly
-                 * what the reconciler's `children_terminal` arm looks for.
-                 */
-                if (updated) runCatching { childDispatcher?.onChildTerminal(runId) }
-                /*
-                 * ── SHIP THE TRACE, ONCE, AFTER THE TREE IS COMPLETE ────────
-                 *
-                 * Behind the same CAS as everything else here, so a redelivered
-                 * message cannot export the same trace twice. The exporter itself
-                 * returns immediately for a run that has a parent — a child is
-                 * shipped as part of its parent's tree, and by the time the parent
-                 * reaches this line every child is already terminal.
-                 *
-                 * `exportAsync`, not `exportRun`: the HTTP round trip goes to
-                 * somebody else's collector, and putting it on the completion of
-                 * every run would let a slow collector slow the fleet. The queue
-                 * behind it is bounded and drops rather than blocking.
-                 *
-                 * `runCatching` is still not defensive habit: invariant 7 says
-                 * observability never blocks execution, and a customer's OTLP
-                 * endpoint being down must not turn a succeeded run into a failed
-                 * one. The exporter swallows its own errors too; this is the second
-                 * wall, because the first one is in code that a customer's config
-                 * can reach.
-                 */
-                if (updated) runCatching { exportTrace(runId) }
                 updated
             }
         }
+        if (won) onTerminalTransition(runId, status)
+        return won
     }
+
+    /**
+     * Everything that must happen exactly once when a run becomes terminal.
+     *
+     * ── WHY THIS IS ITS OWN FUNCTION, OUTSIDE THE CAS'S CONNECTION ──────────
+     * Each step below acquires connections of its own: root-cause attribution
+     * takes several in sequence, the parent wake takes two or three, the trace
+     * export takes one. It all used to run inside `updateRunCompleted`'s
+     * `dataSource.connection.use { ... }`, which meant a thread HELD one pooled
+     * connection while WAITING for another.
+     *
+     * That is hold-and-wait. With a pool of P it deadlocks at P concurrently
+     * terminalising runs: every thread owns its outer connection, every thread
+     * needs an inner one, and none can release until it gets one. Nothing surfaces
+     * a useful error either — Hikari's `connectionTimeout` fires on every thread at
+     * once — so the symptom is a fleet-wide stall at exactly the moment a burst of
+     * runs finishes together, which is a normal thing for a fan-out to do.
+     *
+     * The nesting was two deep before P13; the trace export added a third call
+     * site under the same held connection, which is what took a latent shape and
+     * made it reachable at ordinary concurrency.
+     *
+     * `TerminalCompletionPoolTest` holds the line from both sides: it runs this at
+     * concurrency well above the pool size, and it fails the build if this call
+     * ever moves back inside a `use` block.
+     *
+     * ── WHAT DID NOT CHANGE ─────────────────────────────────────────────────
+     * The CAS, its guard, and the rule that every step here is gated on having WON
+     * it. The UPDATE has already committed (autoCommit), so none of this was ever
+     * inside its transaction and releasing the connection first reorders nothing
+     * observable.
+     */
+    internal fun onTerminalTransition(runId: UUID, status: String) {
+        /* The CAS is what makes attribution run exactly once even under
+           redelivery. */
+        attributeRootCause(runId, status)
+        /*
+         * ── WAKE THE PARENT, IF THIS RUN HAS ONE ────────────────────────────
+         *
+         * Behind the same CAS, and for the same reason: the transition is what
+         * makes "this child just became terminal" true exactly once, so a
+         * redelivered message cannot wake the parent twice.
+         *
+         * `onChildTerminal` itself only enqueues when NO sibling is still live, so
+         * a five-child fan-out wakes its parent once rather than five times — and
+         * if that enqueue is lost, the parent is left `waiting_for_child` with
+         * every child terminal, which is exactly what the reconciler's
+         * `children_terminal` arm looks for.
+         */
+        runCatching { childDispatcher?.onChildTerminal(runId) }
+        /*
+         * ── SHIP THE TRACE, ONCE, AFTER THE TREE IS COMPLETE ────────────────
+         *
+         * Behind the same CAS as everything else here, so a redelivered message
+         * cannot export the same trace twice. The exporter itself returns
+         * immediately for a run that has a parent — a child is shipped as part of
+         * its parent's tree, and by the time the parent reaches this line every
+         * child is already terminal.
+         *
+         * `exportAsync`, not `exportRun`: the HTTP round trip goes to somebody
+         * else's collector, and putting it on the completion of every run would let
+         * a slow collector slow the fleet. The queue behind it is bounded and drops
+         * rather than blocking.
+         *
+         * `runCatching` is still not defensive habit: invariant 7 says
+         * observability never blocks execution, and a customer's OTLP endpoint
+         * being down must not turn a succeeded run into a failed one. The exporter
+         * swallows its own errors too; this is the second wall, because the first
+         * one is in code that a customer's config can reach.
+         */
+        runCatching { exportTrace(runId) }
+}
 
     private fun markRunFailed(job: WorkflowRunJob, sanitizedMessage: String, start: Instant) {
         val durationMs = Instant.now().toEpochMilli() - start.toEpochMilli()

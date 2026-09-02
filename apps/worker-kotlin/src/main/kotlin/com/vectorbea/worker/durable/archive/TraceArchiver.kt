@@ -29,8 +29,24 @@ import javax.sql.DataSource
  * The ledger has UNIQUE(source_table, partition_name), the store's write is
  * atomic, and the work queue is "partitions with no ledger row". A crash
  * anywhere leaves either no object and no row (retried next tick) or an object
- * and no row (overwritten next tick, byte-identical). There is no state where a
- * row exists without its object.
+ * and no row (overwritten next tick). There is no state where a row exists
+ * without its object, and no state where a partition is dropped against an
+ * export that did not finish. That is what idempotent has to mean here.
+ *
+ * ── THE RETRY IS NOT BYTE-IDENTICAL ONCE SAMPLING IS ON ─────────────────────
+ * It used to be, and the claim was left standing after [TraceSampler] was wired,
+ * which made it false. `sampledOut` re-runs against `agent_runs` and `run_spans`
+ * at retry time, and both can have moved: a late cancel or an approval decision
+ * changes a root's status, a parent pruned by retention re-roots a tree, and the
+ * status rule alone flips a run from sampled-out to kept. The retry can therefore
+ * write a DIFFERENT object under the same key.
+ *
+ * That is still correct, because nothing depends on the bytes being stable — the
+ * checksum, row count and `sampled_out_runs` are written from the attempt that
+ * won, in the same statement, so the ledger always describes the object that is
+ * actually there. What it rules out is using the key as a content address or
+ * comparing two attempts' checksums to detect corruption. Verify a warm object
+ * against the ledger row, never against a re-export.
  */
 class TraceArchiver(
     private val dataSource: DataSource,
@@ -170,7 +186,7 @@ class TraceArchiver(
         }
 
         val checksum = digest.digest().joinToString("") { "%02x".format(it) }
-        record(table, partition, start, end, rows, bytes, key, checksum)
+        record(table, partition, start, end, rows, bytes, key, checksum, excluded.size)
         log.info("[archive] {} → {} ({} rows, {} bytes, {}{})",
             partition, store.description, rows, bytes, encoder.format,
             if (excluded.isEmpty()) "" else ", ${excluded.size} run(s) sampled out")
@@ -291,23 +307,40 @@ class TraceArchiver(
         """.trimIndent()
     }
 
+    /**
+     * Write the ledger row: what was exported, and what was left out of it.
+     *
+     * ── WHY [sampledOutRuns] BELONGS IN THE SAME STATEMENT ──────────────────
+     * `row_count` describes the OBJECT, not the partition. Once the sampler is on
+     * those are different numbers, and after the drop the difference is
+     * unrecoverable — the rows are in neither place. Recording the count of runs
+     * the sampler excluded, in the same INSERT, is what keeps this table able to
+     * answer "was this trace sampled out, or did it never exist".
+     *
+     * It is written from the attempt that WON. A retry re-runs `sampledOut`
+     * against data that may have moved, so the object and this row must be
+     * produced by the same pass — see the byte-identical note in the class header.
+     */
     private fun record(
         table: String, partition: String, start: LocalDate, end: LocalDate,
-        rows: Long, bytes: Long, key: String, checksum: String,
+        rows: Long, bytes: Long, key: String, checksum: String, sampledOutRuns: Int,
     ) {
+        val withSampled = ledgerHasSampledOutColumn()
         dataSource.connection.use { c ->
             c.prepareStatement(
                 """
                 INSERT INTO run_trace_archives
                     (source_table, partition_name, period_start, period_end,
-                     row_count, byte_count, format, object_key, checksum, tier)
-                VALUES (?,?,?,?,?,?,?,?,?, 'warm')
+                     row_count, byte_count, format, object_key, checksum, tier
+                     ${if (withSampled) ", sampled_out_runs" else ""})
+                VALUES (?,?,?,?,?,?,?,?,?, 'warm'${if (withSampled) ", ?" else ""})
                 ON CONFLICT (source_table, partition_name) DO UPDATE
                     SET row_count = EXCLUDED.row_count,
                         byte_count = EXCLUDED.byte_count,
                         format     = EXCLUDED.format,
                         object_key = EXCLUDED.object_key,
                         checksum   = EXCLUDED.checksum,
+                        ${if (withSampled) "sampled_out_runs = EXCLUDED.sampled_out_runs," else ""}
                         exported_at = now()
                 """.trimIndent()
             ).use { st ->
@@ -315,9 +348,50 @@ class TraceArchiver(
                 st.setDate(3, java.sql.Date.valueOf(start)); st.setDate(4, java.sql.Date.valueOf(end))
                 st.setLong(5, rows); st.setLong(6, bytes)
                 st.setString(7, encoder.format); st.setString(8, key); st.setString(9, checksum)
+                if (withSampled) st.setLong(10, sampledOutRuns.toLong())
                 st.executeUpdate()
             }
         }
+        if (!withSampled && sampledOutRuns > 0) {
+            /* Loud, because this is the one combination where the count is
+               computed and then genuinely lost: the sampler is on, V055 has not
+               reached this database, and the partition is about to become
+               droppable. Warn rather than refuse — refusing would stop the export
+               entirely, which is strictly worse for the same partition. */
+            log.warn("[archive] {} excluded {} run(s) but run_trace_archives has no " +
+                "sampled_out_runs column (V055 not applied) — that count is not recorded",
+                partition, sampledOutRuns)
+        }
+    }
+
+    /**
+     * Does the ledger have V055's column yet?
+     *
+     * The worker and the API deploy independently, in either order. A new worker
+     * against a pre-V055 database must still export: the whole point of the ledger
+     * is that it gates the drop, and an INSERT that fails on an unknown column
+     * would stop archiving and therefore stop retention.
+     *
+     * Cached after the first successful probe. Not cached on failure — a `false`
+     * here is either "the migration has not landed" or "the probe itself failed",
+     * and the first resolves itself when the migration lands. Re-probing costs one
+     * catalogue lookup per partition, which is nothing next to the export.
+     */
+    @Volatile private var sampledOutColumnPresent: Boolean = false
+
+    private fun ledgerHasSampledOutColumn(): Boolean {
+        if (sampledOutColumnPresent) return true
+        val present = runCatching {
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    """SELECT 1 FROM information_schema.columns
+                        WHERE table_name = 'run_trace_archives'
+                          AND column_name = 'sampled_out_runs'"""
+                ).use { st -> st.executeQuery().use { it.next() } }
+            }
+        }.getOrDefault(false)
+        if (present) sampledOutColumnPresent = true
+        return present
     }
 
     /** Move archives past the warm window to `cold`. */

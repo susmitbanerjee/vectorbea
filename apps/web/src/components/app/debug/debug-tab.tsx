@@ -289,8 +289,7 @@ export function DebugTab({
           className={cn(
             "mt-2 rounded-xs px-1 text-sm text-fg-link",
             "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-            "focus-visible:outline-border-focus",
+            "focus-visible:focus-ring",
           )}
         >
           Try again
@@ -337,8 +336,7 @@ export function DebugTab({
             className={cn(
               "-mb-px border-b-2 px-3 py-2 text-sm",
               "transition-opacity hover:opacity-90 motion-reduce:transition-none",
-              "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2",
-              "focus-visible:outline-border-focus",
+              "focus-visible:focus-ring-inset",
               view === v.id
                 ? "border-fg-max font-medium text-fg-max"
                 : "border-transparent text-fg-secondary",

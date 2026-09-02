@@ -28,6 +28,28 @@ import java.nio.file.StandardCopyOption
  * everything, and its deletion is a compliance action rather than a cleanup.
  * Merging them would put an object that must never be garbage-collected behind
  * a store designed to expire things.
+ *
+ * ── ⚠ ONE STORE HOLDS EVERY TENANT'S DATA ───────────────────────────────────
+ * READ THIS BEFORE CONFIGURING `TRACE_ARCHIVE_DIR`.
+ *
+ * The unit of archiving is a PARTITION — a month of `run_events` or `run_spans`
+ * across the whole installation. A partition is not per-workspace and cannot be:
+ * the drop gate is per-partition, so a per-tenant export would have to complete
+ * for every tenant before any partition could be dropped, and one tenant with an
+ * unreachable bucket would stop retention for everyone.
+ *
+ * So the object key contains no workspace id, and every tenant's traces land in
+ * whatever this store points at. That is correct for OUR warm tier — one bucket
+ * we operate, holding our own data, read back by us.
+ *
+ * It is a data breach if this is ever pointed at a location that belongs to, or
+ * is readable by, one customer. There is no per-tenant mode and no partial
+ * failure that would reveal the mistake: the export succeeds, the ledger records
+ * it, and the partitions are dropped. [archiveStoreFromEnv] therefore refuses
+ * paths that look tenant-scoped rather than trusting the operator to notice.
+ *
+ * An implementation that DOES want per-tenant destinations has to change the unit
+ * of archiving first. It is not a configuration change.
  */
 interface ArchiveStore {
     /**
@@ -123,5 +145,68 @@ object UnconfiguredArchiveStore : ArchiveStore {
 /** Pick a store from the environment. */
 fun archiveStoreFromEnv(): ArchiveStore =
     System.getenv("TRACE_ARCHIVE_DIR")?.takeIf { it.isNotBlank() }
+        ?.also { requireNotTenantScoped(it) }
         ?.let { FilesystemArchiveStore(it) }
         ?: UnconfiguredArchiveStore
+
+/**
+ * Refuse an archive root that looks like it belongs to one customer.
+ *
+ * ── WHY A HEURISTIC IS WORTH IT HERE ────────────────────────────────────────
+ * Normally a guess about intent is a bad guard. This one earns its place because
+ * the failure it prevents is silent, irreversible and maximal: every tenant's
+ * traces written into one customer's storage, the ledger recording success, and
+ * the source partitions then dropped. There is no later signal — not a failed
+ * export, not a missing file, not a complaint — until someone reads a bucket they
+ * should not have been able to read.
+ *
+ * Against that, the cost of a false positive is one environment variable and a
+ * message that says exactly what to do about it.
+ *
+ * Three signals, all of which mean the path was written per-tenant:
+ *
+ *   1. A segment that is a UUID. Nothing in a shared archive root is named after
+ *      an id; a workspace id in the path means somebody templated it in.
+ *   2. An unsubstituted placeholder (`{workspace}`, `${tenantId}`, `%s`). Nothing
+ *      substitutes these — the directory would be created with the braces in its
+ *      name — so this is always a mistake, never a preference.
+ *   3. A `customers`/`tenants`/`clients`/`workspaces` segment. The weakest of the
+ *      three, and the reason the override exists.
+ *
+ * `TRACE_ARCHIVE_ALLOW_SCOPED_PATH=true` overrides it. Deliberately verbose: it
+ * has to be conspicuous in a diff and impossible to set by accident, and the log
+ * line names the segment that triggered it so the reviewer of that diff can see
+ * what was waived.
+ */
+internal fun requireNotTenantScoped(root: String) {
+    val segments = root.split('/', '\\').filter { it.isNotBlank() }
+    val uuid = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" +
+                     "[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\$")
+    /* `{anything}` or a printf slot. Written with explicit escapes rather than a
+       raw string: `$` opens a template in both kinds of Kotlin string, and a
+       regex that silently loses a character here would let the case through. */
+    val placeholder = Regex("\\{[^}]*\\}|%[sd]")
+    val scoped = setOf("customer", "customers", "tenant", "tenants",
+                       "client", "clients", "workspace", "workspaces")
+
+    val offending = segments.firstOrNull {
+        uuid.matches(it) || placeholder.containsMatchIn(it) || it.lowercase() in scoped
+    } ?: return
+
+    if (System.getenv("TRACE_ARCHIVE_ALLOW_SCOPED_PATH")?.lowercase() == "true") {
+        logger("archive-store").warn(
+            "[archive] TRACE_ARCHIVE_DIR contains a tenant-scoped segment ('{}') and " +
+            "TRACE_ARCHIVE_ALLOW_SCOPED_PATH is set. Every workspace's traces will be " +
+            "written here. Confirm this location is not readable by any customer.",
+            offending)
+        return
+    }
+
+    throw IllegalStateException(
+        "TRACE_ARCHIVE_DIR ('$root') contains a tenant-scoped path segment ('$offending'). " +
+        "The trace archive holds EVERY workspace's data in one location — a partition " +
+        "spans all tenants and the object key has no workspace in it — so a per-customer " +
+        "path would write all tenants' traces into one customer's storage. " +
+        "Point it at a location you operate, or set TRACE_ARCHIVE_ALLOW_SCOPED_PATH=true " +
+        "if this path is genuinely not customer-scoped.")
+}

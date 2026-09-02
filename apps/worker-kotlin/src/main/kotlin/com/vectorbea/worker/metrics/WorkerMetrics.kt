@@ -276,6 +276,26 @@ object WorkerMetrics {
 
     /** Finished traces never shipped to a workspace's OTLP endpoint, by reason. */
     internal val traceExportsDropped = WCounter("worker_trace_exports_dropped", "Trace exports discarded", listOf("cause"))
+
+    /**
+     * Partition drops the export gate refused, by reason. ALERT ON `gate_unavailable`.
+     *
+     * Two causes, and they need different responses:
+     *
+     *   `work_outstanding`  — the archiver has partitions queued past the hot
+     *                         window. Expected while an export catches up; a
+     *                         problem only if it persists for days.
+     *   `gate_unavailable`  — the gate could not be evaluated at all. Nothing will
+     *                         ever be dropped, for ANY table, until it is fixed:
+     *                         retention has stopped and the disk is filling. The
+     *                         usual cause is a worker with TRACE_ARCHIVE_DIR set
+     *                         reaching a database where V047 has not been applied.
+     *
+     * A metric and not only a log line because the failure is quiet by nature —
+     * nothing errors, nothing retries, a job simply declines to act and keeps
+     * declining. That is invisible until someone notices the disk.
+     */
+    internal val partitionDropsGated = WCounter("worker_partition_drops_gated", "Partition drops refused by the export gate", listOf("cause"))
     internal val runReenqueued    = WCounter("worker_run_reenqueued",    "RESUME_RUN jobs re-enqueued after a yield",   emptyList())
     // Histogram: per-tick execution duration
     internal val runTickDuration  = WHistogram("worker_run_tick_duration_ms", "Duration of a single run execution tick", listOf("job_type"))
@@ -800,7 +820,7 @@ object WorkerMetrics {
                `droppedCount()` was readable only from a debugger. The Debug tab
                asserted drops it had no signal for while the signal sat here
                unexposed. */
-            spansWritten, spansDropped, eventsDropped, traceExportsDropped,
+            spansWritten, spansDropped, eventsDropped, traceExportsDropped, partitionDropsGated,
             jvmThreads, jvmThreadsPeak, jvmHeapUsedBytes, jvmHeapMaxBytes, jvmCpuSeconds, jvmCpuLoad,
         ).forEach { m ->
             try {

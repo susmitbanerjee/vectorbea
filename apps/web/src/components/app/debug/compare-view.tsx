@@ -102,8 +102,7 @@ function Refused({
               className={cn(
                 "inline-flex items-center gap-1 rounded-xs px-1 text-xs text-fg-link",
                 "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-                "focus-visible:outline-border-focus",
+                "focus-visible:focus-ring",
               )}
             >
               <Icon icon={GitDiff} size="xs" decorative />

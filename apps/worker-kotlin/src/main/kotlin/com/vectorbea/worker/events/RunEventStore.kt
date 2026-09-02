@@ -142,15 +142,41 @@ open class RunEventStore(
     /**
      * Event types that must be on disk before the emitting thread continues.
      *
-     * Terminal run states, and the two that gate a resume. Everything here is
-     * something a reader would treat as authoritative - "this run finished" -
-     * and something that must survive the kill that follows it.
+     * ── THE RULE, STATED PROPERLY ───────────────────────────────────────────
+     * Not "terminal states" — that description was narrower than the set already
+     * was, and read as exhaustive when it was not. The rule is: an event whose
+     * emitting thread is about to STOP TOUCHING THIS RUN. Terminal states qualify
+     * because the process may be killed straight after; so does every point where
+     * the run leaves this worker for a queue, a timer or a successor run.
+     *
+     * That distinction is what a buffer cannot survive. Anything else sits in the
+     * per-run deque and is flushed by the next append or the 250 ms timer, both of
+     * which need a thread that is still working on the run. At a handoff there
+     * isn't one, and the timeline loses the line that explains why the run appears
+     * to jump — on `?afterSequence=` paging, a visible hole with no cause.
+     *
+     * ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────
+     * `HISTORY_LIMIT_WARNING` and `CONTINUE_AS_NEW_RECOMMENDED` are ADVISORY. They
+     * observe a threshold; the run carries on, the thread carries on, and the next
+     * append flushes them. Forcing a synchronous write for advice would put a
+     * round trip on the hot path for an event nothing waits on.
+     *
+     * `TENANT_THROTTLED` and `POOL_SATURATED` are never appended at all (see their
+     * declarations) — listing them here would imply they reach this store.
      */
     private val neverBuffered = setOf(
+        // Terminal.
         EventType.RUN_STARTED, EventType.RUN_SUCCEEDED, EventType.RUN_FAILED,
         EventType.RUN_CANCELLED, EventType.RUN_CANCELLED_CLEANLY,
-        EventType.RUN_CONTINUED_AS_NEW, EventType.RUN_YIELDED,
+        // Parked: the thread stops here and resumes from a different message.
+        EventType.RUN_YIELDED, EventType.RUN_REENQUEUED, EventType.RUN_RESUMED,
         EventType.APPROVAL_REQUESTED, EventType.AGENT_APPROVAL_REQUESTED,
+        /* Handed to a successor run. `RUN_CONTINUED_AS_NEW` was already here and
+           the three transitions that produce it were not, which made the boundary
+           legible from one side only. RECOMMENDED stays out: it is advice, not a
+           transition. */
+        EventType.CONTINUE_AS_NEW_REQUESTED, EventType.CONTINUE_AS_NEW_STARTED,
+        EventType.CONTINUE_AS_NEW_COMPLETED, EventType.RUN_CONTINUED_AS_NEW,
     )
 
     /** Start the periodic flush. No-op when batching is off. */

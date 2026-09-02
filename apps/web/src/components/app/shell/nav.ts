@@ -5,6 +5,7 @@ import {
   DurableRunIcon, IncidentIcon, ApprovalGateIcon, AgentBrainIcon, ToolCallIcon,
   QueueDepthIcon, CheckpointIcon, TokenMeterIcon, BlastRadiusIcon,
   FanOutIcon, LeaseIcon, ByokKeyIcon, CommitBoundaryIcon,
+  RootCauseIcon,
 } from "~/components/icons/domain";
 
 /* Members and Settings take PHOSPHOR glyphs, not bespoke marks. Design §6 makes
@@ -60,6 +61,10 @@ export const NAV: NavGroup[] = [
       { label: "Control", href: "/control" as Route, icon: CheckpointIcon, placeholder: true },
       { label: "Runs", href: "/runs" as Route, icon: DurableRunIcon },
       { label: "Incidents", href: "/incidents" as Route, icon: IncidentIcon, badge: "incidents", badgeTone: "failed", placeholder: true },
+      /* A peer of Incidents, not a duplicate: Incidents is a queue of live
+         signatures somebody has to own; Failures is the shape they make over a
+         window, grouped by who can fix each class. */
+      { label: "Failures", href: "/failures" as Route, icon: RootCauseIcon },
       { label: "Approvals", href: "/approvals" as Route, icon: ApprovalGateIcon, badge: "approvals", badgeTone: "waiting" },
     ],
   },

@@ -338,6 +338,72 @@ The failure panel then reads as one sentence a business user can act on:
 > Class **AUTH** — a workspace admin needs to reconnect Salesforce.
 > Retrying now will fail the same way.
 
+### 4.1 The workspace roll-up
+
+The taxonomy above is a per-run label. On a run page it answers "what went wrong
+here"; it cannot answer "what is wrong with this workspace", because that answer
+is a shape across hundreds of runs and nobody sees a shape one run at a time.
+
+`GET /api/workspaces/{id}/failures?window=24h|7d|30d|90d` is that shape, and
+`/failures` is the screen over it. **Owner is the first section, not the third**:
+sorting by count produces a ranking nobody can act on, because the top row may be
+`AUTH` — which the workflow builder reading the page cannot fix — above `CONFIG`,
+which is theirs and three rows down. Grouping by owner turns one list into the
+two or three separate queues it always was.
+
+It returns, for the window:
+
+- `byClass` — counts, share, and the trend against the **same length of time
+  immediately before** the window. `changePct` is `null` rather than a percentage
+  when the previous count was zero: "+100%" from a base of nothing reads as a
+  trend and is not one.
+- `byOwner` — the same failures, split by who can act.
+- `byWorkflow` and `byAgent` — worst twenty each. By-agent reads
+  `agent_activations`, not runs: a run has one class but activates several
+  agents, so attributing the run's class to every agent in it blames agents that
+  did their job. It reports failed **activations** and the **runs** they happened
+  in as separate numbers, because an agent retried four times inside one run is
+  four and one, and which it is changes the fix. Runs with no agents contribute
+  nothing there, which is correct — an HTTP node that 500s is a failure of the
+  workflow. The window and the replay exclusion come from the joined RUN, so
+  "last 7 days" means the same seven days in every section of the page.
+- `recurring` — the same `(class, step, kind)` signature more than once, ranked.
+  One expired credential across forty runs is **one row**, and `workflows` is what
+  keeps the collapse from hiding blast radius.
+- `budgetPressure` — workflows whose runs regularly finish above 85% of a cost
+  ceiling. These runs **succeeded**; they are on a failures page because that is
+  the cheap moment to change them, and they never render in the failure tone.
+- `traceCompleteness` — the workspace-level version of §5.1's banner. Rendered
+  above everything else once `undermines` is set (≥5% of runs partial), because
+  every figure on the page is attributed from spans that survived.
+
+Every row carries a `sampleRunId` and links to that run's Debug tab. A count with
+no example is a statistic.
+
+#### Why the class is denormalised onto the run
+
+`agent_runs.failure_class` (V053) duplicates what the root-cause span already
+carries. Two reasons, and the second matters more:
+
+1. **Speed.** Reading it off the span means, per failed run, finding its
+   root-cause span in a partitioned `run_spans` with no index on `is_root_cause`.
+   At the 100,000-run window the page is specified for, that is not close.
+2. **Correctness.** Only activation spans carry a class, so a run that failed in
+   an HTTP node has no classified span at all — and "every failed run appears in
+   exactly one class" is impossible while the class is a property of a span that
+   may not exist. Written on the run at terminalisation, every failed run gets
+   exactly one, including an explicit `UNCLASSIFIED` for the ones nothing could
+   classify. `UNCLASSIFIED` is owned by **Platform**: a gap in the taxonomy is
+   ours, and inventing an owner would put runs in somebody's queue on a guess.
+
+Replays are excluded from every aggregate, on the same predicate the dashboard
+uses — a replayed run is an investigation, not a production failure.
+
+Measured at 80ms over 100,000 runs in one window. The covering index
+`agent_runs_failures_idx` is for the production shape (a workspace is a slice of a
+shared table); where one workspace owns nearly every row the planner correctly
+prefers a parallel sequential scan, which is why no test pins the plan.
+
 ---
 
 ## 5. The Debug tab
@@ -825,7 +891,7 @@ GET  /api/runs/{runId}/trace/root-cause
 GET  /api/runs/{runId}/compare/{otherRunId}
 POST /api/runs/{runId}/replay                   { fromSpanId?, edits? }
 GET  /api/runs/{runId}/trace/stream             → SSE, live spans
-GET  /api/workspaces/{id}/failures              → taxonomy roll-up, filterable
+GET  /api/workspaces/{id}/failures?window=      → taxonomy roll-up, by owner (§4.1)
 ```
 
 Two rules:
@@ -923,6 +989,18 @@ internal model is validated against an external one before the schema hardens.
 
 Off by default: `OTEL_TRACE_EXPORT_ENABLED`, **and** a per-workspace
 `workspace_otel_exports` row with `enabled = true`. Both are required.
+
+Called behind the CAS but **outside its database connection** — the export takes
+a connection of its own, and taking it while the terminal update still held one
+was a hold-and-wait deadlock at pool-size concurrency. See
+[architecture §11](./AGENT-HARNESS-ARCHITECTURE.md).
+
+**Exporter construction is serialised per workspace, not globally.** Building an
+`OtlpHttpSpanExporter` opens an HTTP client and negotiates TLS against a customer
+endpoint; under one monitor every workspace's first export after a config change
+queued behind whichever workspace happened to be building, so one slow or
+unreachable endpoint stalled export for tenants with nothing to do with it. The
+blast radius of a bad endpoint has to be the workspace that configured it.
 
 **It reads `run_spans`; it does not instrument live.** The obvious design — open
 a real OTel span alongside every `RunTracer.open()` — cannot work here, and the

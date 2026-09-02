@@ -3,7 +3,6 @@ package com.vectorbea.worker.events
 import com.vectorbea.worker.testsupport.noOpPubSub
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
-import org.junit.jupiter.api.Assumptions.assumeTrue
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -11,6 +10,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.sql.DataSource
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.jupiter.api.Tag
 
 /**
@@ -39,16 +40,36 @@ import org.junit.jupiter.api.Tag
  * expensive in production and is invisible in a benchmark that only writes
  * events.
  *
- * ── OPT-IN VIA A TAG, NOT VIA assumeTrue ────────────────────────────────────
- * It writes ~60k rows across four passes and takes minutes, so it is excluded
- * from both tiers by the `benchmark` tag. That exclusion lives in the build file
- * where it is visible, rather than in an `assumeTrue(System.getenv(...))` that
- * reports a PASS for a measurement nobody took.
+ * ── TWO TESTS: A MEASUREMENT, AND A GUARD ───────────────────────────────────
+ * `event write throughput before and after` is the four-pass measurement that
+ * produced §12.2.1's table. It writes ~60k rows and takes minutes, so it keeps
+ * the `benchmark` tag and stays out of both ordinary tiers:
  *
  *     ./gradlew :worker-kotlin:benchmark
+ *
+ * `the sequence change still beats the run-row lock` is the REGRESSION, and it
+ * runs on merge. A measured 6x that nothing asserts is a number in a document:
+ * the change can be reverted, mis-flagged or undone by an innocent refactor of
+ * `allocateSequences`, and every existing test still passes because all of them
+ * are about correctness at a concurrency of one.
+ *
+ * ── WHAT THE REGRESSION ASSERTS, AND WHY THAT AND NOT WALL CLOCK ────────────
+ * Primarily ROW CHURN on `agent_runs`, which is structural rather than timed.
+ * Run-row sequencing takes `FOR UPDATE` on the run row per flush and leaves a
+ * dead tuple behind; the counter row does not touch `agent_runs` at all. The
+ * measured separation is 14 297 versus 239 — two orders of magnitude, on a
+ * number that does not move with CPU speed, CI load or a noisy neighbour. If
+ * sequencing goes back to the run row, this cannot pass.
+ *
+ * Wall clock is asserted too, because the headline claim is throughput, but with
+ * a deliberately loose ratio. The measurement says 6x; the guard demands 1.5x.
+ * The gap is not timidity — it is the difference between a test that fails when
+ * the change is undone and a test that fails when CI is busy, and only one of
+ * those is worth having on every merge.
+ *
+ * At the regression tier's volume this takes seconds, not minutes.
  */
 @Tag("integration")
-@Tag("benchmark")
 class EventWriteLoadTest {
 
     /* From [Infra], not a hard-coded port: this class opens SEVERAL DataSources
@@ -225,6 +246,22 @@ class EventWriteLoadTest {
         ds: HikariDataSource,
         source: RunEventStore.SequenceSource,
         batching: Boolean,
+        eventsPerRun: Int = this.eventsPerRun,
+        /**
+         * Threads doing what a lease renewal and a status transition do.
+         *
+         * Eight for the MEASUREMENT, because that is what makes the run-row lock
+         * expensive in production and a benchmark without it flatters the old path.
+         *
+         * ZERO for the REGRESSION, and that is not a simplification. The regression
+         * asserts on `agent_runs` row churn, and eight threads updating that row
+         * every 5ms contribute thousands of updates of their own — a number that
+         * depends on how long the pass happened to take, which would bury a signal
+         * that is otherwise two orders of magnitude wide. With no competing writer,
+         * every update counted came from the event path, which is exactly the thing
+         * under test.
+         */
+        competingWriters: Int = 8,
     ): Result {
         val store = RunEventStore(ds, noOpPubSub(),
             sequenceSource = source, batchEnabled = batching, batchSize = 50, flushEveryMs = 250L)
@@ -240,7 +277,7 @@ class EventWriteLoadTest {
         val done = CountDownLatch(w.runIds.size)
 
         // The competing writer: lease/status churn on agent_runs, throughout.
-        repeat(8) {
+        repeat(competingWriters) {
             statusPool.submit {
                 while (!stopStatus.get()) {
                     runCatching {
@@ -297,6 +334,7 @@ class EventWriteLoadTest {
     }
 
     @Test
+    @Tag("benchmark")
     fun `event write throughput before and after`() {
 
         val results = mutableListOf<Result>()
@@ -324,5 +362,100 @@ class EventWriteLoadTest {
                 "8 competing agent_runs writers ═══")
         results.forEach { println(it.render()) }
         println()
+
+        /* The measurement asserts too, loosely. It exists to produce the table,
+           but a pass that printed a 6x regression and went green would be worse
+           than useless — somebody would paste the numbers into the doc. */
+        val before = results.first()
+        val after = results.last()
+        assertTrue(after.wallMs < before.wallMs,
+            "counter+batch (${after.wallMs}ms) was not faster than run-row+no-batch " +
+            "(${before.wallMs}ms) — §12.2.1's table no longer describes this code")
+        results.forEach { r ->
+            assertEquals(runs * eventsPerRun, r.eventsWritten,
+                "${r.label}: wrote ${r.eventsWritten} of ${runs * eventsPerRun} events")
+        }
+    }
+
+    /**
+     * The regression. Runs on merge.
+     *
+     * Two passes, not four: the claim being protected is that the counter row plus
+     * batching beats the run-row lock, and the two intermediate configurations are
+     * there to attribute the improvement, not to establish it.
+     */
+    @Test
+    fun `the sequence change still beats the run-row lock`() {
+        /* A tenth of the measurement's volume. Enough that batching engages
+           (batchSize is 50) and that row churn separates by two orders of
+           magnitude; small enough to belong on every merge. */
+        val regressionRuns = 20
+        val regressionEvents = 100
+        val expected = regressionRuns * regressionEvents
+
+        fun measure(label: String, source: RunEventStore.SequenceSource, batching: Boolean): Result {
+            val ds = pool(16)
+            val w = seed(ds, regressionRuns)
+            return try {
+                pass(label, w, ds, source, batching,
+                    eventsPerRun = regressionEvents, competingWriters = 0)
+            } finally {
+                cleanup(ds, w); ds.close()
+            }
+        }
+
+        val before = measure("BEFORE run-row, no batch", RunEventStore.SequenceSource.RUN_ROW, false)
+        val after  = measure("AFTER  counter + batch",   RunEventStore.SequenceSource.COUNTER, true)
+
+        println()
+        println("═══ regression: $regressionRuns runs × $regressionEvents events, no competing writers ═══")
+        println(before.render())
+        println(after.render())
+        println()
+
+        /* Correctness first. A configuration that is fast because it dropped
+           events is not an improvement, and asserting throughput without this
+           would rank it as one. */
+        assertEquals(expected, before.eventsWritten,
+            "run-row pass wrote ${before.eventsWritten} of $expected events")
+        assertEquals(expected, after.eventsWritten,
+            "counter+batch pass wrote ${after.eventsWritten} of $expected events")
+
+        /*
+         * ── THE STRUCTURAL ASSERTION ────────────────────────────────────────
+         *
+         * With no competing writer, every `agent_runs` update in a pass came from
+         * event sequencing. Run-row mode takes the row per flush; counter mode
+         * never touches it. Measured 14 297 vs 239 at ten times this volume.
+         *
+         * The bound is a tenth of the run-row pass's own churn — relative, so it
+         * cannot rot as volumes change, and still an enormous margin against a
+         * real separation of ~60x. Nothing about it depends on how fast the
+         * machine is.
+         */
+        assertTrue(before.agentRunsUpdates > 0,
+            "the run-row pass updated agent_runs ${before.agentRunsUpdates} times — expected " +
+            "roughly one per flush. Either sequencing changed or the pg_stat read is stale, " +
+            "and the churn assertion below is meaningless either way")
+        assertTrue(after.agentRunsUpdates < before.agentRunsUpdates / 10,
+            "counter mode updated agent_runs ${after.agentRunsUpdates} times against the " +
+            "run-row mode's ${before.agentRunsUpdates}. The counter row exists so event " +
+            "writes stop contending with the row that also carries status, the lease and " +
+            "the fair-queueing vtime — this says they are contending again")
+
+        /*
+         * ── THE THROUGHPUT ASSERTION ────────────────────────────────────────
+         *
+         * Loose on purpose. Measured 6x (9192ms → 1537ms); demanded 1.5x. A tight
+         * bound here would fail on a busy CI box and be disabled within a month,
+         * which is how a suite ends up with no throughput coverage at all. 1.5x
+         * cannot be reached by accident if the change has been reverted, and is
+         * not reachable by noise if it has not.
+         */
+        val ratio = before.wallMs.toDouble() / maxOf(after.wallMs, 1L)
+        assertTrue(ratio >= 1.5,
+            "counter+batch was only ${"%.2f".format(ratio)}x faster than the run-row lock " +
+            "(${before.wallMs}ms → ${after.wallMs}ms). §12.2.1 measured 6x; the guard allows " +
+            "anything above 1.5x, so this is a regression rather than a slow machine")
     }
 }

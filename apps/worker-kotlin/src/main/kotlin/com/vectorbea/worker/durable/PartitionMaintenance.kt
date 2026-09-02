@@ -1,6 +1,7 @@
 package com.vectorbea.worker.durable
 
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.metrics.WorkerMetrics
 import io.lettuce.core.api.sync.RedisCommands
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -43,6 +44,10 @@ import javax.sql.DataSource
  * The check is deliberately on the ARCHIVER's queue and not on "every partition
  * has a ledger row" — the current month never does and never should, so the
  * latter would refuse every drop forever, which reads as a bug and gets disabled.
+ *
+ * The gate has two ways of saying no and they are reported differently — see
+ * [Gate]. "The exporter is behind" is a status; "the gate cannot be evaluated" is
+ * an incident, because nothing drops until somebody acts.
  */
 class PartitionMaintenance(
     private val dataSource: DataSource,
@@ -161,22 +166,82 @@ class PartitionMaintenance(
             }
     }
 
+    /**
+     * What the export gate says about one table.
+     *
+     * ── WHY THIS IS A TYPE AND NOT A LIST ───────────────────────────────────
+     * It used to be `List<Triple<...>>?`, with an unreadable gate represented as a
+     * synthetic entry named `"unknown"`. Two very different states then produced
+     * the same log line, distinguishable only by that literal:
+     *
+     *   [Outstanding]  the exporter is behind. Self-correcting, and the gate is
+     *                  doing exactly its job.
+     *   [Unavailable]  the gate itself cannot be evaluated. NOT self-correcting.
+     *                  Nothing drops, for any table, until somebody intervenes —
+     *                  so retention has stopped and the disk is now filling.
+     *
+     * Fail-closed is right for both. Reporting them identically is not: the first
+     * is a status and the second is an incident, and an operator scanning for the
+     * second finds a page of the first.
+     */
+    private sealed interface Gate {
+        /** No archiver wired — pre-§12.1 behaviour, drop decided on age alone. */
+        object NotConfigured : Gate
+        /** Everything past the hot window has reached the warm tier. */
+        object Clear : Gate
+        data class Outstanding(val partitions: List<String>) : Gate
+        data class Unavailable(val reason: String?) : Gate
+    }
+
+    private fun gateFor(table: String): Gate {
+        val a = archiver ?: return Gate.NotConfigured
+        return runCatching { a.due(table) }
+            .fold(
+                onSuccess = { due ->
+                    if (due.isEmpty()) Gate.Clear else Gate.Outstanding(due.map { it.first })
+                },
+                /* A gate that fails OPEN is not a gate. If we cannot tell whether
+                   the data is safe, it is not safe. */
+                onFailure = { Gate.Unavailable(it.message) },
+            )
+    }
+
     internal fun reportOrDropExpired(table: String) {
         /* The export gate. Anything past the hot window that has not reached the
            warm tier is, by definition, older than the drop cutoff would eventually
            make it — so dropping now would destroy the only copy. */
-        val unexported = archiver?.let { runCatching { it.due(table) }.getOrElse {
-            /* A gate that fails OPEN is not a gate. If we cannot tell whether the
-               data is safe, it is not safe. */
-            log.error("[archive] cannot determine export state for {} — refusing to drop: {}",
-                table, it.message)
-            listOf(Triple("unknown", java.time.LocalDate.EPOCH, java.time.LocalDate.EPOCH))
-        } }
-        if (!unexported.isNullOrEmpty()) {
-            log.warn("[partitions] {} has {} un-exported partition(s) past the hot window " +
-                "({}) — NOT dropping anything for this table until they reach the warm tier",
-                table, unexported.size, unexported.joinToString { it.first })
-            return
+        when (val gate = gateFor(table)) {
+            is Gate.NotConfigured, is Gate.Clear -> Unit
+
+            is Gate.Outstanding -> {
+                WorkerMetrics.partitionDropsGated.inc("work_outstanding")
+                log.warn("[partitions] gate: {} has {} un-exported partition(s) past the hot " +
+                    "window ({}) — NOT dropping anything for this table until they reach the " +
+                    "warm tier. Expected while an export catches up.",
+                    table, gate.partitions.size, gate.partitions.joinToString())
+                return
+            }
+
+            is Gate.Unavailable -> {
+                WorkerMetrics.partitionDropsGated.inc("gate_unavailable")
+                /*
+                 * Deliberately not the same shape as the line above, and deliberately
+                 * ERROR. This one does not resolve on its own: every drop for every
+                 * table is refused until it is fixed, so retention has stopped and
+                 * disk use is now unbounded. The most likely cause is stated inline
+                 * because it is both the commonest and the least obvious — a worker
+                 * that has TRACE_ARCHIVE_DIR set but reaches a database where V047's
+                 * `run_trace_unarchived_partitions` does not exist yet.
+                 */
+                log.error("[partitions] GATE UNAVAILABLE for {} — cannot determine export " +
+                    "state, so NO partition of ANY table will be dropped and retention has " +
+                    "stopped. Reason: {}. Most likely: TRACE_ARCHIVE_DIR is set but V047 has " +
+                    "not been applied to this database (run_trace_unarchived_partitions is " +
+                    "missing). Either apply the migration or unset TRACE_ARCHIVE_DIR. " +
+                    "See worker_partition_drops_gated{cause=\"gate_unavailable\"}.",
+                    table, gate.reason)
+                return
+            }
         }
         if (!dropEnabled) {
             /* Name what WOULD go, without touching it. Reads the same catalog the

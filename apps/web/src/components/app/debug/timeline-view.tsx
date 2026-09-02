@@ -217,8 +217,7 @@ function Row({
         "absolute inset-x-0 px-2", GRID,
         !isGap && "cursor-pointer",
         "transition-opacity hover:opacity-90 motion-reduce:transition-none",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2",
-        "focus-visible:outline-border-focus",
+        "focus-visible:focus-ring-inset",
         selected && "bg-surface-selected",
       )}
     >
@@ -430,8 +429,7 @@ function Header({
               className={cn(
                 "rounded-xs px-2 py-0.5 text-xs text-fg-link",
                 "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-                "focus-visible:outline-border-focus",
+                "focus-visible:focus-ring",
               )}
             >
               Reset zoom

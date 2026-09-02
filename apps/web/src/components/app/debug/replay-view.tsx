@@ -234,8 +234,7 @@ function Confirm({
                 Math.min(max, Math.max(1, Number(ev.target.value) || 1)))}
               className={cn(
                 "w-20 rounded-sm border border-default bg-surface-raised px-2 py-1 text-xs tabular-nums",
-                "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-                "focus-visible:outline-border-focus",
+                "focus-visible:focus-ring",
               )}
             />
             {/* What the number MEANS, restated as the reader changes it — the
@@ -332,8 +331,7 @@ function History({
                   className={cn(
                     "ml-auto rounded-xs px-1 text-xs text-fg-link",
                     "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-                    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-                    "focus-visible:outline-border-focus",
+                    "focus-visible:focus-ring",
                   )}
                 >
                   Open

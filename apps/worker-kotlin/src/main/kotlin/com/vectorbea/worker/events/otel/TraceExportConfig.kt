@@ -27,6 +27,9 @@ import javax.sql.DataSource
  * The superseded exporter is SHUT DOWN when it is replaced. An unclosed exporter
  * keeps its pool and its daemon threads for the life of the JVM, and a workspace
  * that edits its endpoint a few times a day would leak both.
+ *
+ * Construction is serialised PER WORKSPACE. One workspace must never be able to
+ * hold up another's export by pointing at a slow endpoint — see [buildLocks].
  */
 open class TraceExportConfig(
     private val dataSource: DataSource,
@@ -56,6 +59,24 @@ open class TraceExportConfig(
     )
 
     private val cache = ConcurrentHashMap<UUID, Destination>()
+
+    /**
+     * One lock per workspace, so building an exporter for A does not block B.
+     *
+     * This was `synchronized(this)`, which is correct and far too wide: building
+     * an `OtlpHttpSpanExporter` opens an HTTP client and, against a vendor
+     * endpoint, negotiates TLS. Under one monitor, every workspace's first export
+     * after a config change queues behind whichever workspace happened to be
+     * building — so one slow or unreachable endpoint stalled export for tenants
+     * that have nothing to do with it. The blast radius of a bad endpoint has to
+     * be the workspace that configured it.
+     *
+     * Entries are never removed. The key set is bounded by the number of
+     * workspaces this worker has ever exported for, each entry is an empty object,
+     * and removing one would need the same lock it protects — a leak measured in
+     * kilobytes against a race that would rebuild exporters.
+     */
+    private val buildLocks = ConcurrentHashMap<UUID, Any>()
 
     /** The enabled config for [workspaceId], or null if it exports nothing. */
     open fun rowFor(workspaceId: UUID): Row? = runCatching {
@@ -101,7 +122,9 @@ open class TraceExportConfig(
      */
     open fun destinationFor(row: Row): Destination? {
         cache[row.workspaceId]?.let { if (it.version == row.updatedAtMs) return it }
-        return synchronized(this) {
+        /* Per workspace, not per instance. See [buildLocks]. */
+        val lock = buildLocks.computeIfAbsent(row.workspaceId) { Any() }
+        return synchronized(lock) {
             cache[row.workspaceId]?.let { if (it.version == row.updatedAtMs) return@synchronized it }
             val built = runCatching { build(row) }.getOrElse {
                 log.warn("[otel-export] could not build exporter for {}: {}",
@@ -206,5 +229,6 @@ open class TraceExportConfig(
     fun close() {
         cache.values.forEach { runCatching { it.exporter.shutdown() } }
         cache.clear()
+        buildLocks.clear()
     }
 }

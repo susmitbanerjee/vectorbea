@@ -148,8 +148,7 @@ export function FlowView({
         onScroll={onScroll}
         className={cn(
           "relative overflow-x-auto overflow-y-hidden rounded-md border border-subtle bg-surface-base",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2",
-          "focus-visible:outline-border-focus",
+          "focus-visible:focus-ring-inset",
         )}
         /* Focusable so the graph can be scrolled from the keyboard without
            tabbing through every node inside it. */
@@ -287,8 +286,7 @@ function NodeCard({
         className={cn(
           "flex w-full flex-col justify-between rounded-md px-2.5 py-2 text-left",
           "transition-opacity hover:opacity-90 active:opacity-80 motion-reduce:transition-none",
-          "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-          "focus-visible:outline-border-focus",
+          "focus-visible:focus-ring",
           t.fill, t.border, t.borderWidth,
           t.borderStyle === "dashed" ? "border-dashed" : "border-solid",
           /* Dimmed, never hidden. What did not happen is information. */
@@ -344,8 +342,7 @@ function NodeCard({
             className={cn(
               "mt-0.5 flex w-full items-center gap-1 rounded-xs px-1 text-left",
               "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-              "focus-visible:outline-border-focus",
+              "focus-visible:focus-ring",
             )}
           >
             <Icon icon={expanded ? CaretDown : CaretRight} size="xs" decorative
@@ -448,8 +445,7 @@ function Minimap({
             }}
             className={cn(
               "absolute inset-y-0 flex items-center justify-stretch px-px",
-              "focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1",
-              "focus-visible:outline-border-focus",
+              "focus-visible:focus-ring-inset",
             )}
           >
             <span

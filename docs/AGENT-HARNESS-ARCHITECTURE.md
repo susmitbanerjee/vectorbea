@@ -1064,6 +1064,31 @@ live, so five children wake their parent once. That enqueue is best-effort — w
 is the fourth instance of the pattern §16 describes, and why the reconciler
 exists.
 
+**Behind the CAS, but not inside its connection.** Three things follow a won
+transition — root-cause attribution, the parent wake, the OTel trace export — and
+each acquires connections of its own. They used to run inside
+`updateRunCompleted`'s `dataSource.connection.use { … }`, so a thread held one
+pooled connection while waiting for another. That is hold-and-wait: at P
+concurrently terminalising runs against a pool of P, every thread owns one and
+needs a second, none can release, and Hikari's `connectionTimeout` then fires on
+all of them together. The symptom is a fleet-wide stall at exactly the moment a
+burst of runs finishes, with no error naming the cause — and a fan-out finishing
+together is the normal case, not a pathological one.
+
+They now run in `RunProcessor.onTerminalTransition`, called after the connection
+is released, on the boolean the CAS produced. **The CAS, its guard and the rule
+that every step is gated on winning it are unchanged**; the UPDATE has already
+committed under autoCommit, so nothing here was ever inside its transaction and
+releasing first reorders nothing observable.
+
+Three tests hold it: `TerminalCompletionPoolTest` asserts that no thread ever
+holds two connections at once on this path and reproduces the exhaustion at 16
+threads over a pool of 4, and `RunProcessorStructureTest` fails the build if the
+call moves back inside a `use` block. The last one earns its place because the
+edit that reintroduces this is two lines, reads *better* than the correct version,
+and passes every behavioural test in the suite — they all terminalise one run at a
+time against a pool with room to spare.
+
 ---
 
 ## 12. Scaling
@@ -1107,6 +1132,34 @@ so the latter would refuse every drop forever, read as a bug, and get switched
 off. It fails **closed**: if the export state cannot be determined, nothing is
 dropped.
 
+**The gate says no in two ways, and they are not the same event.** Fail-closed is
+right for both; reporting them identically was not, because one is a status and
+the other is an incident.
+
+| State | Log | Metric | What it means |
+|---|---|---|---|
+| `Outstanding` | `warn` — "gate: N un-exported partition(s)" | `worker_partition_drops_gated{cause="work_outstanding"}` | The exporter is behind. Self-correcting. The gate is doing its job. |
+| `Unavailable` | `error` — "GATE UNAVAILABLE" | `worker_partition_drops_gated{cause="gate_unavailable"}` | The gate cannot be evaluated. **Not** self-correcting: nothing drops for any table until somebody acts, so retention has stopped and disk use is unbounded. |
+
+**Ops: alert on `gate_unavailable`.** The commonest cause is a worker deployed
+with `TRACE_ARCHIVE_DIR` set against a database where V047 has not been applied —
+`run_trace_unarchived_partitions` does not exist, `due()` throws, and every drop
+is refused. The fix is to apply the migration or unset the variable; the log line
+names both. Nothing errors, nothing retries and no run fails, which is exactly
+why this needs a metric rather than a log line alone: the symptom is a job
+quietly declining to act, and that is invisible until someone notices the disk.
+
+**⚠ `TRACE_ARCHIVE_DIR` holds every tenant's data.** The unit of archiving is a
+partition — a month of one table across the whole installation — so the object
+key contains no workspace id and there is no per-tenant mode. Pointing this at a
+location one customer can read is a breach with no failure signal: the export
+succeeds, the ledger records it, the partitions are dropped.
+`archiveStoreFromEnv` therefore **refuses** a root containing a UUID segment, an
+unsubstituted `{placeholder}`, or a `customers`/`tenants`/`clients`/`workspaces`
+segment. `TRACE_ARCHIVE_ALLOW_SCOPED_PATH=true` overrides it and logs which
+segment was waived. Per-tenant destinations would require changing the unit of
+archiving; they are not a configuration change.
+
 Windows: `TRACE_HOT_DAYS` (7), `TRACE_WARM_DAYS` (90). A partition is eligible
 for export once its whole month is past the hot window — the unit of eviction is
 a partition, so a snapshot taken while the month is still being appended to would
@@ -1135,6 +1188,22 @@ Deciding once the run has finished makes the rule absolute, and keeps the other
 §12.1 rule intact — nothing is ever DELETEd from Postgres. The cost, stated
 plainly: **this does not reduce span write volume.** Batching, payload offload
 and content addressing are what do that.
+
+**What was sampled out is recorded (V055).** `run_trace_archives.row_count`
+describes the OBJECT, not the partition, and once sampling is on those differ by
+whatever the sampler declined to keep. The ledger is the only surviving record
+that a dropped partition existed, so recording what it kept while staying silent
+about what it dropped made the difference unobservable by construction —
+`TraceArchiver.Archived.sampledOutRuns` was computed on every export and thrown
+away. It is now written in the same INSERT as the checksum, and
+`run_trace_archives_reduced` lists the months it is non-zero for. Runs, not rows:
+the sampler's unit is a whole trace tree and it never keeps part of a run, so a
+row count would mean a second full scan of the month to produce a number nobody
+would query.
+
+The worker probes for the column before using it — new worker against a pre-V055
+database must still export, because an INSERT that fails on an unknown column
+stops archiving and therefore stops retention.
 
 The rules, in order, every KEEP unconditional: younger than
 `TRACE_SAMPLE_GRACE_SECONDS` (60) → keep; status is anything but `succeeded` →
@@ -1177,9 +1246,24 @@ a per-run buffer flushes at 50 events or 250 ms.
 The buffer applies **back-pressure, not dropping** — the opposite of `SpanWriter`,
 deliberately. A missing span is a degraded trace; a missing event is a hole in the
 timeline that `?afterSequence=` paging exposes and cannot explain, and a lost
-RUN_FAILED is an outage reported as a success. Terminal states and approval gates
-are never buffered, and a synchronous write drains the run's queue first so
-sequence order stays emission order.
+RUN_FAILED is an outage reported as a success. A synchronous write drains the
+run's queue first, so sequence order stays emission order.
+
+**What is never buffered** is not "terminal states" — that described the set more
+narrowly than it already was, and read as exhaustive when it was not. The rule is
+**an event whose emitting thread is about to stop touching this run**: terminal
+states, and every point where the run leaves this worker for a queue, a timer or a
+successor. Anything else waits in the per-run deque for the next append or the
+250 ms timer, both of which need a thread that is still working on the run — and
+at a handoff there is not one, so the timeline loses the line that explains why
+the run appears to jump.
+
+So the set is the four terminal states, plus `RUN_YIELDED`, `RUN_REENQUEUED`,
+`RUN_RESUMED` and the two approval gates, plus all four continue-as-new
+transitions. `HISTORY_LIMIT_WARNING` and `CONTINUE_AS_NEW_RECOMMENDED` stay out
+deliberately: they observe a threshold, the run and the thread carry on, and
+forcing a synchronous round trip for advice nothing waits on would put it on the
+hot path.
 
 `appendEvent` returns `SEQ_BUFFERED` (-1) for a buffered event. No caller in the
 worker reads the return value; one that needs the number calls `appendEvents`.
@@ -1212,7 +1296,23 @@ competing `agent_runs` writers, local Postgres 18):
 | counter row + batch | 1537 ms | 0.00 ms | 244 ms | 874 ms | 239 |
 
 Six times the throughput and 60× less row churn on the row that also carries
-status, the lease and the fair-queueing vtime. Two caveats worth keeping: **p50
+status, the lease and the fair-queueing vtime.
+
+**The table is now guarded, not just recorded.** `EventWriteLoadTest` asserted
+nothing and was excluded from every tier, so the figures above could be reverted,
+mis-flagged or refactored away with the whole suite still green — every other test
+is about correctness at a concurrency of one. It is now two tests: the four-pass
+measurement keeps the `benchmark` tag and produces this table, and a two-pass
+regression runs **on merge** at a tenth of the volume with no competing writers.
+
+The primary assertion is row churn, because it is structural rather than timed —
+run-row sequencing takes `FOR UPDATE` on the run row per flush and leaves a dead
+tuple; the counter row does not touch `agent_runs` at all. Measured at the
+regression's volume: 1 747 versus 11, and the bound is a tenth of the run-row
+pass's own churn. Wall clock is asserted too, at 1.5× against a measured 8.7×.
+The gap between the measurement and the bound is deliberate: the difference
+between a test that fails when the change is undone and one that fails when CI is
+busy. Two caveats worth keeping: **p50
 of 0.00 ms in the batched rows is enqueue latency, not write latency** — the
 comparable numbers are wall clock and p99. And sampled lock wait (`pg_locks` not
 granted, plus backends in a `Lock` wait event, every 2 ms) was **0.00 in all four

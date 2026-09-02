@@ -102,6 +102,26 @@
   box-shadow: var(--elev-focus);
 }
 
+/* The same ring, drawn INSIDE the element.
+
+   `focus-ring` is a box-shadow, and a box-shadow is clipped by an
+   `overflow-hidden` ancestor — which is exactly the case for a node inside a
+   scrolling canvas, a row in a clipped list, or a tab on an underlined strip.
+   Those need a real outline, inset so it is not eaten by the clip.
+
+   It has to live here as a utility rather than being written inline, because
+   every attempt to spell it in classes lands on a name Tailwind will not mint:
+   `outline-border-focus` and `outline-focus` both LOOK like colour utilities and
+   both silently generate nothing, leaving the ring at currentColor — brand on
+   one control, red on another, invisible on a third. Verified in the browser,
+   not assumed: the class must appear in the compiled sheet.
+
+   Prefer `focus-ring`. Reach for this only when the ring would be clipped. */
+@utility focus-ring-inset {
+  outline: 2px solid var(--border-focus);
+  outline-offset: -2px;
+}
+
 /* Live/executing emphasis — the only place a glow is permitted (§3.7). */
 @utility glow-live {
   box-shadow: var(--elev-glow-live);

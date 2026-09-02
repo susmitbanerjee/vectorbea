@@ -170,8 +170,7 @@ export function IterationsView({
 
 const selectClass = cn(
   "mt-1 w-full rounded-sm border border-default bg-surface-raised px-2 py-1.5 text-xs",
-  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-  "focus-visible:outline-border-focus",
+  "focus-visible:focus-ring",
 );
 
 // ── The rail ────────────────────────────────────────────────────────────────
@@ -197,8 +196,7 @@ function IterationRow({
       className={cn(
         "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left",
         "transition-opacity hover:opacity-90 motion-reduce:transition-none",
-        "focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2",
-        "focus-visible:outline-border-focus",
+        "focus-visible:focus-ring-inset",
         selected && "bg-surface-selected",
         /* Recalled iterations are dimmed: they are real history, but they did
            not happen on this attempt. */
@@ -705,8 +703,7 @@ function PayloadPanel({
             className={cn(
               "mt-2 rounded-xs px-1 text-xs text-fg-link",
               "transition-opacity hover:opacity-80 motion-reduce:transition-none",
-              "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-              "focus-visible:outline-border-focus",
+              "focus-visible:focus-ring",
             )}
           >
             {open ? "Hide" : "Show"} {title.toLowerCase()}

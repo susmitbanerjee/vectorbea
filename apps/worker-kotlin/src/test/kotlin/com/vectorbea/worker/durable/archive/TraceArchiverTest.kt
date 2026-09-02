@@ -90,7 +90,8 @@ class TraceArchiverTest {
 
     private fun ledger(ds: DataSource): Map<String, Any?>? = ds.connection.use { c ->
         c.prepareStatement(
-            "SELECT row_count, byte_count, format, object_key, checksum, tier, dropped_at " +
+            "SELECT row_count, byte_count, format, object_key, checksum, tier, dropped_at, " +
+            "       sampled_out_runs " +
             "FROM run_trace_archives WHERE partition_name = ?"
         ).use { st ->
             st.setString(1, partition)
@@ -98,7 +99,8 @@ class TraceArchiverTest {
                 if (!rs.next()) null else mapOf(
                     "rows" to rs.getLong(1), "bytes" to rs.getLong(2), "format" to rs.getString(3),
                     "key" to rs.getString(4), "checksum" to rs.getString(5),
-                    "tier" to rs.getString(6), "dropped_at" to rs.getTimestamp(7))
+                    "tier" to rs.getString(6), "dropped_at" to rs.getTimestamp(7),
+                    "sampled_out_runs" to rs.getLong(8))
             }
         }
     }
@@ -464,7 +466,183 @@ class TraceArchiverTest {
             }
         }
 
+    /**
+     * What the sampler dropped is recorded, not just what it kept.
+     *
+     * ── WHY THIS IS AN ASSERTION AND NOT A LOG LINE ─────────────────────────
+     * `row_count` describes the OBJECT. Once sampling is on it is smaller than the
+     * partition by however many runs were declined, and once the partition is
+     * dropped that difference exists nowhere: the rows are not in Postgres and not
+     * in the archive. V047 calls this table "the only remaining evidence that the
+     * rows ever existed", which is only true if it records the absence too.
+     *
+     * `Archived.sampledOutRuns` was computed on every export and discarded at the
+     * end of the method — the exact shape of defect that reads as finished.
+     *
+     * A team of two clean succeeded runs against rate 0.0: the whole tree is
+     * declined, so the object is empty and the ledger has to say why.
+     */
+    @Test
+    fun `the ledger records how many runs sampling left out`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database"); ds!!
+        val tmp = Files.createTempDirectory("archive-test")
+        val ws = UUID.randomUUID()
+        val parent = UUID.randomUUID()
+        val child = UUID.randomUUID()
+        try {
+            seedWorkspace(ds, ws)
+            seedRun(ds, ws, parent)
+            seedChildRun(ds, ws, child, parent)
+            ds.connection.use { c ->
+                c.prepareStatement("SELECT run_spans_ensure_partition('2026-05-01'::date)")
+                    .use { it.executeQuery().use { } }
+            }
+            span(ds, ws, parent, "ok", "{}")
+            span(ds, ws, child, "ok", "{}")
+
+            val done = TraceArchiver(ds, FilesystemArchiveStore(tmp.toString()),
+                NdJsonGzEncoder(), hotDays = 7, warmDays = 3650,
+                sampler = TraceSampler(rateFor = { 0.0 }))
+                .runOnce().first { it.partition == partition }
+
+            assertEquals(2, done.sampledOutRuns, "both runs of the tree were declined")
+            assertEquals(0L, done.rows, "so the object holds none of their spans")
+
+            val row = ledger(ds)!!
+            assertEquals(2L, row["sampled_out_runs"],
+                "the count has to reach the LEDGER — computing it and dropping it is " +
+                "what this test exists to prevent")
+            assertEquals(0L, row["rows"])
+
+            /* And the view an investigation actually reaches for. */
+            val reduced = ds.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT sampled_out_runs FROM run_trace_archives_reduced " +
+                    "WHERE partition_name = ?"
+                ).use { st ->
+                    st.setString(1, partition)
+                    st.executeQuery().use { rs -> if (rs.next()) rs.getLong(1) else null }
+                }
+            }
+            assertEquals(2L, reduced,
+                "a partition that lost runs must appear in run_trace_archives_reduced")
+        } finally {
+            runCatching {
+                ds.connection.use { c ->
+                    c.prepareStatement("DELETE FROM workspaces WHERE id=?")
+                        .use { it.setObject(1, ws); it.executeUpdate() }
+                }
+            }
+            tearDown(ds, tmp)
+        }
+    }
+
+    /**
+     * An unsampled export records zero, not null.
+     *
+     * The default configuration everywhere, and the number a reader will see on
+     * almost every row. Zero means "nothing was left out"; a null would mean "we
+     * do not know", and those are different answers to the question this column
+     * exists to settle.
+     */
+    @Test
+    fun `an unsampled export records zero runs left out`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database"); ds!!
+        val tmp = Files.createTempDirectory("archive-test")
+        val ws = UUID.randomUUID(); val run = UUID.randomUUID()
+        try {
+            setUp(ds, ws, run, 10)
+            val done = TraceArchiver(ds, FilesystemArchiveStore(tmp.toString()),
+                NdJsonGzEncoder(), hotDays = 7, warmDays = 3650)
+                .runOnce().first { it.partition == partition }
+
+            assertEquals(0, done.sampledOutRuns)
+            assertEquals(0L, ledger(ds)!!["sampled_out_runs"])
+        } finally {
+            tearDown(ds, tmp)
+        }
+    }
+
     // ── The gate ──────────────────────────────────────────────────────────────
+
+    /**
+     * A gate that cannot be EVALUATED is reported differently from one that says
+     * "not yet".
+     *
+     * ── WHY THE DISTINCTION IS THE WHOLE POINT ──────────────────────────────
+     * Both refuse the drop, and both are right to. But one is self-correcting and
+     * the other is not:
+     *
+     *   work_outstanding  — the exporter is behind. Next tick may clear it. The
+     *                       gate is working.
+     *   gate_unavailable  — the gate cannot be read at all. NOTHING will ever be
+     *                       dropped, for any table, until somebody acts. Retention
+     *                       has stopped and the disk is filling.
+     *
+     * They used to produce the same warning, distinguishable only by a synthetic
+     * partition literally named "unknown". The realistic way to reach the second
+     * is a worker with TRACE_ARCHIVE_DIR set against a database where V047 has not
+     * been applied — `run_trace_unarchived_partitions` does not exist, `due()`
+     * throws, and every drop is silently refused.
+     *
+     * Asserted on the METRIC rather than on the log text: the log line is what an
+     * operator reads, the metric is what pages them, and the metric is the half
+     * that can be checked without pinning wording nobody should be afraid to edit.
+     */
+    @Test
+    fun `a gate that cannot be evaluated is counted separately from a backlog`() {
+        val ds = dsOrNull(); assumeTrue(ds != null, "no database"); ds!!
+        val tmp = Files.createTempDirectory("archive-test")
+        val ws = UUID.randomUUID(); val run = UUID.randomUUID()
+
+        fun gated(cause: String): Long =
+            com.vectorbea.worker.metrics.WorkerMetrics.partitionDropsGated
+                .cells[listOf(cause)]?.get() ?: 0L
+
+        try {
+            setUp(ds, ws, run, 5)
+            val outstandingBefore = gated("work_outstanding")
+            val unavailableBefore = gated("gate_unavailable")
+
+            /* 1. A real archiver with a real, un-exported partition: backlog. */
+            PartitionMaintenance(
+                dataSource = ds, redisCommands = null, dropEnabled = true,
+                archiver = TraceArchiver(ds, FilesystemArchiveStore(tmp.toString()),
+                    NdJsonGzEncoder(), hotDays = 7, warmDays = 3650),
+            ).reportOrDropExpired("run_spans")
+
+            assertTrue(partitionExists(ds), "the backlog must still block the drop")
+            assertEquals(outstandingBefore + 1, gated("work_outstanding"),
+                "a backlog must count as work_outstanding")
+            assertEquals(unavailableBefore, gated("gate_unavailable"),
+                "a backlog is NOT a broken gate — counting it as one would make the " +
+                "alert fire during normal catch-up and be turned off")
+
+            /* 2. An archiver whose queue cannot be read at all. A DataSource that
+                  refuses is the same shape as the real cause: `due()` raises, and
+                  the gate has no answer rather than an empty one. */
+            val broken = object : DataSource by ds {
+                override fun getConnection(): java.sql.Connection =
+                    throw java.sql.SQLException("relation \"run_trace_unarchived_partitions\" does not exist")
+            }
+            PartitionMaintenance(
+                dataSource = ds, redisCommands = null, dropEnabled = true,
+                archiver = TraceArchiver(broken, FilesystemArchiveStore(tmp.toString()),
+                    NdJsonGzEncoder(), hotDays = 7, warmDays = 3650),
+            ).reportOrDropExpired("run_spans")
+
+            assertTrue(partitionExists(ds),
+                "fail CLOSED: an unreadable gate must refuse the drop, not allow it")
+            assertEquals(unavailableBefore + 1, gated("gate_unavailable"),
+                "an unreadable gate must be counted as gate_unavailable — it is the " +
+                "signal that retention has stopped, and nothing else in the system " +
+                "reports it")
+            assertEquals(outstandingBefore + 1, gated("work_outstanding"),
+                "and it must NOT be filed as an ordinary backlog")
+        } finally {
+            tearDown(ds, tmp)
+        }
+    }
 
     /**
      * The point of the whole item: an un-exported partition past the hot window

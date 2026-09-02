@@ -471,6 +471,12 @@ fun main() {
            Separate from TraceRoutes because they answer a different question —
            "who asked whom, and why" lives in agent_handoffs, not in the span tree. */
         runRepo?.let { com.vectorbea.api.routes.ConstellationRoutes(ds, it).register(router) }
+        /* The failures roll-up. Workspace-scoped rather than run-scoped, so it
+           takes no run repository — it checks the path id against the caller's
+           own workspace itself, because a workspace id in a URL is not an
+           authorisation and this endpoint aggregates everything that workspace
+           ever did. */
+        com.vectorbea.api.routes.FailureRoutes(ds).register(router)
     } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
     // 7b. Cron scheduler — fires due workflow schedules onto the queue

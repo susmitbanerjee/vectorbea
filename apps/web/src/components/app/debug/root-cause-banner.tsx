@@ -112,8 +112,8 @@ export function RootCauseBanner({
           className={cn(
             "mt-0.5 shrink-0 rounded-xs px-1 text-fg-secondary",
             "transition-opacity hover:opacity-80 active:opacity-70",
-            "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
-            "focus-visible:outline-border-focus motion-reduce:transition-none",
+            "focus-visible:focus-ring",
+            "motion-reduce:transition-none",
           )}
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>

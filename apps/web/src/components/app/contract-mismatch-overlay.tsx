@@ -59,7 +59,7 @@ export function ContractMismatchOverlay() {
             onClick={() => setDismissed(true)}
             className={cn(
               "rounded-sm border border-subtle px-2 py-1 text-xs",
-              "hover:bg-hover focus-visible:outline-2 focus-visible:outline-border-focus",
+              "hover:bg-hover focus-visible:focus-ring",
             )}
           >
             Dismiss
