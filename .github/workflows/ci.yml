@@ -150,7 +150,7 @@ jobs:
           cache: gradle
 
       - name: Build
-        run: gradle build --no-daemon --console=plain -x test
+        run: bash ./gradlew build --no-daemon --console=plain -x test
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
@@ -159,7 +159,7 @@ jobs:
       # green one, which is the same failure mode as a skipped test. The unit
       # tier is 286/286 green, so this is safe to enforce now.
       - name: Test (unit tier)
-        run: gradle test --no-daemon --console=plain
+        run: bash ./gradlew test --no-daemon --console=plain
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
@@ -181,7 +181,7 @@ jobs:
           cache: gradle
 
       - name: Build
-        run: gradle build --no-daemon --console=plain -x test
+        run: bash ./gradlew build --no-daemon --console=plain -x test
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
@@ -190,7 +190,7 @@ jobs:
       # This job used to build and stop. 542 worker tests existed and none of
       # them had ever run in CI.
       - name: Test (unit tier)
-        run: gradle test --no-daemon --console=plain
+        run: bash ./gradlew test --no-daemon --console=plain
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
@@ -302,12 +302,12 @@ jobs:
       - name: Worker — integration tier
         if: needs.changes.outputs.worker == 'true'
         working-directory: apps/worker-kotlin
-        run: gradle integrationTest --no-daemon --console=plain
+        run: bash ./gradlew integrationTest --no-daemon --console=plain
 
       - name: API — integration tier
         if: needs.changes.outputs.api == 'true'
         working-directory: apps/api-kotlin
-        run: gradle integrationTest --no-daemon --console=plain
+        run: bash ./gradlew integrationTest --no-daemon --console=plain
 
       - name: Publish test results
         if: always()

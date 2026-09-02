@@ -20,8 +20,8 @@
     "dev:infra:stop": "docker compose stop postgres redis",
     "dev:infra:down": "docker compose down",
 
-    "build:api": "bash -c 'cd apps/api-kotlin && gradle fatJar --no-daemon --console=plain'",
-    "build:worker": "bash -c 'cd apps/worker-kotlin && gradle fatJar --no-daemon --console=plain'",
+    "build:api": "node scripts/run-gradle.mjs apps/api-kotlin fatJar --no-daemon --console=plain",
+    "build:worker": "node scripts/run-gradle.mjs apps/worker-kotlin fatJar --no-daemon --console=plain",
     "build:web": "npm run build --workspace=apps/web",
     "build": "npm run build:api && npm run build:worker && npm run build:web",
 

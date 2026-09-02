@@ -420,6 +420,15 @@ export function DebugTab({
             <div className="h-64 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
                  aria-busy="true" aria-label="Loading the burn-down" />
           )
+        ) : view === "agents" ? (
+          agentsError ? (
+            <TraceUnavailable message={agentsError} onRetry={() => setAgentsError(null)} />
+          ) : constellation ? (
+            <AgentsView constellation={constellation} />
+          ) : (
+            <div className="h-64 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
+                 aria-busy="true" aria-label="Loading the agent constellation" />
+          )
         ) : (
           <IterationsView
             api={api}
