@@ -50,6 +50,15 @@ class AgentTeamNodeExecutor(
      */
     private val teamsEnabled: Boolean = TEAMS_ENABLED,
     private val llmHttpClient: java.net.http.HttpClient? = null,
+    /**
+     * Shared provider token bucket. §12.4.
+     *
+     * This class had no capacity parameter at all, so the entire multi-agent path
+     * called providers unmetered even with the bucket enabled — and a team node is
+     * the largest fan-out in the product, which is exactly what the bucket exists
+     * for. Every member's brain gets it below.
+     */
+    private val capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
 ) : NodeExecutor {
 
     private val log = logger()
@@ -341,6 +350,7 @@ class AgentTeamNodeExecutor(
         /* A team IS delegation. The team flag being on is the decision; making an
            operator set two flags to run one node is a footgun with no upside. */
         delegationEnabled = true,
+        capacity = capacity,
     )
 
     // ── The agent row ────────────────────────────────────────────────────────

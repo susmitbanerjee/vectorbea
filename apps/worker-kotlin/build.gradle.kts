@@ -29,6 +29,29 @@ dependencies {
     // type it is handed has to re-declare it.
     api("com.vectorbea:graph-kotlin:0.1.0")
 
+    /*
+     * BPE tokenizer, for the capacity bucket's input-token estimate.
+     *
+     * ── WHY A DEPENDENCY RATHER THAN AN APPROXIMATION ───────────────────────
+     * The estimate was `characters / 4`, which is the standard figure for English
+     * prose and is wrong for what an agent actually sends. An agent prompt is
+     * dominated by pretty-printed tool schemas and JSON observations, and
+     * measured against real prompt shapes the old estimate under-reserved by
+     * 15-36% — always in the same direction, and worst at high tool counts and
+     * deep iterations, which is exactly when a fan-out is at full width. A bucket
+     * that systematically under-reserves cannot prevent 429s however it is keyed.
+     *
+     * jtokkit is the reference JVM implementation of OpenAI's BPE encodings:
+     * Apache 2.0, no transitive dependencies, encodings loaded from its own jar
+     * so there is no network call and no model download at runtime.
+     *
+     * It is exact for OpenAI models. Anthropic and Google publish no offline
+     * tokenizer, so those use cl100k as a close approximation and the residual
+     * error is closed by the learned correction factor in `EstimateCorrection` —
+     * see `TokenEstimator`.
+     */
+    implementation("com.knuddels:jtokkit:1.1.0")
+
     // JSON — Jackson with Kotlin module
     // Note: recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")

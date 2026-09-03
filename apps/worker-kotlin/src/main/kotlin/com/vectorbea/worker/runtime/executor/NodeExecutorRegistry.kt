@@ -59,7 +59,8 @@ class NodeExecutorRegistry(
         NodeType.DB_QUERY  to DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore),
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),
         // Reference executors — look up tool/agent definition from DB at runtime
-        NodeType.TOOL      to ToolNodeExecutor(dataSource, connectionResolver, dbPoolManager, eventStore),
+        NodeType.TOOL      to ToolNodeExecutor(dataSource, connectionResolver, dbPoolManager,
+                                  eventStore, circuit = circuit),
         /* The agent path matters MORE than the plain LLM node here: an agent
            loop is where one run becomes twenty provider calls, which is the
            multiplier §12.4 exists for. */
@@ -69,7 +70,7 @@ class NodeExecutorRegistry(
            unchanged, and the two are siblings over the same primitives rather
            than one type with a branch inside it. */
         NodeType.AGENT_TEAM to AgentTeamNodeExecutor(dataSource, connectionResolver, eventStore,
-                                  dbPoolManager),
+                                  dbPoolManager, capacity = capacity),
     )
 
     private val unsupported = UnsupportedNodeExecutor()

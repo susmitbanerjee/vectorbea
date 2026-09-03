@@ -1409,6 +1409,162 @@ Every failure mode fails **open**. A bucket that cannot be reached must not stop
 the fleet calling providers: the 429 handling that predates it is still there and
 still correct.
 
+#### 12.4.2 Rebuilt (P15) — after 429s reached production anyway
+
+The investigation is in
+[PROVIDER-THROTTLING-FINDINGS.md](./PROVIDER-THROTTLING-FINDINGS.md). Six things
+were wrong, and the first one subsumed the rest.
+
+**It had never been enabled.** `PROVIDER_CAPACITY_ENABLED` was set in no
+environment file, compose file, Railway config or Dockerfile, and defaults to
+off. Every `reserve` returned `NotApplicable` before touching Redis. It is now
+documented in `.env.example` with the limits that have to accompany it.
+
+**The ceiling is keyed on the CREDENTIAL, not the workspace.** The old key
+assumed a provider limit is per API key and a key is per workspace. Nothing
+enforces the second half — `connections` has no uniqueness constraint on the
+credential, and one customer running several workspaces against one account is
+ordinary. When that happens a per-workspace bucket bounds nothing: N workspaces
+each at 90% of their own limit is 90N% of the account's.
+
+`CredentialKey.fingerprint` is a salted SHA-256 of the API key, computed where
+the plaintext already exists (it is about to become an Authorization header) and
+never stored. `PROVIDER_CAPACITY_SALT` **must match across the fleet** — workers
+that disagree compute different keys for one credential and each gets a bucket of
+its own, which is the original bug wearing a configuration hat.
+
+Workspace fairness moved inside that ceiling: a workspace draws freely within
+`depth / activeWorkspaces`, and beyond it may borrow only down to
+`PROVIDER_CAPACITY_BORROW_FLOOR`, so a workspace still inside its share always
+finds room. **When every workspace has its own credential the two layers
+collapse** — one workspace per account bucket, share equals depth, nothing to
+configure and nothing to disable.
+
+**Both limits are modelled.** Providers publish and enforce requests-per-minute
+and tokens-per-minute separately, and an agent loop is many small calls: at the
+old 1M-token default, fifty concurrent agent-sized calls fit inside the token
+depth without the bucket noticing. Every reservation now needs headroom in both,
+and a refusal names which one bound it — "raise your RPM" and "raise your TPM"
+are different actions.
+
+**The estimate is tokenized, then calibrated.** `chars / 4` is the figure for
+English prose, and an agent sends pretty-printed tool schemas and JSON
+observations; measured against real prompt shapes it under-reserved by 15-36%,
+always in the same direction and worst at high tool counts and deep iterations.
+`TokenEstimator` uses jtokkit (exact for OpenAI encodings, cl100k as a stated
+approximation for the others) and multiplies by a factor learned per
+`(model, prompt shape)` from the provider's own `input_tokens`. The factor is
+clamped at **≥ 1.0**: the failure being fixed is systematic under-reservation, and
+a feedback loop able to reintroduce it would do so silently and with the
+authority of measured data.
+
+**`Retry-After` is honoured, and jittered anyway.** Honouring it *exactly* is
+itself a synchronisation mechanism — every caller refused in one second gets the
+same value, so parking them all at `now + 60s` schedules a rendezvous. The header
+is a floor; the delay is spread over `[retryAfter, retryAfter × 1.5]`, never
+below. The fallback curve was worse: `decide(header, attempt = 0)` was called with
+a hardcoded zero, so `BASE shl 0` collapsed `Random.nextLong(1000, 1001)` to
+exactly 1000 for every caller — jitter that read as present in the source and was
+arithmetically absent. The attempt now comes from the run's own event history,
+because a throttled run resumes in a different process and an in-memory counter
+would reset to zero every time.
+
+**The throttle resume path was broken, independently of the bucket.** A 429
+parked the run at `yielded` and scheduled a timer, but `findDueTimers` selects
+`status = 'waiting_for_timer'` and nothing wrote that status. The timer could
+never fire; the only thing that resumed a throttled run was `CrashRecoveryLoop`,
+in batches of ten ordered by `updated_at` — which reconstructed the burst. Runs
+now park at `waiting_for_timer`, which is the status that path was written for,
+with `ResumeReconciler`'s existing fourth arm as the backstop.
+
+**A 429 is not a breaker event**, and never was — the throttle branch does not
+call `circuit.onFailure`. It is now asserted from both sides, including a source
+check, because the reintroducing edit is one line that makes the two error paths
+look consistent.
+
+**Fan-out asks before it starts.** `preflightFanOut` answers "can this team
+afford N children" — a total. `headroomFor` answers "is there room to start them
+now" — a rate. Twenty children can be affordable in tokens and still be twenty
+simultaneous requests. Capacity **staggers** rather than refusing, because the
+children that do not fit now will fit in a moment.
+
+**The paths the bucket could not see.** `AgentTeamNodeExecutor` had no capacity
+parameter at all, so the entire multi-agent path — the largest fan-out in the
+product — called providers unmetered even with the flag on; and delegated
+children were constructed without one. Both now carry it.
+
+**Observability**, per key: utilisation, reservations, refusals by dimension,
+leases reclaimed by TTL, the estimate-error distribution, and 429s received.
+`provider_429_after_admit` is separate on purpose: **a 429 on a call the bucket
+admitted is a bug in the bucket**, not a refusal, and any non-zero value means the
+limits are too high, the estimate is short, or something outside the fleet is
+spending the same account's budget.
+
+#### 12.4.3 Tool result contracts (P16)
+
+Full write-up: [TOOL-RESULT-CONTRACTS.md](./TOOL-RESULT-CONTRACTS.md).
+
+An observation was the tool's whole result — `{statusCode, body, headers}` —
+serialised and cut at `MAX_TOOL_PAYLOAD_CHARS` with `String.take`. Measured
+against representative API responses: **six of eight truncate, and every
+truncated one is unparseable JSON**. A model handed a broken fragment does not get
+less information, it gets a syntax error, and it cannot tell that the list it saw
+was cut. A single 56-field CRM record does not fit; the ten fields an agent wants
+are 17% of it; response headers are 18% of the whole budget.
+
+`tools.result_contract_json` (V056) declares what the model sees: the projected
+fields with one line of meaning each, a collection summary (count, sample, "more
+exist and here is how to page"), an error mapping, and usage guidance for the
+prompt. `ResultProjection` applies it **before** the cap; the full result still
+goes to the payload store, because the debugger and the model are two consumers
+with two different needs.
+
+`ToolErrorShape` maps failures to `kind` / `retryable` / what would fix it, with
+HTTP status semantics as the default so the error half works before anyone writes
+a contract. Unknown failures default to NOT retryable: not retrying something that
+would have worked costs one opportunity, retrying something that never will costs
+the iteration budget.
+
+Measured: median observation **681 → 361 tokens**, truncation **5/6 → 0/6**,
+iterations-to-completion **8 (never answered) → 2**. A tool with no contract is
+byte-for-byte unchanged.
+
+#### 12.4.4 Named queries (P17)
+
+Full write-up: [NAMED-QUERIES.md](./NAMED-QUERIES.md).
+
+Database tools routed by the SQL statement's first keyword — `firstWord ==
+"SELECT"` chose the read executor, anything else the write executor — on a path
+that reaches a production database. The read executor re-checks for `SELECT`, so
+a write was not trivially reachable there, but `SELECT writes_something()` is a
+write whose first token is `SELECT`, a read opening with a CTE was routed to the
+write path and then rejected for not being a write, and every new SQL form was a
+new chance to be wrong.
+
+`tools.named_queries_json` (V057) holds a catalogue: id, description, typed
+parameters, human-authored SQL with `:name` placeholders, a **declared**
+read/write access level, and a mandatory row limit and statement timeout. The
+agent selects an id and supplies parameters; it never composes SQL. Each query is
+exposed as its own tool (`<toolId>#<queryId>`), so discovery is the same mechanism
+as every other tool — the grant stays on the tool, so a query is reachable exactly
+when its tool is.
+
+Nothing reads the SQL to classify it. An unrecognised `access` is a WRITE, because
+a misspelling that defaulted to READ would be a write executing unapproved,
+silently. A declared write requires approval on its own account, whatever the
+tool's `requires_approval` says — that flag is a property of a tool, and one tool
+can expose a dozen reads and one write.
+
+Parameters are **bound**, replacing `{{ … }}` interpolation that built SQL
+literals by string concatenation. Row limits are clamped at 500 — far below
+`DbReadNodeExecutor.HARD_MAX_ROWS` (10 000), because that bound counts rows and
+what exhausts a worker is bytes.
+
+Free-form SQL stays available behind `allow_freeform_sql`, default off, and the
+distinction that makes the default safe is whose SQL it is: a tool running its own
+stored `sqlTemplate` needs no flag, because that statement is the author's. Only a
+CALLER-supplied statement is gated.
+
 ### 12.5 Context growth
 
 Left alone, a five-hop handoff chain carries five accumulated contexts. Mitigated

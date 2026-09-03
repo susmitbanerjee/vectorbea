@@ -981,8 +981,41 @@ class RunProcessor(
                 // between the status change and the timer write leaves a `yielded`
                 // run the recovery sweep re-enqueues. The timer is the fast path,
                 // not the only path.
+                /*
+                 * ── PARKED AT `waiting_for_timer`, NOT `yielded` ─────────────
+                 *
+                 * This was `yielded`, and the timer scheduled below could
+                 * therefore never fire: `TimerScheduler.findDueTimers` selects
+                 * `ar.status = 'waiting_for_timer'`, and nothing in the codebase
+                 * wrote that status. The row was created, the sweep never matched
+                 * it, and the only thing that ever resumed a throttled run was
+                 * `CrashRecoveryLoop` — 60-second ticks, batches of ten, ordered
+                 * by `updated_at`.
+                 *
+                 * Two consequences, and both are the reported symptom:
+                 *
+                 *   1. `Retry-After` was computed, logged, written to the timer
+                 *      row and then ignored. A 60-second instruction and a
+                 *      1000ms fallback behaved identically.
+                 *   2. Runs throttled together came back together, in
+                 *      `updated_at` order — the recovery sweep reconstructed the
+                 *      burst that caused the throttling.
+                 *
+                 * `waiting_for_timer` is the status the timer path was written
+                 * for, and `RunProcessor` already accepts it as resumable. The
+                 * run is now genuinely parked until `fireAt`.
+                 *
+                 * ── WHAT THIS GIVES UP, AND WHY IT IS SAFE ──────────────────
+                 * `CrashRecoveryLoop` scans ('running','yielded'), so it no
+                 * longer sees these runs. That is correct — a run deliberately
+                 * parked for 60 seconds is not a crashed run, and treating it as
+                 * one is what produced the batching. The backstop is
+                 * `ResumeReconciler`, which already sweeps `waiting_for_timer`
+                 * for exactly this case: a durable status change followed by a
+                 * best-effort enqueue.
+                 */
                 val moved = updateRunStatus(
-                    runId = job.runId, status = "yielded",
+                    runId = job.runId, status = "waiting_for_timer",
                     startedAt = start, workerId = workerId, fromStatus = "running",
                 )
                 if (!moved) {
@@ -1007,7 +1040,7 @@ class RunProcessor(
 
                 eventStore.appendEvent(RunEvent(
                     runId = job.runId, workspaceId = run.workspaceId, environmentId = run.environmentId,
-                    type = EventType.RUN_YIELDED, status = "yielded",
+                    type = EventType.RUN_YIELDED, status = "waiting_for_timer",
                     source = "worker:$workerId",
                     title = "Paused by ${execResult.provider} rate limit",
                     summary = execResult.message,

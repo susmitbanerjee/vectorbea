@@ -101,6 +101,71 @@ internal class WHistogram(val name: String, val help: String, val labelNames: Li
  * five-minute agent runs. Observations are still supplied in milliseconds
  * because that is what the call sites measure.
  */
+/**
+ * A histogram over a RATIO, bucketed tightly around 1.0.
+ *
+ * `WSecondsHistogram`'s buckets jump 0.5 → 1.0 → 2.5, which cannot answer the
+ * question this exists for: "is the estimate within 10% at p95". Reading that off
+ * a bucket boundary requires boundaries at 1.05 and 1.10, so it gets its own
+ * scale rather than a rescaled reuse of a latency one.
+ *
+ * Buckets are dense between 0.9 and 1.3 because that is where a working estimator
+ * lives, and sparse outside it because anything past 1.5 is a single verdict:
+ * badly wrong, in the direction that causes 429s.
+ */
+internal class WRatioHistogram(val name: String, val help: String, val labelNames: List<String>) {
+    companion object {
+        val BUCKETS = doubleArrayOf(
+            0.5, 0.8, 0.9, 0.95, 1.0, 1.05, 1.10, 1.15, 1.20, 1.30, 1.50, 2.0, 3.0,
+        )
+        private fun fmt(d: Double) = if (d == d.toLong().toDouble()) "${d.toLong()}.0" else d.toString()
+    }
+
+    class Cell(val bc: Array<AtomicLong>, val sum: DoubleAdder, val count: AtomicLong)
+
+    val cells = ConcurrentHashMap<List<String>, Cell>()
+
+    fun observe(ratio: Double, vararg lv: String) {
+        if (ratio.isNaN() || ratio.isInfinite()) return
+        val key = LabelGuard.guard(name, lv.toList())
+        val c = cells.getOrPut(key) {
+            Cell(Array(BUCKETS.size + 1) { AtomicLong(0) }, DoubleAdder(), AtomicLong(0))
+        }
+        for (i in BUCKETS.indices) if (ratio <= BUCKETS[i]) c.bc[i].incrementAndGet()
+        c.bc[BUCKETS.size].incrementAndGet()
+        c.sum.add(ratio)
+        c.count.incrementAndGet()
+    }
+
+    /** The quantile, read off the buckets. Used by tests and by the estimate report. */
+    fun quantile(q: Double, vararg lv: String): Double? {
+        val c = cells[LabelGuard.guard(name, lv.toList())] ?: return null
+        val total = c.count.get()
+        if (total == 0L) return null
+        val target = Math.ceil(q * total).toLong()
+        for (i in BUCKETS.indices) if (c.bc[i].get() >= target) return BUCKETS[i]
+        return Double.POSITIVE_INFINITY
+    }
+
+    fun exposition() = buildString {
+        append("# HELP $name $help\n# TYPE $name histogram\n")
+        cells.forEach { (lbs, c) ->
+            for (i in BUCKETS.indices) {
+                append("${name}_bucket${ls(lbs, "le" to fmt(BUCKETS[i]))} ${c.bc[i].get().toDouble()}\n")
+            }
+            append("${name}_bucket${ls(lbs, "le" to "+Inf")} ${c.bc[BUCKETS.size].get().toDouble()}\n")
+            append("${name}_count${ls(lbs)} ${c.count.get().toDouble()}\n")
+            append("${name}_sum${ls(lbs)} ${c.sum.sum()}\n")
+        }
+    }
+
+    private fun ls(v: List<String>, extra: Pair<String, String>? = null): String {
+        val parts = labelNames.zip(v).map { (k, x) -> "$k=\"$x\"" } +
+            (extra?.let { listOf("${it.first}=\"${it.second}\"") } ?: emptyList())
+        return if (parts.isEmpty()) "" else "{" + parts.joinToString(",") + "}"
+    }
+}
+
 internal class WSecondsHistogram(val name: String, val help: String, val labelNames: List<String>) {
     companion object {
         val BUCKETS = doubleArrayOf(
@@ -522,7 +587,7 @@ object WorkerMetrics {
     internal val providerThrottleSuspendTotal = WCounter(
         // §5.4: `provider_429_total{provider}`. The `_total` suffix is appended by the
         // counter renderer, so the name here stops at `provider_429`.
-        "provider_429", "Runs suspended after a provider 429", listOf("provider"))
+        "provider_429", "Runs suspended after a provider 429", listOf("provider", "dimension"))
 
     /**
      * Provider calls the capacity bucket refused. §12.4.
@@ -533,7 +598,66 @@ object WorkerMetrics {
      */
     internal val providerCapacityExhaustedTotal = WCounter(
         "provider_capacity_exhausted", "Calls deferred by the local token bucket",
-        listOf("provider", "model"))
+        listOf("provider", "model", "dimension"))
+
+    /**
+     * Provider 429s actually received, by which limit the provider named.
+     *
+     * `dimension` comes from the rate-limit headers, not from a guess. Together
+     * with `provider_capacity_exhausted` this answers the question the bucket
+     * exists for: refusals rising while 429s stay flat is the bucket working;
+     * 429s rising while refusals stay flat means the limits are set too high.
+     */
+    internal val provider429Total = WCounter(
+        "provider_429_received", "Provider 429 responses received",
+        listOf("provider", "model", "dimension"))
+
+    /**
+     * A 429 that arrived AFTER the bucket admitted the call. **This is a bug in
+     * the bucket, and is counted as one.**
+     *
+     * Distinct from a refusal on purpose. A refusal means the bucket held a call
+     * back and did its job. This means it let one through that it should have
+     * held — so the configured limit is above the provider's real one, the
+     * estimate is short, or something outside this fleet is spending the same
+     * account's budget. Any non-zero value is worth investigating; a rising one
+     * means capacity control is not actually in control.
+     */
+    internal val provider429AfterAdmitTotal = WCounter(
+        "provider_429_after_admit", "429s received on calls the capacity bucket admitted",
+        listOf("provider", "model", "dimension"))
+
+    /** Bucket headroom at reservation time, as a fraction of depth, per dimension. */
+    internal val capacityUtilisation = WRatioHistogram(
+        "provider_capacity_utilisation", "Bucket fill at reserve time (0-1)",
+        listOf("provider", "model", "dimension"))
+
+    /** Reservations granted, by account fingerprint prefix and lane. */
+    internal val capacityReservedTotal = WCounter(
+        "provider_capacity_reserved", "Reservations granted", listOf("provider", "model", "lane"))
+
+    /**
+     * Reservations reclaimed by TTL rather than settled — a LEAKED reservation.
+     *
+     * Expected to be near zero. Non-zero means workers are dying mid-call, which
+     * the bucket survives by design (the lease expires and the tokens come back)
+     * but which is worth seeing, because until the TTL fires that capacity is
+     * unavailable to everyone else on the account.
+     */
+    internal val capacityLeasesExpiredTotal = WCounter(
+        "provider_capacity_leases_expired", "Reservations returned by TTL, not by settle",
+        emptyList())
+
+    /**
+     * Actual input tokens divided by what was reserved for them.
+     *
+     * 1.0 is a perfect estimate; above 1.0 is UNDER-reservation, which is the
+     * direction that causes 429s. The distribution is the point — a mean near 1.0
+     * hides a p95 of 1.4, and it is the p95 calls that breach the limit.
+     */
+    internal val estimateErrorRatio = WRatioHistogram(
+        "provider_estimate_error_ratio", "actual input tokens / reserved input tokens",
+        listOf("model", "shape"))
 
     /** Runs claimed, by class. */
     internal val claimedTotal = WCounter("claimed", "Runs claimed from Postgres", listOf("class"))
@@ -810,6 +934,8 @@ object WorkerMetrics {
             claimReservedLaneTotal, ceilingBreachTotal,
             circuitOpenedTotal, circuitClosedTotal, circuitRejectedTotal,
             providerThrottleSuspendTotal, providerCapacityExhaustedTotal,
+            provider429Total, provider429AfterAdmitTotal, capacityReservedTotal,
+            capacityLeasesExpiredTotal, capacityUtilisation, estimateErrorRatio,
             fencedWriteTotal, sideEffectDedupeTotal, sideEffectUndeterminedTotal,
             deadLetterTotal, leaseStolenTotal,
             tenantDbSlotsTotal, tenantDbSlotsActive, tenantDbQueueDepth, tenantDbRejectedTotal,
@@ -829,6 +955,7 @@ object WorkerMetrics {
                     is WCounter          -> m.exposition()
                     is WHistogram        -> m.exposition()
                     is WSecondsHistogram -> m.exposition()
+                    is WRatioHistogram   -> m.exposition()
                     is WDoubleCounter    -> m.exposition()
                     else -> ""
                 })

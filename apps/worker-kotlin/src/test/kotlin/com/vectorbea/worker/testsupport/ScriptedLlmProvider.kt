@@ -97,6 +97,29 @@ class ScriptedLlmProvider(
     fun thenHttpError(status: Int, body: String = """{"error":{"message":"scripted"}}"""):
         ScriptedLlmProvider = thenRaw(body, status)
 
+    /**
+     * Answer as a function of the PROMPT rather than of the call index.
+     *
+     * ── WHY THIS EXISTS ─────────────────────────────────────────────────────
+     * A fixed script measures nothing about observation quality: it produces the
+     * same number of iterations whether the observation contained the answer or a
+     * broken JSON fragment, because the script decided in advance.
+     *
+     * The question "did the model get what it needed" is precisely a question
+     * about the model REACTING to what it was given, so `iterations-to-completion`
+     * can only be measured with a responder that reads the prompt.
+     *
+     * This is a simulation of a model, not a model, and the difference matters:
+     * it answers when the observation demonstrably contains the value it was
+     * looking for, and asks again when it does not. That is a lower bound on real
+     * behaviour — a real model may also be confused by noise it CAN parse — so a
+     * measured improvement here is conservative rather than flattering.
+     */
+    fun respondWith(responder: (RecordedRequest) -> String): ScriptedLlmProvider =
+        apply { dynamic = responder }
+
+    @Volatile private var dynamic: ((RecordedRequest) -> String)? = null
+
     // ── Observation ───────────────────────────────────────────────────────────
 
     /** How many times a provider call was actually made. */
@@ -111,7 +134,7 @@ class ScriptedLlmProvider(
     fun remaining(): Int = script.size - calls.get()
 
     fun reset() {
-        script.clear(); recorded.clear(); calls.set(0)
+        script.clear(); recorded.clear(); calls.set(0); dynamic = null
     }
 
     // ── HttpClient ────────────────────────────────────────────────────────────
@@ -119,6 +142,15 @@ class ScriptedLlmProvider(
     private fun answer(request: HttpRequest): StubHttpResponse<String> {
         val index = calls.getAndIncrement()
         record(request)
+        /* A dynamic responder takes precedence and never runs out — it is
+           answering the prompt rather than replaying a list. */
+        dynamic?.let { fn ->
+            val content = mapper.writeValueAsString(fn(recorded.last()))
+            return StubHttpResponse(200,
+                """{"choices":[{"message":{"role":"assistant","content":$content},""" +
+                """"finish_reason":"stop"}],"usage":{"prompt_tokens":$tokensPerCall,""" +
+                """"completion_tokens":0,"total_tokens":$tokensPerCall}}""")
+        }
         val scripted = synchronized(script) { script.getOrNull(index) }
             ?: throw AssertionError(
                 "ScriptedLlmProvider ran out of responses: the code under test made " +

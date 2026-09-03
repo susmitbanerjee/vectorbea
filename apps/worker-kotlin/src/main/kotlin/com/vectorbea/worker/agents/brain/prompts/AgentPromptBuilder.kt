@@ -60,8 +60,36 @@ object AgentPromptBuilder {
          */
         roster: List<AgentDescriptor> = emptyList(),
     ): String {
+        /*
+         * ── WHAT THE MODEL IS TOLD ABOUT EACH TOOL ──────────────────────────
+         *
+         * A name, a sentence and an input schema tell it HOW to call a tool and
+         * nothing about WHEN, or about what it will get back. So it picks by name,
+         * calls to find out, reads forty opaque fields, and spends another
+         * iteration working out which one it wanted. Two additions, both from the
+         * tool's own result contract, both cheap because they are sent once here
+         * rather than repeated in every observation:
+         *
+         *   `whenToUse` — the tool author's answer to "why this tool and not that
+         *                 one". Tool-selection quality is bounded by what the
+         *                 description says, and an endpoint path says nothing.
+         *   `returns`   — the projected fields and what each means, so the model
+         *                 knows the shape of the answer before it asks.
+         *
+         * Omitted entirely when absent rather than emitted as null: a key with no
+         * value costs tokens on every iteration and teaches nothing.
+         */
         val toolsJson = mapper.writerWithDefaultPrettyPrinter()
-            .writeValueAsString(availableTools.map { mapOf("id" to it.id, "name" to it.name, "description" to it.description, "inputSchema" to it.inputSchema) })
+            .writeValueAsString(availableTools.map { t ->
+                buildMap {
+                    put("id", t.id)
+                    put("name", t.name)
+                    put("description", t.description)
+                    t.usage?.let { put("whenToUse", it) }
+                    t.resultLegend?.let { put("returns", it) }
+                    put("inputSchema", t.inputSchema)
+                }
+            })
         val rosterJson = mapper.writerWithDefaultPrettyPrinter()
             .writeValueAsString(roster.map { mapOf("id" to it.id, "name" to it.name, "description" to it.description) })
         val outputSchemaSection = if (config.outputSchemaJson != "{}") "\n\nFINAL OUTPUT SCHEMA (your finalOutput MUST match this JSON Schema):\n${config.outputSchemaJson}" else ""
@@ -241,5 +269,23 @@ Return your next action as JSON:"""
         val name: String,
         val description: String,
         val inputSchema: Map<String, Any?> = emptyMap(),
+        /**
+         * What comes BACK, one line per field.
+         *
+         * A schema tells the model how to call the tool; nothing told it what it
+         * would get. So it called a tool to find out, read forty opaque field
+         * names, and spent another iteration deciding which was the one it wanted.
+         * Sent once here rather than repeated in every observation.
+         */
+        val resultLegend: String? = null,
+        /**
+         * When to reach for THIS tool rather than another.
+         *
+         * The model's tool-selection quality is bounded by what the description
+         * says, and a description generated from an endpoint path says nothing
+         * about choosing. This is the tool author's answer to "when would I use
+         * this", and it is the cheapest quality lever in the whole loop.
+         */
+        val usage: String? = null,
     )
 }

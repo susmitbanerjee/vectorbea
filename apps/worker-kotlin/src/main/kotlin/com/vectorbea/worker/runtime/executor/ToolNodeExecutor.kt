@@ -41,6 +41,14 @@ class ToolNodeExecutor(
     private val connectionResolver: ConnectionResolver,
     private val dbPoolManager: ClientDbPoolManager,
     private val eventStore: RunEventStore,
+    /**
+     * Per-connection breaker, for outbound tool types.
+     *
+     * Null keeps every existing call site working unchanged; production wires the
+     * same instance the other executors share, so an MCP server that is down stops
+     * being called on exactly the terms an HTTP endpoint that is down does.
+     */
+    private val circuit: com.vectorbea.worker.net.ConnectionCircuit? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -51,6 +59,15 @@ class ToolNodeExecutor(
         System.getenv("BUILTIN_EMAIL_MONTHLY_LIMIT")?.toIntOrNull()?.takeIf { it > 0 } ?: 15
 
     private val httpExecutor    by lazy { HttpNodeExecutor(connectionResolver, eventStore) }
+
+    /** MCP, lazily: most workspaces have no MCP server and should pay nothing. */
+    private val mcpExecutor by lazy {
+        com.vectorbea.worker.agents.tools.mcp.McpToolExecutor(
+            connectionResolver = connectionResolver,
+            discovery = com.vectorbea.worker.agents.tools.mcp.McpDiscovery(dataSource),
+            circuit = circuit,
+        )
+    }
     private val dbReadExecutor  by lazy { DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore) }
     private val dbWriteExecutor by lazy { DbWriteNodeExecutor(connectionResolver, dbPoolManager,
         ApprovalStore(dataSource), eventStore) }
@@ -71,7 +88,11 @@ class ToolNodeExecutor(
         val toolIdStr = node.config["toolId"] as? String
             ?: return NodeResult.Failed("Tool node '${node.id}' missing required config: toolId")
 
-        val toolId = try { UUID.fromString(toolIdStr) }
+        /* `<toolId>#<queryId>` when the caller selected a named query. The tool is
+           loaded by its own id; the query id is read back out in
+           [executeDatabaseTool], which is the only place it means anything. */
+        val baseToolId = com.vectorbea.worker.agents.tools.NamedQuery.splitToolId(toolIdStr).first
+        val toolId = try { UUID.fromString(baseToolId) }
         catch (_: Exception) {
             return NodeResult.Failed("Tool node '${node.id}': invalid toolId format (expected UUID)")
         }
@@ -127,22 +148,38 @@ class ToolNodeExecutor(
             // before the type normalizer existed) may be persisted with these variants.
             "http", "http_api", "rest_api", "api", "rest" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
-            // "database" is the canonical type in the tools table (see V001 migration).
-            // Distinguish read vs write by inspecting the first keyword of the SQL statement —
-            // SELECT = read-only path; INSERT/UPDATE/DELETE/MERGE/UPSERT = write path.
-            "database" -> {
-                val sql = (tool.configJson["sqlTemplate"] as? String ?: "").trimStart()
-                val firstWord = sql.split(Regex("\\s+"), limit = 2).firstOrNull()?.uppercase() ?: ""
-                if (firstWord == "SELECT") {
-                    dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
-                } else {
-                    dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
-                }
-            }
+            /*
+             * ── DATABASE: A NAMED QUERY, OR A GATED FALLBACK ─────────────────
+             *
+             * This branch used to read the stored `sqlTemplate`, upper-case its
+             * first whitespace-delimited token, and send it to the read path if
+             * that token was `SELECT`. A leading comment, a CTE, or a
+             * `SELECT writes_something()` all land somewhere the string match did
+             * not intend, on a path that reaches a production database.
+             *
+             * The replacement does not classify better — it stops classifying.
+             * `NamedQuery.access` is DECLARED by the tool author, and the routing
+             * below reads the declaration. Nothing here inspects the SQL.
+             */
+            "database", "database_read", "database_write" ->
+                executeDatabaseTool(tool, node, syntheticNode, resolvedInputs, ctx)
 
-            "database_read" -> dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
-
-            "database_write" -> dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            /*
+             * ── MCP: A TOOL TYPE, AND NOTHING MORE ───────────────────────────
+             *
+             * The whole point of this dispatch is that adding a type does not
+             * change the runtime. Everything above and below this `when` — the
+             * approval gate, the TOOL_CALL_* events, the `tool_call` span and its
+             * parent, the idempotency key, the payload store — already ran or will
+             * run, identically, because this is the same code path an HTTP tool
+             * takes.
+             *
+             * `mcp_server` is accepted as an alias because the API's connection
+             * tester already recognises it, and a tool type that works in one
+             * service and not the other is the kind of split nobody finds until a
+             * customer does.
+             */
+            "mcp", "mcp_server" -> executeMcpTool(tool, resolvedInputs, ctx)
 
             "builtin_email" -> {
                 // Built-in email — calls the platform's /api/email/send route
@@ -364,6 +401,219 @@ class ToolNodeExecutor(
 
     // ── Tool row ──────────────────────────────────────────────────────────────
 
+    /**
+     * Invoke a remote MCP tool.
+     *
+     * ── THE GRANT WAS ALREADY CHECKED, AND NOT HERE ─────────────────────────
+     * By the time this runs, `AgentSafetyGuard.validateToolAllowed` has compared
+     * this tool's uuid against `allowed_tool_ids` read from our own database.
+     * Nothing about MCP participates in that: a discovered tool is an ordinary
+     * `tools` row, so a server-level grant is not refused here — it is
+     * inexpressible, because the grant list holds tool ids and a server is a
+     * connection.
+     *
+     * That is why a hostile tool description cannot widen what an agent may call.
+     * The description reaches the prompt; the prompt is not an input to the grant
+     * check. Invariant 1, applied to somebody else's server.
+     */
+    private suspend fun executeMcpTool(
+        tool: ToolRow,
+        resolvedInputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): NodeResult {
+        val connectionId = tool.mcpServerConnectionId?.let {
+            runCatching { UUID.fromString(it) }.getOrNull()
+        } ?: return NodeResult.Failed(
+            "MCP tool '${tool.name}' has no server connection. It was probably created " +
+            "by hand rather than by discovery; re-run discovery for its server.")
+
+        val remoteName = tool.mcpToolName
+            ?: return NodeResult.Failed(
+                "MCP tool '${tool.name}' does not record what the remote server calls it.")
+
+        /*
+         * A resource read, when the caller asked for one.
+         *
+         * Resources are read-only context pulled on demand — the contextRefs model
+         * from the delegation work, one layer out: pass a pointer and let the
+         * callee read what it needs, rather than pushing every resource a server
+         * offers into the prompt.
+         */
+        (resolvedInputs["resourceUri"] as? String)?.takeIf { it.isNotBlank() }?.let { uri ->
+            return mcpExecutor.readResource(connectionId, uri, ctx.workspaceId)
+        }
+
+        return mcpExecutor.call(
+            connectionId = connectionId,
+            mcpToolName = remoteName,
+            arguments = resolvedInputs,
+            workspaceId = ctx.workspaceId,
+            /* A locally-authored contract wins over the server's annotations: the
+               customer's agent knows what it needs and the server author does
+               not. Null here falls back to whatever discovery stored. */
+            toolContract = com.vectorbea.worker.agents.tools.ToolResultContract
+                .parse(tool.resultContractJson),
+            timeoutMs = tool.timeoutMs?.toLong(),
+        )
+    }
+
+    /**
+     * Run a database tool: a named query, or a gated free-form fallback.
+     *
+     * ── THE ORDER OF THESE CHECKS IS THE SECURITY PROPERTY ──────────────────
+     * A catalogue, once a tool has one, is exhaustive. A caller that names a
+     * query not in it is refused before a connection is opened, and a caller that
+     * supplies SQL to a tool with a catalogue is refused whatever the free-form
+     * flag says — a tool that has declared what may run has declared that this may
+     * not.
+     *
+     * The free-form flag is the LAST resort, not the first branch, so nothing can
+     * reach the old path by omitting a field.
+     */
+    private suspend fun executeDatabaseTool(
+        tool: ToolRow,
+        node: WorkflowNode,
+        syntheticNode: WorkflowNode,
+        resolvedInputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): NodeResult {
+        val catalogue = com.vectorbea.worker.agents.tools.NamedQuery.parseCatalogue(tool.namedQueriesJson)
+
+        /* The query id arrives either on the synthetic tool id the model selected
+           (`<toolId>#<queryId>` — one tool per query, so discovery is the same
+           mechanism as every other tool) or as an explicit input for a caller that
+           is not an agent. */
+        val requestedQueryId =
+            com.vectorbea.worker.agents.tools.NamedQuery.splitToolId(
+                node.config["toolId"] as? String ?: "").second
+                ?: (resolvedInputs["queryId"] as? String)?.takeIf { it.isNotBlank() }
+
+        /* Any statement the CALLER is trying to supply. A tool's own stored
+           `sqlTemplate` is not this: that SQL is the author's, and a tool with one
+           already has the property named queries introduce. */
+        val callerSuppliedSql = listOf("query", "sql", "statement")
+            .firstNotNullOfOrNull { resolvedInputs[it] as? String }
+            ?.takeIf { it.isNotBlank() }
+
+        if (catalogue.isNotEmpty()) {
+            if (callerSuppliedSql != null) {
+                return NodeResult.Failed(
+                    "Tool '${tool.name}' runs named queries only. It was given raw SQL, " +
+                    "which it will not execute. Choose one of: " +
+                    catalogue.joinToString { it.id } + ".")
+            }
+            if (requestedQueryId == null) {
+                return NodeResult.Failed(
+                    "Tool '${tool.name}' requires a query id. Available: " +
+                    catalogue.joinToString { "${it.id} — ${it.description}" } + ".")
+            }
+            val query = catalogue.firstOrNull { it.id == requestedQueryId }
+                ?: return NodeResult.Failed(
+                    /* Named, not "invalid query": an agent that is told which ids
+                       exist picks one, and an agent told only that it was wrong
+                       tries a different guess. */
+                    "Tool '${tool.name}' has no query '$requestedQueryId'. Available: " +
+                    catalogue.joinToString { it.id } + ".")
+            return runNamedQuery(tool, query, node, syntheticNode, resolvedInputs, ctx)
+        }
+
+        /* ── NO CATALOGUE: THE MIGRATION PATH ────────────────────────────────
+           A caller-supplied statement needs the flag. A tool running its own
+           stored SQL does not, and that is what keeps every existing tool
+           working on the deploy that ships this. */
+        if (callerSuppliedSql != null && !tool.allowFreeformSql) {
+            return NodeResult.Failed(
+                "Tool '${tool.name}' does not accept raw SQL. Declare named queries " +
+                "on the tool, or set allow_freeform_sql if this tool genuinely needs " +
+                "to run statements supplied by its caller.")
+        }
+
+        /*
+         * The legacy routing, unchanged and now reached only here.
+         *
+         * Still a keyword match, and still wrong in the ways described in V057 —
+         * kept because changing how an EXISTING tool's stored SQL is classified
+         * would change what those tools do, which is the one thing this migration
+         * promises not to do. A tool escapes it by declaring a catalogue.
+         */
+        val sql = (tool.configJson["sqlTemplate"] as? String ?: "").trimStart()
+        val firstWord = sql.split(Regex("\\s+"), limit = 2).firstOrNull()?.uppercase() ?: ""
+        return when {
+            tool.type == "database_read" -> dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            tool.type == "database_write" -> dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            firstWord == "SELECT" -> dbReadExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            else -> dbWriteExecutor.execute(syntheticNode, resolvedInputs, ctx)
+        }
+    }
+
+    /**
+     * Execute one named query: bind, bound, route by declaration.
+     *
+     * ── A WRITE MEETS THE GATE, WHATEVER THE TOOL SAYS ──────────────────────
+     * `requires_approval` is a property of a TOOL, and one database tool can
+     * legitimately expose a dozen reads and one write. Inheriting the tool's flag
+     * would mean gating every read or gating no write, so a query declared WRITE
+     * requires approval on its own account.
+     *
+     * The gate is the same `(runId, nodeId)` approval the tool boundary uses, so
+     * the two compose rather than conflict — a tool that already required approval
+     * finds its row APPROVED and proceeds.
+     */
+    private suspend fun runNamedQuery(
+        tool: ToolRow,
+        query: com.vectorbea.worker.agents.tools.NamedQuery,
+        node: WorkflowNode,
+        syntheticNode: WorkflowNode,
+        resolvedInputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): NodeResult {
+        val bound = query.bind()
+        val values = query.bindValues(resolvedInputs, bound.order).getOrElse { e ->
+            /* A parameter problem is the caller's to fix and is stated in its
+               terms — which parameter, of which query, and what it wanted. */
+            return NodeResult.Failed(e.message ?: "invalid parameters for query '${query.id}'")
+        }
+
+        if (query.access == com.vectorbea.worker.agents.tools.NamedQuery.Access.WRITE &&
+            !tool.requiresApproval) {
+            /* The tool boundary already gated tools whose own flag is set; this
+               covers a write query on a tool whose flag is not. */
+            approvalGate(node, tool, resolvedInputs, ctx)?.let { return it }
+        }
+
+        /*
+         * The bound statement and its limits, handed to the existing executors.
+         *
+         * Reusing them rather than opening a connection here is deliberate: they
+         * hold the pool management, the driver-level `socketTimeout` that is the
+         * only bound that actually works against a blackholed host, the tenant
+         * dispatcher and the read-only connection flag. A second implementation
+         * would have to reproduce all of it and would drift.
+         */
+        val cfg = syntheticNode.config.toMutableMap()
+        cfg["query"] = bound.sql
+        cfg["statement"] = bound.sql
+        cfg["params"] = values
+        cfg["maxRows"] = query.maxRows
+        cfg["timeoutMs"] = query.timeoutMs
+        /* The write executor reads this to decide whether to gate again. It has
+           already been gated above; leaving it set makes the two agree. */
+        if (query.access == com.vectorbea.worker.agents.tools.NamedQuery.Access.WRITE) {
+            cfg["requireApproval"] = tool.requiresApproval
+        }
+        val queryNode = syntheticNode.copy(config = cfg)
+
+        log.info("[tool] named query [tool={}, query={}, access={}, maxRows={}, timeoutMs={}]",
+            tool.name, query.id, query.access, query.maxRows, query.timeoutMs)
+
+        return when (query.access) {
+            com.vectorbea.worker.agents.tools.NamedQuery.Access.READ ->
+                dbReadExecutor.execute(queryNode, resolvedInputs, ctx)
+            com.vectorbea.worker.agents.tools.NamedQuery.Access.WRITE ->
+                dbWriteExecutor.execute(queryNode, resolvedInputs, ctx)
+        }
+    }
+
     private data class ToolRow(
         val id: String,
         val name: String,
@@ -374,13 +624,25 @@ class ToolNodeExecutor(
         val riskLevel: String,
         val requiresApproval: Boolean,
         val timeoutMs: Int?,
+        /** Raw `named_queries_json`. Parsed lazily — most tools have none. */
+        val namedQueriesJson: String? = null,
+        /** Whether a CALLER may supply SQL. Default false; see V057. */
+        val allowFreeformSql: Boolean = false,
+        /** The MCP connection this tool was discovered through, if any. */
+        val mcpServerConnectionId: String? = null,
+        /** What the remote server calls it. */
+        val mcpToolName: String? = null,
+        /** Locally-authored result contract. Overrides a server's annotations. */
+        val resultContractJson: String? = null,
     )
 
     private fun loadTool(toolId: UUID, workspaceId: UUID): ToolRow? = try {
         dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT id, name, type, connection_id, config_json,
-                   risk_level, requires_approval, timeout_ms
+                   risk_level, requires_approval, timeout_ms,
+                   named_queries_json, allow_freeform_sql,
+                   mcp_server_connection_id, mcp_tool_name, result_contract_json
                    FROM tools
                    WHERE id = ? AND workspace_id = ? AND status = 'active'"""
             ).use { stmt ->
@@ -405,6 +667,11 @@ class ToolNodeExecutor(
                         timeoutMs        = rs.getObject("timeout_ms")?.let {
                             (it as? Number)?.toInt()
                         },
+                        namedQueriesJson = rs.getString("named_queries_json"),
+                        allowFreeformSql = rs.getBoolean("allow_freeform_sql"),
+                        mcpServerConnectionId = rs.getString("mcp_server_connection_id"),
+                        mcpToolName = rs.getString("mcp_tool_name"),
+                        resultContractJson = rs.getString("result_contract_json"),
                     )
                 }
             }

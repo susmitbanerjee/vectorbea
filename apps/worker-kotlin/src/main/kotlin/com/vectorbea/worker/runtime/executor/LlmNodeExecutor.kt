@@ -80,6 +80,17 @@ class LlmNodeExecutor(
      * the behaviour of every deployment before it existed.
      */
     private val capacity: com.vectorbea.worker.net.ProviderCapacityBucket? = null,
+    /**
+     * Turns a prompt into the number of tokens the provider will bill for.
+     *
+     * Its own object rather than a method here because it holds two things this
+     * class should not: the tokenizer's merge tables, which are megabytes and must
+     * be loaded once, and the learned correction factor, which is state that
+     * accumulates across calls. Default-constructed so no call site has to know
+     * either exists.
+     */
+    private val tokenEstimator: com.vectorbea.worker.net.TokenEstimator =
+        com.vectorbea.worker.net.TokenEstimator(),
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -281,6 +292,26 @@ class LlmNodeExecutor(
             )
         }
 
+        /* ── THE CREDENTIAL, BEFORE THE CAPACITY CHECK ─────────────────────
+           The bucket's ceiling is keyed on the ACCOUNT, because that is what the
+           provider rate-limits, so the fingerprint has to exist before the
+           reservation. That means resolving the secret earlier than the call that
+           uses it — the plaintext is held as a CharArray for the extra few lines
+           and never becomes a String. See [CredentialKey]. */
+        val apiKeyChars: CharArray = resolved.secret?.let { sv ->
+            var k: CharArray = CharArray(0)
+            sv.useOnce { k = it.toCharArray() }
+            k
+        } ?: run {
+            emitEvent(context, node.id, EventType.SECRET_MISSING, "failed",
+                title = "Secret missing",
+                summary = "LLM connection '${resolved.record.name}' has no API key")
+            return NodeResult.Failed(
+                "No API key configured for LLM connection '${resolved.record.name}'")
+        }
+        val fingerprint = runCatching { com.vectorbea.worker.net.CredentialKey.fingerprint(apiKeyChars) }
+            .getOrDefault(com.vectorbea.worker.net.CredentialKey.UNKNOWN)
+
         /* ── CAPACITY, BEFORE THE CALL ──────────────────────────────────────
            Reserved on an ESTIMATE, because the real cost is only known from the
            response and a bucket that counts afterwards limits nothing: a hundred
@@ -289,9 +320,10 @@ class LlmNodeExecutor(
 
            Placed after the replay branch on purpose — a replay makes no provider
            call, so charging it would throttle a run that costs nothing. */
+        val estimate = tokenEstimator.estimate(model, messages, maxTokens)
         val lease: com.vectorbea.worker.net.ProviderCapacityBucket.Lease? =
-            when (val c = capacity?.reserve(provider, model, context.workspaceId,
-                estimateTokens(messages, maxTokens),
+            when (val c = capacity?.reserve(provider, model, fingerprint, context.workspaceId,
+                estimate.total,
                 interactive = context.executionLane ==
                     com.vectorbea.worker.queue.WorkerJobType.AGENT_INTERACTIVE)) {
                 is com.vectorbea.worker.net.ProviderCapacityBucket.Outcome.Granted -> c.lease
@@ -299,45 +331,44 @@ class LlmNodeExecutor(
                     /* Not a failure and not a provider error: nothing has been sent.
                        Throttled releases the permit and re-enqueues on a timer, so
                        this costs a yield — exactly what §12.4 asks for. */
-                    WorkerMetrics.providerCapacityExhaustedTotal.inc(provider, model)
+                    java.util.Arrays.fill(apiKeyChars, '\u0000')
+                    WorkerMetrics.providerCapacityExhaustedTotal.inc(
+                        provider, model, c.dimension.name.lowercase())
                     /*
                      * NAME THE LIMIT AND WHERE TO CHANGE IT — invariant 6.
                      *
-                     * "Waiting for anthropic capacity" tells an operator nothing
-                     * they can act on: not which number was hit, not whether it
-                     * is ours or the provider's, not where it lives. All three
-                     * are known here, and a limit nobody can find is a limit that
-                     * gets worked around by disabling the feature.
+                     * And name WHICH limit: "raise your requests per minute" and
+                     * "raise your tokens per minute" are different actions, and a
+                     * message that says only "capacity" sends an operator to the
+                     * wrong number. The dimension that bound the reservation is
+                     * known here and nowhere downstream.
                      */
+                    val dim = c.dimension
+                    val hit = if (dim == com.vectorbea.worker.net.ProviderCapacityBucket.Dimension.REQUESTS)
+                        "${c.limit.requestsPerMinute} requests/minute"
+                        else "${c.limit.tokensPerMinute} tokens/minute"
+                    /*
+                     * JITTERED. The bucket's own arithmetic is deterministic — N
+                     * callers refused at one instant with equal deficits all get
+                     * the same answer and would come back together, which is the
+                     * resynchronisation this whole change exists to remove.
+                     */
+                    val waitMs = ProviderThrottle.jitter(c.retryAfterMs)
                     val limitMsg =
-                        "Reached this workspace's own limit of ${c.capacity} tokens/minute " +
-                        "for $provider/$model (not a provider 429). Retrying in " +
-                        "${c.retryAfterMs}ms. Raise it with PROVIDER_TPM_OVERRIDES=" +
-                        "$provider:$model=<tokens per minute>, or PROVIDER_TPM_DEFAULT."
+                        "Reached this account's own limit of $hit for $provider/$model " +
+                        "(not a provider 429). Retrying in ${waitMs}ms. Raise it with " +
+                        "PROVIDER_LIMIT_OVERRIDES=$provider:$model=<rpm>/<tpm>."
                     emitEvent(context, node.id, EventType.NODE_FAILED, "throttled",
                         title = "Reached the $model capacity limit",
-                        summary = limitMsg)
-                    log.info("[llm] capacity exhausted [provider={}, model={}, limitTpm={}, retryAfterMs={}]",
-                        provider, model, c.capacity, c.retryAfterMs)
-                    return NodeResult.Throttled(provider, c.retryAfterMs, limitMsg)
+                        summary = limitMsg, modelName = model)
+                    log.info("[llm] capacity exhausted [provider={}, model={}, dimension={}, " +
+                        "rpm={}, tpm={}, retryAfterMs={}]",
+                        provider, model, dim, c.limit.requestsPerMinute, c.limit.tokensPerMinute, waitMs)
+                    return NodeResult.Throttled(provider, waitMs, limitMsg)
                 }
                 else -> null
             }
 
-        /*
-         * ── EVERY LEASE IS SETTLED EXACTLY ONCE, ON EVERY EXIT ──────────────
-         *
-         * The explicit paths below call this with the right amount. The `finally`
-         * is what catches the ones that are not paths at all — most importantly
-         * `CancellationException`, which the worker throws ROUTINELY: a tick
-         * deadline cancels in-flight work, and every cancelled model call used to
-         * leak its whole reservation. A workspace that yields often could leak
-         * faster than the bucket refills, refuse its own batch work, and look for
-         * all the world like a slow provider.
-         *
-         * `compareAndSet` rather than a null check because the finally and a
-         * catch can both reach it, and settling twice returns the tokens twice.
-         */
         val settled = java.util.concurrent.atomic.AtomicBoolean(false)
         suspend fun settleOnce(actualTokens: Long) {
             val l = lease ?: return
@@ -356,28 +387,16 @@ class LlmNodeExecutor(
         }
 
         val result = try {
-            resolved.secret.use { secret ->
-                val apiKey = secret?.let { sv ->
-                    var key = ""
-                    sv.useOnce { key = it }
-                    key
-                } ?: run {
-                    emitEvent(context, node.id, EventType.SECRET_MISSING, "failed",
-                        title = "Secret missing",
-                        summary = "LLM connection '${resolved.record.name}' has no API key")
-                    return NodeResult.Failed("No API key configured for LLM connection '${resolved.record.name}'")
-                }
-
-                // Fail fast if this connection is already known to be down. The
-                // alternative is burning the full timeout to rediscover it, once
-                // per run, while holding a permit each time.
-                circuit?.beforeCall(connectionId)
-                callProvider(provider, model, baseUrl, apiKey, messages,
-                    temperature, maxTokens, timeoutMs, maxRespBytes, capture, outputSchema)
-                    .also { circuit?.onSuccess(connectionId) }
-            }
+            // Fail fast if this connection is already known to be down. The
+            // alternative is burning the full timeout to rediscover it, once
+            // per run, while holding a permit each time.
+            circuit?.beforeCall(connectionId)
+            callProvider(provider, model, baseUrl, String(apiKeyChars), messages,
+                temperature, maxTokens, timeoutMs, maxRespBytes, capture, outputSchema,
+                hadLease = lease != null)
+                .also { circuit?.onSuccess(connectionId) }
         } catch (e: ConnectionCircuit.CircuitOpenException) {
-            settleOnce(lease?.reserved ?: 0)   // nothing was sent; return it whole
+            settleOnce(lease?.reservedTokens ?: 0)   // nothing was sent; return it whole
             recordCall("error", error = "circuit open")
             emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
                 title = "Connection paused", summary = e.message)
@@ -386,18 +405,39 @@ class LlmNodeExecutor(
             /* The provider refused, so it spent nothing on our behalf — give the
                whole reservation back. Keeping it would compound the outage: the
                bucket would stay drawn for a call that never happened. */
-            settleOnce(lease?.reserved ?: 0)
-            // Hand the scheduling decision up. Suspending releases the permit;
-            // sleeping here would hold it for the provider's whole backoff.
+            settleOnce(lease?.reservedTokens ?: 0)
+            /*
+             * ── A 429 IS NOT A BREAKER EVENT ────────────────────────────────
+             *
+             * Note what is NOT called here: `circuit.onFailure`. A rate limit
+             * means the provider is HEALTHY and we are asking too fast; the
+             * breaker exists for a provider that is unavailable. Opening it on a
+             * throttle storm converts "slow down" into "this connection is down"
+             * for every run in the workspace, including the ones that would have
+             * succeeded — a worse failure than the one being handled, and one
+             * that outlives the rate limit that caused it.
+             *
+             * Asserted by `ThrottleDoesNotOpenBreakerTest`.
+             */
             recordCall("throttled", error = "provider rate limited")
-            val decision = ProviderThrottle.decide(e.retryAfter, attempt = 0)
-            WorkerMetrics.providerThrottleSuspendTotal.inc(provider)
+            /*
+             * THE PROVIDER'S OWN INSTRUCTION WINS.
+             *
+             * `Retry-After` is the provider telling us exactly when to come back.
+             * Applying our own curve on top of it is how a throttle becomes a
+             * storm: we either come back too early and are refused again, or too
+             * late and idle capacity we were given. `attemptOf` supplies the real
+             * retry count for the fallback curve — it used to be hardcoded to 0,
+             * which collapsed the exponential to a constant 1000ms with the
+             * jitter arithmetically eliminated.
+             */
+            val decision = ProviderThrottle.decide(e.retryAfter, attempt = attemptOf(context, node.id))
+            WorkerMetrics.providerThrottleSuspendTotal.inc(provider, e.limitKind)
             emitEvent(context, node.id, EventType.NODE_FAILED, "throttled",
                 title = "Rate limited by $provider",
-                summary = decision.userMessage(provider))
-            log.info("[llm] {} rate limited [nodeId={}] — {} for {}ms",
-                provider, node.id, if (decision.suspend) "suspending" else "backing off",
-                decision.delayMs)
+                summary = decision.userMessage(provider), modelName = model)
+            log.info("[llm] {} rate limited [nodeId={}, limit={}, fromHeader={}] — waiting {}ms",
+                provider, node.id, e.limitKind, decision.fromHeader, decision.delayMs)
             return NodeResult.Throttled(provider, decision.delayMs, decision.userMessage(provider))
             /* Reached only when nothing above settled — cancellation, or a
                throwable this method does not name. Half, for the same reason
@@ -411,7 +451,7 @@ class LlmNodeExecutor(
                answers: returning everything under-counts a real spend, and
                returning nothing over-counts a request that never reached the
                model. The bucket self-corrects within a refill window either way. */
-            settleOnce((lease?.reserved ?: 0) / 2)
+            settleOnce((lease?.reservedTokens ?: 0) / 2)
             val durationMs = System.currentTimeMillis() - startMs
             recordCall("error", error = e.message?.take(500))
             circuit?.onFailure(connectionId, e.message ?: "LLM call failed")
@@ -425,7 +465,7 @@ class LlmNodeExecutor(
                reason LlmCallException returns half: the request may or may not
                have reached the provider, and both "return everything" and
                "return nothing" are wrong in one direction. */
-            settleOnce((lease?.reserved ?: 0) / 2)
+            settleOnce((lease?.reservedTokens ?: 0) / 2)
         }
 
         /* Settle against the real cost. A surplus goes back for the next caller;
@@ -433,6 +473,29 @@ class LlmNodeExecutor(
            legitimate state — an estimate that was badly low SHOULD make the next
            caller wait. */
         settleOnce((result.tokenCount ?: 0).toLong())
+        java.util.Arrays.fill(apiKeyChars, '\u0000')
+
+        /*
+         * ── CLOSE THE LOOP ─────────────────────────────────────────────────
+         *
+         * The provider's own input-token count is the only ground truth there is,
+         * and it arrives here. Feeding the ratio back is what turns the tokenizer
+         * from a better guess into a calibrated one: it absorbs message framing,
+         * tool-definition wrappers, Anthropic's separate system block, and the
+         * fact that cl100k is an approximation for two of the three providers.
+         *
+         * Input tokens only. The output side is `maxTokens`, which is a ceiling we
+         * chose rather than an estimate we made — grading it would teach the
+         * corrector that we systematically over-reserve output, and it would then
+         * shrink the input reservation to compensate for a completion that simply
+         * came in short.
+         */
+        result.tokensIn?.let { actual ->
+            tokenEstimator.record(estimate, actual.toLong())
+            WorkerMetrics.estimateErrorRatio.observe(
+                actual.toDouble() / estimate.correctedInput.coerceAtLeast(1L),
+                model, estimate.shape.name.lowercase())
+        }
 
         val durationMs = System.currentTimeMillis() - startMs
         val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }
@@ -586,10 +649,69 @@ class LlmNodeExecutor(
      * Separate from [LlmCallException] because the handling is opposite: a failure
      * ends the node, a throttle pauses the run and keeps its progress.
      */
+    /**
+     * A provider 429.
+     *
+     * [limitKind] is which limit the provider says was breached — `requests`,
+     * `tokens` or `unknown`. Read from the rate-limit headers rather than guessed,
+     * because "we hit RPM" and "we hit TPM" call for different changes and the
+     * bucket cannot tell them apart from the outside. It was previously thrown
+     * away along with the whole response, which is why the original investigation
+     * could not confirm which limit was being hit.
+     */
     private class ProviderThrottledException(
         val provider: String,
         val retryAfter: String?,
+        val limitKind: String = "unknown",
     ) : RuntimeException("$provider rate limited this request")
+
+    /**
+     * Which limit the provider says was breached.
+     *
+     * ── WHY THIS IS WORTH READING ───────────────────────────────────────────
+     * Providers publish RPM and TPM separately, enforce them separately, and say
+     * which one they refused on — in headers, and usually in the body too. The
+     * old handler read `Retry-After` and discarded everything else, which is why
+     * "which limit are we actually hitting" was unanswerable from our own
+     * telemetry during the investigation that produced this work.
+     *
+     * The rule is: whichever remaining counter is at zero is the one that
+     * refused. If both or neither are, the answer is honestly `unknown` rather
+     * than a guess — a wrong label here sends an operator to raise the wrong
+     * number.
+     */
+    private fun limitKindOf(header: (String) -> String?): String {
+        fun zero(vararg names: String): Boolean =
+            names.any { header(it)?.trim()?.toLongOrNull() == 0L }
+        val reqOut = zero("x-ratelimit-remaining-requests",
+            "anthropic-ratelimit-requests-remaining")
+        val tokOut = zero("x-ratelimit-remaining-tokens",
+            "anthropic-ratelimit-tokens-remaining", "anthropic-ratelimit-input-tokens-remaining")
+        return when {
+            reqOut && !tokOut -> "requests"
+            tokOut && !reqOut -> "tokens"
+            else -> "unknown"
+        }
+    }
+
+    /**
+     * How many times this node has already been throttled in this run.
+     *
+     * The exponential curve needs it, and it used to be hardcoded to zero — which
+     * collapsed `BASE shl 0` to a single value and made `Random.nextLong(1000,
+     * 1001)` return exactly 1000 every time. The fallback backoff was therefore a
+     * constant one second with the jitter arithmetically eliminated, however many
+     * times a run had been refused.
+     *
+     * Counted from the run's own event stream rather than carried in memory: a
+     * throttled run is parked and resumed in a different process, so an in-memory
+     * counter would reset to zero on every attempt — which is exactly the bug
+     * being fixed, wearing a different hat.
+     */
+    private fun attemptOf(context: RuntimeContext, nodeId: String): Int =
+        runCatching {
+            eventStore.countEvents(context.runId, nodeId, EventType.NODE_FAILED, "throttled")
+        }.getOrDefault(0)
 
     // ── Provider dispatch ─────────────────────────────────────────────────────
 
@@ -612,10 +734,12 @@ class LlmNodeExecutor(
          * guarantee.
          */
         outputSchema: Map<String, Any?>?,
+        /** Whether the capacity bucket admitted this call. See [doHttpPost]. */
+        hadLease: Boolean,
     ): LlmResponse = when (provider) {
-        "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema)
-        "gemini"    -> callGemini(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema)
-        else        -> callOpenAiCompatible(provider, model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema)
+        "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
+        "gemini"    -> callGemini(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
+        else        -> callOpenAiCompatible(provider, model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
     }
 
     // ── OpenAI-compatible ─────────────────────────────────────────────────────
@@ -632,6 +756,7 @@ class LlmNodeExecutor(
         maxResponseBytes: Long,
         capture: CallCapture,
         outputSchema: Map<String, Any?>?,
+        hadLease: Boolean,
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.openai.com") + "/v1/chat/completions"
 
@@ -654,6 +779,8 @@ class LlmNodeExecutor(
             maxResponseBytes = maxResponseBytes,
             provider = provider,
             capture = capture,
+            model = model,
+            hadLease = hadLease,
         )
 
         return parseOpenAiResponse(response)
@@ -672,6 +799,7 @@ class LlmNodeExecutor(
         maxResponseBytes: Long,
         capture: CallCapture,
         outputSchema: Map<String, Any?>?,
+        hadLease: Boolean,
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.anthropic.com") + "/v1/messages"
 
@@ -701,6 +829,8 @@ class LlmNodeExecutor(
             maxResponseBytes = maxResponseBytes,
             provider = "anthropic",
             capture = capture,
+            model = model,
+            hadLease = hadLease,
         )
 
         return parseAnthropicResponse(response)
@@ -719,6 +849,7 @@ class LlmNodeExecutor(
         maxResponseBytes: Long,
         capture: CallCapture,
         outputSchema: Map<String, Any?>?,
+        hadLease: Boolean,
     ): LlmResponse {
         // NOTE: Gemini uses Bearer auth — API key goes in Authorization header, NOT as ?key= param
         val url = (baseUrl?.trimEnd('/') ?: "https://generativelanguage.googleapis.com") +
@@ -751,6 +882,8 @@ class LlmNodeExecutor(
             maxResponseBytes = maxResponseBytes,
             provider = "gemini",
             capture = capture,
+            model = model,
+            hadLease = hadLease,
         )
 
         return parseGeminiResponse(response)
@@ -780,6 +913,16 @@ class LlmNodeExecutor(
         maxResponseBytes: Long,
         provider: String,
         capture: CallCapture,
+        /** For the 429 metrics, which are per model — a 429 is model-scoped. */
+        model: String,
+        /**
+         * Did the capacity bucket admit this call?
+         *
+         * A 429 on an ADMITTED call is a bucket bug and is counted as one, apart
+         * from an ordinary 429 on an unmetered call. Passed down rather than
+         * inferred, because down here there is no way to tell the two apart.
+         */
+        hadLease: Boolean,
     ): String {
         // The backstop. Every replayed node should have returned a recorded
         // response before reaching here; if one did not, refusing is the only safe
@@ -846,14 +989,27 @@ class LlmNodeExecutor(
         // too, and the provider's polite "slow down" turns into a failed workflow.
         if (result.statusCode == 429) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "throttled")
+            // Header names are case-insensitive and providers disagree about the
+            // casing, so match on the lower-cased name rather than guessing which
+            // two spellings to try.
+            fun header(name: String): String? = result.headers.entries
+                .firstOrNull { it.key.lowercase() == name }?.value?.firstOrNull()
+            val kind = limitKindOf(::header)
+            WorkerMetrics.provider429Total.inc(provider, model, kind)
+            /*
+             * A 429 AFTER THE BUCKET ADMITTED THE CALL IS A BUCKET BUG.
+             *
+             * Counted separately from a refusal, and that distinction is the whole
+             * point of the metric: a refusal means the bucket worked, this means
+             * it let through a call it should have held. If this counter is
+             * non-zero the limits are configured too high, the estimate is short,
+             * or somebody else is spending the same account's budget.
+             */
+            if (hadLease) WorkerMetrics.provider429AfterAdmitTotal.inc(provider, model, kind)
             throw ProviderThrottledException(
                 provider = provider,
-                // Header names are case-insensitive and providers disagree about
-                // the casing, so match on the lower-cased name rather than
-                // guessing which two spellings to try.
-                retryAfter = result.headers.entries
-                    .firstOrNull { it.key.lowercase() == "retry-after" }
-                    ?.value?.firstOrNull(),
+                retryAfter = header("retry-after"),
+                limitKind = kind,
             )
         }
 
@@ -931,7 +1087,12 @@ class LlmNodeExecutor(
             val inputTokens  = (usage?.get("input_tokens") as? Number)?.toInt() ?: 0
             val outputTokens = (usage?.get("output_tokens") as? Number)?.toInt() ?: 0
 
-            LlmResponse(content = text, finishReason = stop, tokenCount = inputTokens + outputTokens)
+            /* The SPLIT, not just the total. The estimate's feedback loop grades
+               the input side alone, and a combined figure cannot be graded: a
+               short completion would read as a good input estimate. */
+            LlmResponse(content = text, finishReason = stop,
+                tokenCount = inputTokens + outputTokens,
+                tokensIn = inputTokens, tokensOut = outputTokens)
         } catch (e: Exception) {
             throw LlmCallException("Failed to parse Anthropic response: ${e.javaClass.simpleName}")
         }
@@ -951,7 +1112,9 @@ class LlmNodeExecutor(
             val usageMeta  = root["usageMetadata"] as? Map<String, Any>
             val tokenCount = (usageMeta?.get("totalTokenCount") as? Number)?.toInt()
 
-            LlmResponse(content = text, finishReason = finishReason, tokenCount = tokenCount)
+            LlmResponse(content = text, finishReason = finishReason, tokenCount = tokenCount,
+                tokensIn = (usageMeta?.get("promptTokenCount") as? Number)?.toInt(),
+                tokensOut = (usageMeta?.get("candidatesTokenCount") as? Number)?.toInt())
         } catch (e: Exception) {
             throw LlmCallException("Failed to parse Gemini response: ${e.javaClass.simpleName}")
         }

@@ -24,7 +24,17 @@ class AgentSafetyGuard {
     fun validateToolAllowed(action: AgentAction, config: AgentBrainConfig) {
         val toolIdStr = action.toolId
             ?: throw ToolNotAllowedException("null", "CALL_TOOL action missing toolId")
-        val toolId = try { UUID.fromString(toolIdStr) }
+        /*
+         * A named query is offered as `<toolId>#<queryId>`, and the GRANT is on the
+         * tool. Splitting here rather than accepting the composite means a query is
+         * reachable exactly when its tool is — one grant, not two — and there is no
+         * way to grant a write query without granting the tool that owns it.
+         *
+         * Whether the query id names something real is the executor's business;
+         * this is the allow-list, and it answers one question.
+         */
+        val baseId = com.vectorbea.worker.agents.tools.NamedQuery.splitToolId(toolIdStr).first
+        val toolId = try { UUID.fromString(baseId) }
         catch (_: Exception) { throw ToolNotAllowedException(toolIdStr, "Tool ID is not a valid UUID") }
         if (config.allowedToolIds.isNotEmpty() && toolId !in config.allowedToolIds) {
             log.warn("[brain] TOOL_NOT_ALLOWED agent={} tried toolId={}", config.agentId, toolIdStr)

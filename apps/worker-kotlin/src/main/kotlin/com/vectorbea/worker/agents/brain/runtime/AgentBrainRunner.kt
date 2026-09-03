@@ -18,6 +18,7 @@ import com.vectorbea.worker.agents.orchestration.TeamLimits
 import com.vectorbea.worker.runtime.executor.AgentCallExecutor
 import com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder
 import com.vectorbea.worker.connector.ConnectionResolver
+import kotlinx.coroutines.delay
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
 import com.vectorbea.worker.durable.StepExecutionGuard
 import com.vectorbea.worker.events.RunEventStore
@@ -158,6 +159,13 @@ class AgentBrainRunner(
          * small enough that one enormous response cannot eat the whole budget.
          */
         internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
+
+        /** Matches the truncation notice `AgentSafetyGuard` appends. */
+        internal const val TRUNCATION_MARKER = "… [truncated"
+
+        /** `HTTP 403` / `status 500` inside a failure message. */
+        internal val STATUS_IN_MESSAGE =
+            Regex("""\b(?:HTTP|status)\s+(\d{3})\b""", RegexOption.IGNORE_CASE)
 
         /**
          * Rebuild a resumed agent's loop instead of replaying it.
@@ -315,6 +323,16 @@ class AgentBrainRunner(
          * A floor rather than a share: see the note at the preflight call site for
          * why an equal share cannot be the test.
          */
+        /**
+         * Per child that did not fit, before the total is divided across the
+         * fan-out. 250ms is roughly one provider round trip, so a child that was
+         * over the line starts about when the one before it finished asking.
+         */
+        internal const val FAN_OUT_STAGGER_PER_CHILD_MS = 250L
+
+        /** A stagger longer than this outlives the tick it is spreading. */
+        internal const val MAX_FAN_OUT_STAGGER_MS = 10_000L
+
         internal val MIN_VIABLE_CHILD = BudgetVector(
             iterations = 1,
             tokens = System.getenv("AGENT_MIN_CHILD_TOKENS")?.toLongOrNull() ?: 256L,
@@ -556,6 +574,10 @@ class AgentBrainRunner(
             teamLimits = teamLimits,
             teamPolicy = teamPolicy,
             delegationEnabled = delegationEnabled,
+            /* The child was constructed WITHOUT this, so a parent metered by the
+               bucket produced children that were not — and delegation depth is
+               the multiplier the bucket exists to bound. */
+            capacity = capacity,
         )
 
         val result = child.run(childConfig, ctx)
@@ -627,6 +649,36 @@ class AgentBrainRunner(
      * not grow at every hop. The resolution happens HERE, at the callee, and only
      * for what the callee was actually pointed at.
      */
+    /**
+     * `(provider, credential fingerprint)` for this agent's LLM connection.
+     *
+     * Memoised for the life of this runner — one broadcast resolves it once,
+     * and a runner exists for one node execution. Without the memo a twenty-child
+     * fan-out would decrypt the same secret twenty times to answer a question that
+     * has one answer.
+     *
+     * Null when the connection cannot be resolved, which makes the preflight a
+     * no-op rather than an error: a fan-out whose connection is broken has a
+     * bigger problem than its stagger, and it will surface at the first call.
+     */
+    @Volatile private var cachedAccount: Pair<String, String>? = null
+
+    private fun accountOf(config: AgentBrainConfig): Pair<String, String>? {
+        cachedAccount?.let { return it }
+        return runCatching {
+            val resolved = connectionResolver.resolve(
+                config.llmConnectionId, config.workspaceId, expectedType = "llm")
+            val fp = resolved.secret?.let { sv ->
+                var chars = CharArray(0)
+                sv.useOnce { chars = it.toCharArray() }
+                val f = com.vectorbea.worker.net.CredentialKey.fingerprint(chars)
+                java.util.Arrays.fill(chars, ' ')
+                f
+            } ?: com.vectorbea.worker.net.CredentialKey.UNKNOWN
+            (resolved.record.provider to fp).also { cachedAccount = it }
+        }.getOrNull()
+    }
+
     private fun resolveContextRefs(contract: TaskContract, ctx: RuntimeContext): Map<String, Any?> {
         if (contract.contextRefs.isEmpty()) return emptyMap()
         val store = contextStore ?: return emptyMap()
@@ -1894,6 +1946,49 @@ class AgentBrainRunner(
             }
         }
 
+        /*
+         * ── CAPACITY PREFLIGHT ─────────────────────────────────────────────
+         *
+         * The budget preflight above answers "can this team AFFORD N children".
+         * It cannot answer "is there room to START them all now", because budget
+         * is a TOTAL and a rate limit is a RATE. Twenty children can be entirely
+         * affordable in tokens and still be twenty simultaneous requests in one
+         * second, which is the single commonest way this product produced 429s.
+         *
+         * So the same question is asked of the bucket, and the answer is used
+         * differently: budget refuses all-or-nothing because half a fan-out is
+         * usually worth nothing, whereas capacity STAGGERS, because the children
+         * that do not fit now will fit in a moment and the results are just as
+         * good for having arrived a second apart.
+         *
+         * Nothing is reserved here. The reservation still happens per call in
+         * `LlmNodeExecutor`; this only decides how fast to let them arrive, so a
+         * stale answer costs a slightly wrong stagger and never a double-count.
+         */
+        val staggerMs: Long = run {
+            val cap = capacity ?: return@run 0L
+            val acct = accountOf(config) ?: return@run 0L
+            val perChild = MIN_VIABLE_CHILD.tokens.coerceAtLeast(1L)
+            val room = cap.headroomFor(acct.first, config.modelName, acct.second,
+                targets.size, perChild)
+            if (room >= targets.size) 0L else {
+                /*
+                 * Spread the ones that do not fit across the window it takes the
+                 * bucket to refill for them, rather than firing them and letting
+                 * each discover the limit independently. One RTT of stagger per
+                 * child that did not fit, floored so a wide fan-out does not crawl
+                 * and capped so it does not outlive the tick.
+                 */
+                val overflow = targets.size - room.coerceAtLeast(0)
+                (overflow * FAN_OUT_STAGGER_PER_CHILD_MS)
+                    .coerceIn(FAN_OUT_STAGGER_PER_CHILD_MS, MAX_FAN_OUT_STAGGER_MS) / targets.size
+            }
+        }
+        if (staggerMs > 0) {
+            log.info("[delegate] staggering {} children by {}ms each — capacity is short",
+                targets.size, staggerMs)
+        }
+
         /* One group id ties this broadcast's children together, so the debugger
            can draw the fan-out as one thing rather than N unrelated edges. */
         val joinGroupId = UUID.randomUUID()
@@ -1922,6 +2017,15 @@ class AgentBrainRunner(
                 System.currentTimeMillis() >= runtimeCtx.tickDeadlineAtMs) {
                 yielded = true
                 stopped = true
+            }
+
+            /* The stagger, applied BETWEEN starts and never before the first —
+               delaying the first child would slow every fan-out to buy nothing.
+               Jittered for the same reason every other delay here is: N brains
+               staggering by an identical amount would still arrive in lockstep,
+               one step later. */
+            if (!stopped && index > 0 && staggerMs > 0) {
+                delay(com.vectorbea.worker.net.ProviderThrottle.jitter(staggerMs))
             }
 
             if (stopped) {
@@ -2250,7 +2354,11 @@ class AgentBrainRunner(
         runtimeCtx: RuntimeContext,
         state: AgentLoopState,
     ): ToolOutcome {
-        val toolId = try { UUID.fromString(action.toolId!!) }
+        /* `<toolId>#<queryId>` for a named query; a plain uuid otherwise. The tool
+           is what is loaded and guarded; the query id travels with it. */
+        val (baseToolId, namedQueryId) =
+            com.vectorbea.worker.agents.tools.NamedQuery.splitToolId(action.toolId ?: "")
+        val toolId = try { UUID.fromString(baseToolId) }
         catch (_: Exception) {
             return ToolOutcome(AgentObservation(
                 state.iteration, "CALL_TOOL", action.toolId, "Invalid tool ID format", false))
@@ -2293,7 +2401,7 @@ class AgentBrainRunner(
             val syntheticNode = WorkflowNode(
                 id     = toolApprovalNodeId(keyScope(config), toolId),
                 type   = "tool",
-                config = mapOf("toolId" to toolId.toString()),
+                config = mapOf("toolId" to (action.toolId ?: toolId.toString())),
             )
 
             @Suppress("UNCHECKED_CAST")
@@ -2386,16 +2494,97 @@ class AgentBrainRunner(
                         )?.ref
                     }.getOrNull()
 
+                    /*
+                     * ── THE CONTRACT, BETWEEN THE RESULT AND THE PROMPT ─────
+                     *
+                     * Order is the whole design. The FULL result went to the
+                     * payload store above — the debugger keeps everything. What
+                     * reaches the model is projected first and capped second, so
+                     * the cap acts on ten meaningful fields rather than on a
+                     * serialised tree it will cut mid-structure.
+                     *
+                     * A tool with no contract projects to itself, so this path is
+                     * byte-for-byte what it was for every tool that has not
+                     * adopted one.
+                     */
+                    val contract = loadToolContract(toolId, config.workspaceId)
+                    val statusCode = com.vectorbea.worker.agents.tools.ToolErrorShape
+                        .statusOf(execResult.output)
+
+                    /*
+                     * A NON-2xx THAT CAME BACK AS `Completed` IS STILL A FAILURE.
+                     *
+                     * HTTP tools return 404 and 403 as completed results rather
+                     * than failing the node, because a 404 is a legitimate answer
+                     * to a lookup and failing the run would be worse. The model was
+                     * therefore handed `{"statusCode":403, "body":{...}}` and left
+                     * to work out that it had been refused — which it does by
+                     * trying again. The error contract applies here too.
+                     */
+                    if (statusCode != null && statusCode !in 200..299) {
+                        val shape = com.vectorbea.worker.agents.tools.ToolErrorShape.of(
+                            contract, statusCode,
+                            com.vectorbea.worker.agents.tools.ToolErrorShape.bodyTextOf(execResult.output),
+                            null)
+                        recordObservationShape(projected = contract != null,
+                            truncated = false, chars = shape.asObservation().length)
+                        return ToolOutcome(
+                            AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                                shape.asObservation(), false,
+                                payload = renderToolPayload(mapOf(
+                                    "error" to shape.kind,
+                                    "retryable" to shape.retryable,
+                                    "status" to shape.status))),
+                            resultRef = fullRef)
+                    }
+
+                    val projection = com.vectorbea.worker.agents.tools.ResultProjection
+                        .project(execResult.output, contract)
+                    if (projection.missing.isNotEmpty()) {
+                        /* The contract asked for fields the response did not have.
+                           Almost always an API that changed shape, and silent
+                           otherwise: the observation simply gets smaller. */
+                        log.warn("[brain] result contract fields missing for tool {}: {}",
+                            toolId, projection.missing.take(5))
+                    }
+                    val payload = capObservation(projection.json)
+                    recordObservationShape(
+                        projected = projection.applied,
+                        truncated = payload?.contains(TRUNCATION_MARKER) == true,
+                        chars = payload?.length ?: 0)
+
                     ToolOutcome(
                         AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
                             buildToolObservationSummary(toolId, execResult.output), true,
-                            payload = renderToolPayload(execResult.output)),
+                            payload = payload),
                         resultRef = fullRef)
                 }
 
                 is NodeResult.Failed -> {
-                    val errSummary = "Tool $toolId failed: ${execResult.reason.take(200)}"
-                    log.warn("[brain] tool execution failed toolId={}: {}", toolId, execResult.reason)
+                    /*
+                     * ── WHAT FAILED, AND WHETHER TO TRY AGAIN ────────────────
+                     *
+                     * The summary used to be "Tool <uuid> failed: <provider text>",
+                     * which tells a model that something went wrong and nothing
+                     * about what to do — so it retries, rephrases, retries again,
+                     * and spends its iteration budget discovering that a revoked
+                     * credential is still revoked.
+                     *
+                     * `retryable` is the field that ends that loop, and the
+                     * sentence beside it says what would actually fix the problem.
+                     * A tool with no contract still gets the HTTP defaults, which
+                     * are correct for most failures — see [ToolErrorShape].
+                     */
+                    val shape = com.vectorbea.worker.agents.tools.ToolErrorShape.of(
+                        contract = loadToolContract(toolId, config.workspaceId),
+                        status = statusFromMessage(execResult.reason),
+                        body = execResult.reason,
+                        fallbackMessage = execResult.reason)
+                    val errSummary = shape.asObservation()
+                    log.warn("[brain] tool execution failed toolId={} kind={} retryable={}: {}",
+                        toolId, shape.kind, shape.retryable, execResult.reason)
+                    recordObservationShape(projected = false, truncated = false,
+                        chars = errSummary.length)
                     /* Marked failed, not left running: `tryAcquire` reads a failed row as
                        free to retry, so a resumed step calls the tool again — which is
                        what should happen to a call that did not succeed. */
@@ -2516,6 +2705,51 @@ class AgentBrainRunner(
      * be wrong for some tool and would fail silently — which is the failure this
      * whole function exists to end.
      */
+    /**
+     * Cap an already-projected observation.
+     *
+     * Split out from [renderToolPayload] because the input is now JSON TEXT rather
+     * than a result map: the projection has already serialised it, and
+     * re-serialising a parsed copy would reorder the keys — which matters, because
+     * the collection summary is written first precisely so it survives a cap.
+     */
+    private fun capObservation(json: String?): String? {
+        if (json.isNullOrBlank()) return null
+        return safetyGuard.sanitizeToolOutput(json, MAX_TOOL_PAYLOAD_CHARS).takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * A status code named in a failure message, if there is one.
+     *
+     * `NodeResult.Failed` carries prose, and the HTTP executors write "HTTP 403"
+     * into it. Parsing that is unlovely and it is the only way to classify a
+     * failure that arrived as a sentence — the alternative is a structured error
+     * on `NodeResult.Failed`, which changes a type every executor returns and is a
+     * larger change than this work should make. Null when nothing matches, and the
+     * classifier then falls back to `unknown`, which is not retryable.
+     */
+    private fun statusFromMessage(message: String?): Int? {
+        if (message == null) return null
+        return STATUS_IN_MESSAGE.find(message)?.groupValues?.get(1)?.toIntOrNull()
+    }
+
+    /**
+     * What the last observation looked like, for the before/after measurement.
+     *
+     * Held here and written by [persistIterationEnd] rather than written directly,
+     * because the iteration row does not exist yet at the moment a tool returns —
+     * and "was this truncated" is knowable exactly here and only guessable
+     * afterwards by matching text in a payload.
+     */
+    @Volatile private var pendingObservationShape: ObservationShape? = null
+
+    internal data class ObservationShape(
+        val projected: Boolean, val truncated: Boolean, val chars: Int)
+
+    private fun recordObservationShape(projected: Boolean, truncated: Boolean, chars: Int) {
+        pendingObservationShape = ObservationShape(projected, truncated, chars)
+    }
+
     private fun renderToolPayload(result: Map<String, Any?>): String? {
         if (result.isEmpty()) return null
         val json = try { mapper.writeValueAsString(result) } catch (_: Exception) { result.toString() }
@@ -2714,7 +2948,9 @@ class AgentBrainRunner(
                          observation_payload_ref=?, tool_result_ref=?,
                          selected_tool_id=?, tokens_delta=?, cost_delta_cents=?,
                          tool_calls_delta=?, loop_schema_version=?,
-                         action_repaired=?, tool_result_cached=?
+                         action_repaired=?, tool_result_cached=?,
+                         observation_projected=?, observation_truncated=?,
+                         observation_chars=?
                        WHERE id=?"""
                 ).use { stmt ->
                     stmt.setString(1, status)
@@ -2740,7 +2976,32 @@ class AgentBrainRunner(
                     stmt.setBoolean(17, action.repaired)
                     if (toolResultCached == null) stmt.setNull(18, java.sql.Types.BOOLEAN)
                     else stmt.setBoolean(18, toolResultCached)
-                    stmt.setObject(19, iterationId)
+                    /*
+                     * ── THE BEFORE/AFTER, RECORDED PER ITERATION ─────────────
+                     *
+                     * NULL when this iteration made no tool call, which is a third
+                     * state and not a false: "no contract applied" and "a contract
+                     * applied and produced nothing" need to be told apart, and so do
+                     * "not truncated" and "nothing to truncate". The acceptance
+                     * criterion is a RATE over contracted tools, and a rate computed
+                     * over rows that never called a tool is not that rate.
+                     *
+                     * Consumed and cleared: the field is per-iteration state on a
+                     * runner that outlives the iteration, so leaving it set would
+                     * attribute this observation's size to the next iteration too.
+                     */
+                    val shape = pendingObservationShape
+                    pendingObservationShape = null
+                    if (shape == null) {
+                        stmt.setNull(19, java.sql.Types.BOOLEAN)
+                        stmt.setNull(20, java.sql.Types.BOOLEAN)
+                        stmt.setNull(21, java.sql.Types.INTEGER)
+                    } else {
+                        stmt.setBoolean(19, shape.projected)
+                        stmt.setBoolean(20, shape.truncated)
+                        stmt.setInt(21, shape.chars)
+                    }
+                    stmt.setObject(22, iterationId)
                     stmt.executeUpdate()
                 }
             }
@@ -2749,19 +3010,116 @@ class AgentBrainRunner(
 
     // ── Tool descriptors ──────────────────────────────────────────────────────
 
+    /**
+     * Parsed contracts, by the JSON they came from.
+     *
+     * Keyed on the text rather than the tool id because the same contract is read
+     * twice while building one descriptor and once per tool call, and parsing is
+     * pure. Bounded by the number of distinct contracts an agent can see, which is
+     * its tool grant.
+     */
+    private val contractCache =
+        java.util.concurrent.ConcurrentHashMap<String, com.vectorbea.worker.agents.tools.ToolResultContract>()
+
+    private fun contractFor(json: String?): com.vectorbea.worker.agents.tools.ToolResultContract? {
+        if (json.isNullOrBlank()) return null
+        contractCache[json]?.let { return it }
+        val parsed = com.vectorbea.worker.agents.tools.ToolResultContract.parse(json)
+        if (parsed == null) {
+            /* A contract that will not parse is a tool whose author believes it has
+               one. Warn once per distinct text rather than per call: the loop would
+               otherwise log it on every iteration of every run using that tool. */
+            if (contractCache.putIfAbsent(json,
+                    com.vectorbea.worker.agents.tools.ToolResultContract()) == null) {
+                log.warn("[brain] tool result contract is unreadable — falling back to the " +
+                    "whole result for this tool")
+            }
+            return null
+        }
+        contractCache[json] = parsed
+        return parsed
+    }
+
+    /** This tool's contract, read at call time. Null when it declares none. */
+    private fun loadToolContract(toolId: UUID, workspaceId: UUID):
+        com.vectorbea.worker.agents.tools.ToolResultContract? {
+        val ds = dataSource ?: return null
+        return runCatching {
+            ds.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT result_contract_json FROM tools WHERE id=? AND workspace_id=?"
+                ).use { st ->
+                    st.setObject(1, toolId); st.setObject(2, workspaceId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next()) contractFor(rs.getString(1)) else null
+                    }
+                }
+            }
+        }.getOrNull()
+    }
+
     private fun loadAllowedToolDescriptors(config: AgentBrainConfig): List<AgentPromptBuilder.ToolDescriptor> {
         if (dataSource == null || config.allowedToolIds.isEmpty()) return emptyList()
         return try {
             dataSource.connection.use { conn ->
                 val placeholders = config.allowedToolIds.joinToString(",") { "?" }
                 conn.prepareStatement(
-                    "SELECT id, name, description, input_schema_json FROM tools WHERE id IN ($placeholders) AND workspace_id=? AND status='active'"
+                    "SELECT id, name, description, input_schema_json, result_contract_json, " +
+                    "named_queries_json " +
+                    "FROM tools WHERE id IN ($placeholders) AND workspace_id=? AND status='active'"
                 ).use { stmt ->
                     config.allowedToolIds.forEachIndexed { i, id -> stmt.setObject(i + 1, id) }
                     stmt.setObject(config.allowedToolIds.size + 1, config.workspaceId)
                     val rs = stmt.executeQuery()
                     buildList {
                         while (rs.next()) {
+                            /*
+                             * ── ONE TOOL PER NAMED QUERY ─────────────────────
+                             *
+                             * A database tool with a catalogue is not offered to
+                             * the model as "a database tool" — each of its queries
+                             * is a tool in its own right, with its own description
+                             * and its own parameter schema. Discovery is then the
+                             * same mechanism as every other tool, and the model
+                             * never has a reason to ask "what SQL should I write":
+                             * there is no affordance for writing any.
+                             *
+                             * The id carries both halves (`<toolId>#<queryId>`),
+                             * which is what `ToolNodeExecutor` splits back apart.
+                             * The grant list still names the TOOL, so a query is
+                             * reachable exactly when its tool is — one grant, not
+                             * two, and no way to grant a write without granting the
+                             * tool that owns it.
+                             */
+                            val queries = com.vectorbea.worker.agents.tools.NamedQuery
+                                .parseCatalogue(rs.getString("named_queries_json"))
+                            if (queries.isNotEmpty()) {
+                                val toolId = rs.getString("id")
+                                val toolName = rs.getString("name")
+                                queries.forEach { q ->
+                                    add(AgentPromptBuilder.ToolDescriptor(
+                                        id = com.vectorbea.worker.agents.tools.NamedQuery
+                                            .syntheticToolId(toolId, q.id),
+                                        name = "$toolName.${q.id}",
+                                        description = q.description,
+                                        inputSchema = q.inputSchema(),
+                                        resultLegend = com.vectorbea.worker.agents.tools
+                                            .ResultProjection.legendOf(q.resultContract),
+                                        /* The access level is stated because it
+                                           changes what the model should expect:
+                                           a write may pause for approval, and an
+                                           agent that knows that plans around it
+                                           rather than treating the pause as a
+                                           failure. */
+                                        usage = if (q.access ==
+                                            com.vectorbea.worker.agents.tools.NamedQuery.Access.WRITE)
+                                            "This query WRITES and may require human approval " +
+                                            "before it runs. Returns at most ${q.maxRows} row(s)."
+                                        else "Read-only. Returns at most ${q.maxRows} row(s)."
+                                    ))
+                                }
+                                continue
+                            }
                             add(AgentPromptBuilder.ToolDescriptor(
                                 id = rs.getString("id"),
                                 name = rs.getString("name"),
@@ -2776,6 +3134,13 @@ class AgentBrainRunner(
                                    guess what to pass it, which is how a tool call comes
                                    back with the right intent and the wrong keys. */
                                 inputSchema = parseJsonObject(rs.getString("input_schema_json")),
+                                /* The two halves of the contract the MODEL needs to
+                                   see: what to expect back, and when to reach for
+                                   this tool at all. The projection half is applied
+                                   server-side and the model never reads it. */
+                                resultLegend = com.vectorbea.worker.agents.tools.ResultProjection
+                                    .legendOf(contractFor(rs.getString("result_contract_json"))),
+                                usage = contractFor(rs.getString("result_contract_json"))?.usage,
                             ))
                         }
                     }

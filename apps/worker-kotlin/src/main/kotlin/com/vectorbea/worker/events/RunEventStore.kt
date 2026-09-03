@@ -128,6 +128,31 @@ open class RunEventStore(
      */
     private val pending = java.util.concurrent.ConcurrentHashMap<UUID, ArrayDeque<RunEvent>>()
 
+    /**
+     * How many events of this type and status this node has already produced.
+     *
+     * Exists for the throttle backoff, which needs to know how many times this
+     * node has been refused. That count cannot live in memory: a throttled run is
+     * parked and resumed in a different process, so an in-process counter is zero
+     * on every attempt and the exponential curve never leaves its first step.
+     *
+     * Returns 0 on any failure. A backoff that cannot read its history should
+     * start from the beginning, not fail the call it is trying to reschedule.
+     */
+    open fun countEvents(runId: UUID, stepId: String, type: EventType, status: String): Int =
+        runCatching {
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    """SELECT COUNT(*) FROM run_events
+                        WHERE run_id = ? AND step_id = ? AND type = ? AND status = ?"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setString(2, stepId)
+                    st.setString(3, type.value); st.setString(4, status)
+                    st.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+                }
+            }
+        }.getOrDefault(0)
+
     /** Events lost to a failed flush. Mirrors `SpanWriter.droppedCount()`. */
     private val dropped = java.util.concurrent.atomic.AtomicLong()
 

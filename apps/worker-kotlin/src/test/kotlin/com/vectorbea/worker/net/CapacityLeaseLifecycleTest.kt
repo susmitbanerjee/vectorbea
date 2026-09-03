@@ -35,6 +35,11 @@ import kotlin.test.assertTrue
  */
 class CapacityLeaseLifecycleTest {
 
+    /* One account throughout: these tests are about the bucket's arithmetic, and
+       the credential layer has its own suite. */
+    private val ACCT = "acct-test"
+
+
     private val ws: UUID = UUID.randomUUID()
 
     private fun bucket(
@@ -42,7 +47,9 @@ class CapacityLeaseLifecycleTest {
         ttlMs: Long = 120_000,
     ) = ProviderCapacityBucket(
         backend = backend,
-        limits = ProviderCapacityBucket.CapacityLimits(100_000, emptyMap()),
+        limits = ProviderCapacityBucket.CapacityLimits(
+            ProviderCapacityBucket.Limit(requestsPerMinute = 1_000_000, tokensPerMinute = 100_000),
+            emptyMap()),
         enabled = true,
         interactiveFloor = 0.0,
         burstFraction = 1.0,   // depth == the limit, so the arithmetic is readable
@@ -55,7 +62,7 @@ class CapacityLeaseLifecycleTest {
         var hi = 100_000L
         while (lo < hi) {
             val mid = (lo + hi + 1) / 2
-            when (val o = b.reserve("p", "m", ws, mid, false)) {
+            when (val o = b.reserve("p", "m", ACCT, ws, mid, false)) {
                 is ProviderCapacityBucket.Outcome.Granted -> { b.release(o.lease); lo = mid }
                 else -> hi = mid - 1
             }
@@ -71,7 +78,7 @@ class CapacityLeaseLifecycleTest {
      * has to release anyway.
      */
     private suspend fun oneCancelledCall(b: ProviderCapacityBucket, entered: CountDownLatch) {
-        val lease = (b.reserve("p", "m", ws, 100, false)
+        val lease = (b.reserve("p", "m", ACCT, ws, 100, false)
             as? ProviderCapacityBucket.Outcome.Granted)?.lease
         try {
             entered.countDown()
@@ -120,7 +127,7 @@ class CapacityLeaseLifecycleTest {
             val entered = CountDownLatch(1)
             val scope = CoroutineScope(Dispatchers.Default)
             val job = scope.launch {
-                val lease = (b.reserve("p", "m", ws, 100, false)
+                val lease = (b.reserve("p", "m", ACCT, ws, 100, false)
                     as? ProviderCapacityBucket.Outcome.Granted)?.lease
                 try {
                     entered.countDown()
@@ -154,7 +161,7 @@ class CapacityLeaseLifecycleTest {
         val before = available(b)
 
         repeat(20) {
-            b.reserve("p", "m", ws, 1_000, false)   // granted, never settled: the crash
+            b.reserve("p", "m", ACCT, ws, 1_000, false)   // granted, never settled: the crash
         }
         val leaked = available(b)
         assertTrue(leaked < before, "the reservations should be outstanding at this point")
@@ -181,7 +188,7 @@ class CapacityLeaseLifecycleTest {
         val b = bucket(ttlMs = 500)
         val before = available(b)
 
-        val lease = (b.reserve("p", "m", ws, 5_000, false)
+        val lease = (b.reserve("p", "m", ACCT, ws, 5_000, false)
             as ProviderCapacityBucket.Outcome.Granted).lease
         b.settle(lease, 5_000)          // spent it all: nothing comes back
         val afterSettle = available(b)
