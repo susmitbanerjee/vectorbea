@@ -11,19 +11,33 @@
 # =============================================================================
 
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM eclipse-temurin:17-jdk-alpine AS builder
+#
+# ── WHY THE GRADLE IMAGE AND NOT temurin + A DOWNLOAD ────────────────────────
+# This stage used to be `eclipse-temurin:17-jdk-alpine` plus
+# `apk add curl unzip` and a curl of the Gradle distribution. That is two
+# network hops before a single line of Kotlin compiles, and both are outside
+# our control:
+#
+#     WARNING: fetching .../v3.24/main/x86_64/APKINDEX.tar.gz: I/O error
+#     ERROR: unable to select packages:
+#       unzip (no such package)
+#       curl-8.22.0-r0: masked in: --no-network
+#
+# The Alpine package index was unreachable, so the build failed before Gradle
+# was ever installed — and the message ("no such package: unzip") reads like a
+# missing dependency rather than a network problem, which is how it cost an
+# afternoon.
+#
+# `gradle:8.14-jdk17-alpine` ships the JDK and the pinned Gradle already, so
+# both hops are gone: the only fetches left are the base image and the Maven
+# dependencies, and neither is avoidable. The version stays pinned, in the tag.
+#
+# The runtime stage below is unchanged and still `eclipse-temurin:17-jre-alpine`
+# — it receives a jar and never sees Gradle, so the builder's flavour cannot
+# reach the shipped image.
+FROM gradle:8.14-jdk17-alpine AS builder
 
 WORKDIR /workspace/apps/worker-kotlin
-
-# Install Gradle (pinned version for reproducible builds)
-ARG GRADLE_VERSION=8.14
-RUN apk add --no-cache curl unzip && \
-    curl -fL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-         -o /tmp/gradle.zip && \
-    unzip -q /tmp/gradle.zip -d /opt && \
-    mv /opt/gradle-${GRADLE_VERSION} /opt/gradle && \
-    rm /tmp/gradle.zip
-ENV PATH="/opt/gradle/bin:${PATH}"
 
 # Limit JVM heap for Gradle + Kotlin compiler to stay within Railway build limits.
 ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false"
