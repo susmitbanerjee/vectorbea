@@ -92,7 +92,17 @@ export function DebugTab({
 }: {
   runId: string;
   onReconnect?: () => void;
-  onRetryFromHere?: (spanId: string | null) => void;
+  /**
+   * Re-run from the step that broke.
+   *
+   * Takes the workflow NODE id, not a span id. A span is one execution of one
+   * step and `POST /api/runs/:id/retry-node` is keyed on the node — the handler
+   * was being given a span id, which that endpoint cannot resolve.
+   *
+   * Null when the root cause has no step: a run that failed before entering the
+   * graph has nothing to resume from.
+   */
+  onRetryFromHere?: (nodeId: string | null) => void;
 }) {
   const client = useApi();
   const { workspaceId } = useScope();
@@ -274,6 +284,8 @@ export function DebugTab({
   );
 
   const rootCauseSpanId = rootCause?.rootCause?.spanId ?? null;
+  /* The step to resume from. `stepId` on a span IS the workflow node id. */
+  const rootCauseNodeId = rootCause?.rootCause?.stepId ?? null;
 
   /**
    * Cross-navigation, both directions.
@@ -318,7 +330,7 @@ export function DebugTab({
         rootCause={rootCause}
         loading={loading}
         onReconnect={onReconnect}
-        onRetryFromHere={onRetryFromHere ? () => onRetryFromHere(rootCauseSpanId) : undefined}
+        onRetryFromHere={onRetryFromHere ? () => onRetryFromHere(rootCauseNodeId) : undefined}
         /* ONE CLICK from the failure to "what changed". "It worked yesterday" is
            the most common report, and the banner is where the reader already is
            when they think it. */

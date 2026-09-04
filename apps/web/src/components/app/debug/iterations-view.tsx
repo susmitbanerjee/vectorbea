@@ -284,7 +284,7 @@ function Markers({ iteration: it }: { iteration: Iteration }) {
  * A reader seeing iteration 3 twice deserves to know the second is a replay and
  * why the first could not be reused.
  */
-function ReplayBanner({ note }: { note: { reason: string; detail: string | null } }) {
+export function ReplayBanner({ note }: { note: { reason: string; detail: string | null } }) {
   return (
     <div className="rounded-sm border border-status-waiting-border bg-status-waiting-subtle px-2 py-1.5">
       <Text variant="caption" className="block text-status-waiting">
@@ -310,7 +310,7 @@ function ReplayBanner({ note }: { note: { reason: string; detail: string | null 
  * rather than a bar against a guess — an invented denominator is worse than an
  * absent one.
  */
-function BudgetGauges({
+export function BudgetGauges({
   budgets, stopReason,
 }: {
   budgets: IterationBudget[];
@@ -401,7 +401,7 @@ function Gauge({ budget: b }: { budget: IterationBudget }) {
 
 // ── The detail ──────────────────────────────────────────────────────────────
 
-function IterationDetail({
+export function IterationDetail({
   api, runId, iteration: it, diffAgainst, selectedSpanId,
 }: {
   api: TraceApi;
@@ -414,11 +414,28 @@ function IterationDetail({
 
   return (
     <div className="space-y-3">
+      {/*
+        ── "STEP", NOT "ITERATION" ─────────────────────────────────────────────
+        This pane is no longer reached only by someone who came looking for the
+        ReAct loop — it is the right-hand half of the default view. "Iteration 4
+        · CALL_TOOL" was the exact wording an operations lead could not read, and
+        leaving it here would have moved the problem rather than fixed it.
+
+        The number is unchanged and still the way people refer to a step out
+        loud. The raw action type keeps its place beside it, quietly, because the
+        one reader who does want `CALL_TOOL` should not have to switch views for
+        it — but the human phrase leads.
+      */}
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Text variant="body" className="font-medium text-fg-max">
-          Iteration {it.number}
+          Step {it.number}
         </Text>
-        <span className={cn("text-xs", tone.text)}>{it.actionType ?? "—"}</span>
+        <span className={cn("text-xs", tone.text)}>{actionPhrase(it)}</span>
+        {it.actionType && (
+          <span className="font-mono text-[10px] uppercase tracking-wide text-fg-muted">
+            {it.actionType}
+          </span>
+        )}
         <StatusPill status={statusOf(it)} />
         <span className="font-mono text-xs tabular-nums text-fg-muted">
           {formatDuration(it.durationMs)}
@@ -472,7 +489,7 @@ function IterationDetail({
       )}
 
       {selectedSpanId && it.llmCall?.spanId === selectedSpanId && (
-        <span className="sr-only">This iteration is selected in the other views.</span>
+        <span className="sr-only">This step is selected in the other views.</span>
       )}
     </div>
   );
@@ -513,7 +530,7 @@ function ParsedAction({ iteration: it }: { iteration: Iteration }) {
         </pre>
       ) : (
         <Text variant="caption" className="block text-fg-muted">
-          Not recorded — this iteration did not complete.
+          Not recorded — this step did not complete.
         </Text>
       )}
     </div>
@@ -708,7 +725,7 @@ function PayloadPanel({
 
       {!present ? (
         <Text variant="caption" className="block text-fg-muted">
-          Not recorded for this iteration.
+          Not recorded for this step.
         </Text>
       ) : (
         <>
@@ -977,7 +994,44 @@ function LoadingRail() {
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** The iteration's own status, mapped onto the shared span vocabulary. */
+/**
+ * What this step DID, in words, for the detail header.
+ *
+ * Deliberately not the narrative sentence from the Activity model: that one is
+ * the agent's own `reasoningSummary` and belongs on the rail, where it is the
+ * whole point. Here it would be a duplicate of the row that was just clicked.
+ * This is the mechanical action, translated — which is what a header needs.
+ */
+export function actionPhrase(it: Iteration): string {
+  switch (it.actionType) {
+    case "CALL_TOOL": return it.toolName ? `Called ${it.toolName}` : "Called a tool";
+    case "THINK": return "Planned the next move";
+    case "FINAL": return "Produced the final answer";
+    case "DELEGATE": return "Handed work to another agent";
+    case "ASK_APPROVAL": return "Asked for approval";
+    case "FAIL": return "Stopped and reported a failure";
+    /* Null while a step is still open — a real state, and "—" said nothing. */
+    default: return it.completedAt ? "Took a step" : "Still running";
+  }
+}
+
+/**
+ * What a reader should be told happened in this step.
+ *
+ * ── A COMPLETED STEP WHOSE TOOL FAILED IS NOT A SUCCESS ─────────────────────
+ * The runtime writes `status = 'completed'` with `observationSuccess = false`
+ * when a tool call fails: the LOOP step completed — it made the call, recorded
+ * the answer and carried on — and the tool did not. Both facts are true, and
+ * this function used to report only the first, so a step whose observation read
+ * "Could not reach Salesforce - the connection timed out" carried a green
+ * "Succeeded" pill directly above that sentence.
+ *
+ * The reader's question is about the work, not about the loop's bookkeeping, so
+ * the observation wins. `=== false` and not falsy: null means the step made no
+ * observation at all (a THINK), which is neither success nor failure.
+ */
 function statusOf(it: Iteration): string {
+  if (it.observationSuccess === false) return "error";
   switch (it.status) {
     case "completed": return "ok";
     case "failed": return "error";

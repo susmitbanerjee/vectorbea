@@ -122,49 +122,40 @@ export function AgentsView({
   /*
    * ── WHY THIS IS EMPTY, ANSWERED FROM THE DATA ───────────────────────────
    *
-   * This branch claimed "every run since the harness shipped has at least one
-   * activation", and that is false. `AGENT_ACTIVATIONS_ENABLED` is off by
-   * default and set in no environment file, so `AgentNodeExecutor` takes the
-   * pre-activation branch and writes no `agent_activations` row at all — while
-   * `agent_iterations` is written either way. The result is the exact report
-   * that led here: a successful run, Iterations populated, Agents blank, and a
-   * message telling the reader their run was old when it ran this morning.
+   * There are two ways to have no nodes and only one of them used to be
+   * handled. This branch once said "every run since the harness shipped has at
+   * least one activation", which is false, and then said the activation path was
+   * switched off — which is true but is OUR deployment configuration, and a
+   * person reading their own run should never be shown an environment variable.
    *
-   * The cause now comes from the API, which knows whether the run produced
-   * iterations. Three states, because two of them are not problems and one is.
+   * Both are gone: the API now reconstructs the agent from the iteration record
+   * when no activation rows exist, so a single-agent run draws its agent like
+   * any other. What is left here is the genuinely empty case — a run with no
+   * agent step at all.
    */
   if (l.nodes.length === 0) {
-    const cause = constellation.emptyCause;
     return (
       <div className={cn("rounded-lg border border-subtle p-6", className)}>
-        {cause === "activations_disabled" ? (
-          <>
-            <Text variant="body-sm" tone="max" className="block font-medium">
-              This run used an agent, but activations were not being recorded
-            </Text>
-            <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[70ch]">
-              The agent ran and its steps are in Iterations. The activation tree
-              this view draws is written only when{" "}
-              <code className="font-code text-mono-sm">AGENT_ACTIVATIONS_ENABLED</code>{" "}
-              is set on the worker, and it is off by default. Nothing was lost from
-              this run — there was never an activation to show.
-            </Text>
-          </>
-        ) : cause === "no_agent_steps" ? (
-          <Text variant="body-sm" tone="secondary">
-            This run had no agent steps, so there is no activation tree. Its work
-            is in the Flow and Timeline views.
-          </Text>
-        ) : (
-          <Text variant="body-sm" tone="secondary">
-            No activations were recorded for this run.
-          </Text>
-        )}
+        <Text variant="body-sm" tone="secondary">
+          {constellation.emptyCause === "no_agent_steps"
+            ? "This run had no agent steps, so there is nothing to draw here. Its work is in the Flow and Timeline views."
+            : "No agents ran in this run."}
+        </Text>
       </div>
     );
   }
 
   const blocked = l.nodes.filter((n) => n.blocked);
+
+  /*
+   * Say what is NOT in the picture, and only when something is missing.
+   *
+   * A derived single-agent run is complete — one agent, no handoffs to draw,
+   * nothing to warn about, so nothing is said. With two or more derived nodes
+   * the edges between them genuinely were not recorded, and silence would let a
+   * reader conclude the agents never handed off to each other.
+   */
+  const missingEdges = constellation.derived === true && l.nodes.length > 1;
 
   return (
     <div className={cn("grid gap-3", className)}>
@@ -175,6 +166,20 @@ export function AgentsView({
         common "why is nothing happening" question, and burying the answer inside
         a node somebody has to find first is how it stays unanswered. It leads.
       */}
+      {missingEdges ? (
+        <div className="rounded-lg border border-subtle bg-surface-raised p-3">
+          <Text variant="label" tone="secondary" className="block">
+            Handoffs are not shown for this run
+          </Text>
+          <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[70ch]">
+            Each agent below is drawn from its own step record, which is complete
+            — the timings and the cost are what the run actually spent. What was
+            not recorded is which agent handed to which, so the connections
+            between them are absent rather than empty.
+          </Text>
+        </div>
+      ) : null}
+
       {blocked.length > 0 ? (
         <div className="rounded-lg border border-subtle bg-surface-raised p-3">
           <Text variant="label" tone="secondary" className="block">

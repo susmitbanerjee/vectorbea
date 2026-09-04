@@ -121,6 +121,18 @@ export interface Constellation {
    * the correct answer rather than a symptom.
    */
   emptyCause?: "activations_disabled" | "no_agent_steps" | null;
+  /**
+   * The nodes were reconstructed from the ITERATION record, not read from
+   * activation rows.
+   *
+   * NOT a quality warning — the numbers on a derived node are the run's real
+   * numbers. It means one specific thing: handoff EDGES were never recorded, so
+   * a reader looking at two derived nodes must not conclude the agents never
+   * talked to each other.
+   *
+   * With one node there is nothing to say, and the view says nothing.
+   */
+  derived?: boolean;
 }
 
 export interface PlacedNode extends ConstellationNode {

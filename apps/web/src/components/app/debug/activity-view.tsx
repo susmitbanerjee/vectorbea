@@ -10,10 +10,12 @@ import { cn } from "~/lib/cn";
 import { formatDuration } from "~/lib/format";
 import type { ActivationDetail, Iteration, TraceApi } from "~/lib/api/trace";
 import {
-  buildActivity, defaultActivation, stepHealth,
+  buildActivity, defaultActivation, significanceOf, stepHealth,
   type ActivityGroup, type ActivityRow, type ActivityStep,
 } from "./activity";
-import { IterationsView } from "./iterations-view";
+import {
+  BudgetGauges, IterationDetail, IterationsView, ReplayBanner,
+} from "./iterations-view";
 import { TONE } from "./status-vocabulary";
 
 /**
@@ -65,9 +67,14 @@ export function ActivityView({
   const [error, setError] = React.useState<string | null>(null);
   const [activeStep, setActiveStep] = React.useState<string | null>(null);
   const [expert, setExpert] = useExpertMode();
-  /* Which step the reader asked to inspect. Seeds the inspector's opening
-     selection so "Step 8 details" opens step 8 rather than step 1 — otherwise
-     that control is a lie the second time somebody uses it. */
+  /*
+   * The step whose detail is open on the right.
+   *
+   * Held here rather than inside the rail because the detail pane and the rail
+   * are siblings, and because it seeds the expert view's opening selection —
+   * switching to iteration detail must land on the step you were reading, not
+   * back at the first one.
+   */
   const [focus, setFocus] = React.useState<{ stepId: string; iteration: number } | null>(null);
 
   React.useEffect(() => {
@@ -82,6 +89,24 @@ export function ActivityView({
     data?.find((a) => a.stepId === activeStep)
     ?? data?.find((a) => a.stepId === selectedNodeId)
     ?? (data ? defaultActivation(data) : null);
+
+  /*
+   * What the detail pane shows.
+   *
+   * Falls back to the first step the reader would care about rather than to
+   * step 1: opening a failed run on "the agent thought about what to do" wastes
+   * the one glance most people give this screen.
+   */
+  const selected = React.useMemo(() => {
+    if (!activation) return null;
+    if (focus && focus.stepId === activation.stepId) {
+      const hit = activation.iterations.find((i) => i.number === focus.iteration);
+      if (hit) return hit;
+    }
+    return activation.iterations.find((i) => significanceOf(i) === "failure")
+      ?? activation.iterations[0]
+      ?? null;
+  }, [activation, focus]);
 
   if (error) {
     return (
@@ -144,14 +169,54 @@ export function ActivityView({
           onSelectSpan={onSelectSpan}
         />
       ) : activation ? (
-        <Narrative
-          activation={activation}
-          onSelectSpan={onSelectSpan}
-          onInspect={(iteration) => {
-            setFocus({ stepId: activation.stepId, iteration });
-            setExpert(true);
-          }}
-        />
+        /*
+         * ── TWO PANES, NOT A LIST ────────────────────────────────────────
+         *
+         * The first version of this view was a flat list of sentences, and the
+         * feedback was immediate: the old inspector was better, because you
+         * could click a step and read what actually happened in it without
+         * leaving the page. It was only its LABELS that nobody could read —
+         * "Iteration 4 · CALL_TOOL · 2.4s".
+         *
+         * So the layout is the inspector's and the words are the narrative's.
+         * The rail says what the agent did; the pane on the right is the same
+         * detail the inspector always showed, unchanged.
+         */
+        <div className="flex gap-4">
+          <div className="w-80 shrink-0 space-y-3">
+            {activation.replayedFrom && <ReplayBanner note={activation.replayedFrom} />}
+
+            <Narrative
+              activation={activation}
+              selected={selected?.number ?? null}
+              onOpen={(iteration) => {
+                setFocus({ stepId: activation.stepId, iteration: iteration.number });
+                /* Selecting a step selects its span everywhere else in the tab,
+                   so the waterfall and the map follow the story. */
+                const span = iteration.llmCall?.spanId ?? iteration.toolCall?.spanId;
+                if (span) onSelectSpan(span);
+              }}
+            />
+
+            <BudgetGauges budgets={activation.budgets} stopReason={activation.stopReason} />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            {selected ? (
+              <IterationDetail
+                api={api}
+                runId={runId}
+                iteration={selected}
+                diffAgainst={null}
+                selectedSpanId={selectedSpanId}
+              />
+            ) : (
+              <Text variant="body" className="text-fg-secondary">
+                Select a step to see what it sent and what came back.
+              </Text>
+            )}
+          </div>
+        </div>
       ) : null}
     </div>
   );
@@ -210,45 +275,30 @@ function StepCount({ activation }: { activation: ActivationDetail }) {
   );
 }
 
-/* ── The narrative ────────────────────────────────────────────────────────── */
+/* ── The narrative rail ───────────────────────────────────────────────────── */
 
 function Narrative({
-  activation, onSelectSpan, onInspect,
+  activation, selected, onOpen,
 }: {
   activation: ActivationDetail;
-  onSelectSpan: (spanId: string) => void;
-  /** Open the inspector on this step number. */
-  onInspect: (iteration: number) => void;
+  /** The step number whose detail is open, so the rail can mark it. */
+  selected: number | null;
+  onOpen: (iteration: Iteration) => void;
 }) {
   const rows = React.useMemo(() => buildActivity(activation.iterations), [activation]);
 
   return (
-    <>
-      {activation.replayedFrom && (
-        <div className="rounded-sm border border-status-waiting-border bg-status-waiting-subtle px-3 py-2">
-          <Text variant="caption" className="block text-status-waiting">
-            Replayed from the first step
-          </Text>
-          <Text variant="caption" className="mt-0.5 block text-fg-secondary">
-            The previous transcript could not be reused
-            ({activation.replayedFrom.reason.toLowerCase().replace(/_/g, " ")}), so
-            the agent started again. Steps you saw before came from that attempt.
-          </Text>
-        </div>
-      )}
-
-      <ol className="space-y-1" aria-label="What the agent did">
-        {rows.map((row, i) => (
-          <li key={rowKey(row, i)}>
-            {row.kind === "group" ? (
-              <GroupRow group={row} onSelectSpan={onSelectSpan} onInspect={onInspect} />
-            ) : (
-              <StepRow step={row} onSelectSpan={onSelectSpan} onInspect={onInspect} />
-            )}
-          </li>
-        ))}
-      </ol>
-    </>
+    <ol className="space-y-1" aria-label="What the agent did">
+      {rows.map((row, i) => (
+        <li key={rowKey(row, i)}>
+          {row.kind === "group" ? (
+            <GroupRow group={row} selected={selected} onOpen={onOpen} />
+          ) : (
+            <StepRow step={row} selected={selected === row.iteration.number} onOpen={onOpen} />
+          )}
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -257,25 +307,30 @@ function rowKey(row: ActivityRow, i: number): string {
 }
 
 /**
- * One step, as a sentence.
+ * One step, as a sentence you can open.
  *
- * The row is a button because it does something: it selects this step's span
- * everywhere else in the Debug tab, so the waterfall and the map follow the
- * story. The link to the inspector is a second control inside it rather than a
- * modifier on the first — two actions, two targets, both reachable from the
- * keyboard.
+ * ── WHY THE WHOLE ROW IS ONE CONTROL ────────────────────────────────────────
+ * It used to be two: the sentence selected a span, and a separate "Step 8
+ * details" link switched views. Two targets for one intention, and the second
+ * one existed only because the detail lived somewhere else. With the detail
+ * pane beside the rail there is a single thing to do here — read this step —
+ * and a single control that does it.
+ *
+ * The step NUMBER is shown, quietly, in the corner. It is the one piece of the
+ * old vocabulary worth keeping: it is how people refer to a step out loud, and
+ * it is what the expert view is indexed by. What is gone is `CALL_TOOL` as the
+ * headline.
  */
 function StepRow({
-  step, onSelectSpan, onInspect, dense,
+  step, selected, onOpen, dense,
 }: {
   step: ActivityStep;
-  onSelectSpan: (spanId: string) => void;
-  onInspect: (iteration: number) => void;
+  selected: boolean;
+  onOpen: (iteration: Iteration) => void;
   dense?: boolean;
 }) {
   const it = step.iteration;
   const failed = step.significance === "failure";
-  const span = it.llmCall?.spanId ?? it.toolCall?.spanId ?? null;
 
   /*
    * A milestone is LOUDER than a routine step but is not a status.
@@ -292,59 +347,49 @@ function StepRow({
       : { icon: TONE.success.icon, tone: "text-fg-muted" };
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => onOpen(it)}
+      aria-current={selected ? "true" : undefined}
       className={cn(
-        "group flex items-start gap-2 rounded-sm border px-3 py-2 transition-colors",
-        "motion-reduce:transition-none",
+        "flex w-full items-start gap-2 rounded-sm border px-2 py-1.5 text-left",
+        "transition-colors motion-reduce:transition-none",
         failed
           ? "border-2 border-status-failed-border bg-status-failed-subtle"
           : "border-subtle bg-surface-raised hover:border-strong",
-        dense && "border-transparent bg-transparent px-2 py-1",
+        selected && !failed && "border-strong bg-surface-selected",
+        selected && failed && "bg-status-failed-subtle",
+        dense && "border-transparent bg-transparent",
+        "focus-visible:focus-ring-inset",
       )}
     >
-      <Icon
-        icon={glyph.icon}
-        size="sm"
-        decorative
-        className={cn("mt-0.5 shrink-0", glyph.tone)}
-      />
+      <Icon icon={glyph.icon} size="xs" decorative className={cn("mt-1 shrink-0", glyph.tone)} />
 
-      <div className="min-w-0 flex-1">
-        {/*
-         * A step with no span is NOT a disabled control.
-         *
-         * It was a button with `disabled` until this comment: a disabled button
-         * takes its content out of the tab order and hands it to a screen reader
-         * as unavailable — which describes the ACTION correctly and the sentence
-         * beside it not at all. With nothing to select, the sentence is just
-         * text, so it renders as text.
-         *
-         * `as="span"` on the body line for the same class of reason: `Text
-         * variant="body"` renders a <p>, and a paragraph inside a <button> is
-         * invalid content.
-         */}
-        {span ? (
-          <button
-            type="button"
-            onClick={() => onSelectSpan(span)}
-            className={cn(
-              "block w-full text-left",
-              "transition-opacity hover:opacity-90 active:opacity-80",
-              "motion-reduce:transition-none",
-              "focus-visible:focus-ring-inset",
-            )}
-          >
-            <StepText step={step} failed={failed} />
-          </button>
-        ) : (
-          <div className="block w-full">
-            <StepText step={step} failed={failed} />
-          </div>
+      <span className="min-w-0 flex-1">
+        <Text
+          as="span"
+          variant="body-sm"
+          className={cn(
+            "block",
+            failed ? "text-status-failed" : "text-fg-primary",
+            /* A generated sentence is quieter than the agent's own words, so a
+               reader can tell which is a summary the agent wrote and which is
+               one we assembled from what it did. */
+            step.generated && !failed && "text-fg-secondary",
+          )}
+        >
+          {step.headline}
+        </Text>
+
+        {step.outcome && (
+          <Text variant="caption" className="mt-0.5 block text-fg-secondary">
+            {step.outcome}
+          </Text>
         )}
 
-        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
           {it.toolName && (
-            <span className="rounded-xs bg-surface-sunken px-1 py-0.5 text-xs text-fg-secondary">
+            <span className="max-w-full truncate rounded-xs bg-surface-sunken px-1 py-0.5 text-xs text-fg-secondary">
               {it.toolName}
             </span>
           )}
@@ -354,46 +399,13 @@ function StepRow({
             </Text>
           )}
           <Markers iteration={it} />
-          <button
-            type="button"
-            onClick={() => onInspect(it.number)}
-            className={cn(
-              "text-xs text-fg-muted underline-offset-2 hover:text-fg-primary hover:underline",
-              "focus-visible:focus-ring-inset",
-            )}
-          >
-            Step {it.number} details
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
+        </span>
+      </span>
 
-/** The two lines of a step, shared so the linked and unlinked forms cannot drift. */
-function StepText({ step, failed }: { step: ActivityStep; failed: boolean }) {
-  return (
-    <>
-      <Text
-        as="span"
-        variant="body"
-        className={cn(
-          "block",
-          failed ? "text-status-failed" : "text-fg-primary",
-          /* A generated sentence is quieter than the agent's own words: the
-             reader should be able to tell which is a summary the agent wrote and
-             which is one we assembled from what it did. */
-          step.generated && "text-fg-secondary",
-        )}
-      >
-        {step.headline}
-      </Text>
-      {step.outcome && (
-        <Text variant="caption" className="mt-0.5 block text-fg-secondary">
-          {step.outcome}
-        </Text>
-      )}
-    </>
+      <span className="shrink-0 font-mono text-[11px] tabular-nums text-fg-muted">
+        {it.number}
+      </span>
+    </button>
   );
 }
 
@@ -402,31 +414,40 @@ function StepText({ step, failed }: { step: ActivityStep; failed: boolean }) {
  *
  * Closed by default and expandable in place — not a link to somewhere else,
  * because the value of the summary is that the sequence stays in its position in
- * the story.
+ * the story. Opens automatically when the step being read is inside it, so
+ * arriving from a link never lands on a fold with nothing visible.
  */
 function GroupRow({
-  group, onSelectSpan, onInspect,
+  group, selected, onOpen,
 }: {
   group: ActivityGroup;
-  onSelectSpan: (spanId: string) => void;
-  onInspect: (iteration: number) => void;
+  selected: number | null;
+  onOpen: (iteration: Iteration) => void;
 }) {
+  const holdsSelection =
+    selected != null && group.steps.some((s) => s.iteration.number === selected);
   const [open, setOpen] = React.useState(false);
+  const expanded = open || holdsSelection;
 
   return (
     <div className="rounded-sm border border-dashed border-subtle bg-surface-sunken">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
+        aria-expanded={expanded}
         className={cn(
-          "flex w-full items-center gap-2 px-3 py-2 text-left",
+          "flex w-full items-start gap-2 px-2 py-1.5 text-left",
           "focus-visible:focus-ring-inset",
         )}
       >
-        <Icon icon={open ? CaretDown : CaretRight} size="sm" decorative className="shrink-0 text-fg-muted" />
+        <Icon
+          icon={expanded ? CaretDown : CaretRight}
+          size="xs"
+          decorative
+          className="mt-1 shrink-0 text-fg-muted"
+        />
         <span className="min-w-0 flex-1">
-          <Text as="span" variant="body" className="block text-fg-secondary">
+          <Text as="span" variant="body-sm" className="block text-fg-secondary">
             <span className="tabular-nums text-fg-muted">
               {group.range[0] === group.range[1]
                 ? `Step ${group.range[0]}`
@@ -444,14 +465,14 @@ function GroupRow({
         </span>
       </button>
 
-      {open && (
-        <div className="space-y-0.5 border-t border-subtle px-2 py-1">
-          {group.steps.map((s) => (
+      {expanded && (
+        <div className="space-y-0.5 border-t border-subtle px-1 py-1">
+          {group.steps.map((st) => (
             <StepRow
-              key={s.iteration.id}
-              step={s}
-              onSelectSpan={onSelectSpan}
-              onInspect={onInspect}
+              key={st.iteration.id}
+              step={st}
+              selected={selected === st.iteration.number}
+              onOpen={onOpen}
               dense
             />
           ))}
@@ -461,12 +482,12 @@ function GroupRow({
   );
 }
 
-/** "a, b and c" — an Oxford-comma-free list, because this is prose. */
+/** "a, b and c" — a list in prose, not a comma-separated dump. */
 function listOf(items: string[]): string {
   if (items.length === 1) return items[0];
   if (items.length === 2) return `${items[0]} and ${items[1]}`;
   const head = items.slice(0, 3).join(", ");
-  return items.length > 3 ? `${head} and ${items.length - 3} more` : `${head}`;
+  return items.length > 3 ? `${head} and ${items.length - 3} more` : head;
 }
 
 /**
@@ -561,7 +582,10 @@ function ExpertToggle({ value, onChange }: { value: boolean; onChange: (v: boole
         onChange={(e) => onChange(e.target.checked)}
         className="accent-accent size-3.5 shrink-0 rounded-xs outline-none focus-visible:focus-ring"
       />
-      <span className="text-xs text-fg-secondary">Show iteration detail</span>
+      {/* The detail pane is always on screen now, so this no longer offers
+          "detail" — it offers the RAW list: iteration numbers, action types and
+          the prompt diff between any two of them. Named for what it adds. */}
+      <span className="text-xs text-fg-secondary">Raw iteration list</span>
     </label>
   );
 }

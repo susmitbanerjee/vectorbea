@@ -108,16 +108,25 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
 
   return (
     <ReplayProvider run={run} events={data.events} detail={data.detail}>
-      <RunDetailBody run={run} frozen={frozen} incident={data.incident} onCancel={data.cancel} />
+      <RunDetailBody
+        run={run}
+        frozen={frozen}
+        incident={data.incident}
+        onCancel={data.cancel}
+        onRetryStep={data.retryStep}
+        onRetryRun={data.retryRun}
+      />
     </ReplayProvider>
   );
 }
 
-function RunDetailBody({ run, frozen, incident, onCancel }: {
+function RunDetailBody({ run, frozen, incident, onCancel, onRetryStep, onRetryRun }: {
   run: Run;
   frozen: boolean;
   incident: contracts.FailureIncident | null;
   onCancel: () => Promise<void>;
+  onRetryStep: (nodeId: string) => Promise<void>;
+  onRetryRun: () => Promise<void>;
 }) {
   const { select, detail } = useReplay();
   const diagnosis = React.useMemo(
@@ -135,6 +144,8 @@ function RunDetailBody({ run, frozen, incident, onCancel }: {
   const [rightOpen, setRightOpen] = React.useState(true);
   const [cancelling, setCancelling] = React.useState(false);
   const [cancelError, setCancelError] = React.useState<string | null>(null);
+  const [retrying, setRetrying] = React.useState(false);
+  const [retryError, setRetryError] = React.useState<string | null>(null);
 
   const cancelRun = React.useCallback(async () => {
     setCancelling(true);
@@ -147,6 +158,31 @@ function RunDetailBody({ run, frozen, incident, onCancel }: {
       setCancelling(false);
     }
   }, [onCancel]);
+
+  /*
+   * One runner for both retries.
+   *
+   * They differ only in which call they make; the pending flag, the failure
+   * message and the reset are identical, and two copies of that is how one of
+   * them ends up never clearing its spinner.
+   *
+   * The message says what did NOT happen, per the copy rules — a retry that the
+   * API refuses because the run moved on is a legitimate answer, not a fault,
+   * and "Something went wrong" would send somebody looking for a bug.
+   */
+  const runRetry = React.useCallback(async (go: () => Promise<void>) => {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      await go();
+    } catch (error) {
+      setRetryError(
+        error instanceof Error ? error.message : "The run could not be retried.",
+      );
+    } finally {
+      setRetrying(false);
+    }
+  }, []);
 
   const drag = (
     axis: "x" | "y",
@@ -179,6 +215,10 @@ function RunDetailBody({ run, frozen, incident, onCancel }: {
         cancelError={cancelError}
         onCompare={() => setComparing((c) => !c)}
         comparing={comparing}
+        onRetryStep={(nodeId) => void runRetry(() => onRetryStep(nodeId))}
+        onRetryRun={() => void runRetry(onRetryRun)}
+        retrying={retrying}
+        retryError={retryError}
       />
 
       {diagnosis ? (

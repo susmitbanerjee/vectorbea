@@ -79,7 +79,7 @@ class ConstellationRoutes(
     private fun constellation(req: Request): Response {
         val (runId, wsId) = authorizedRun(req)
 
-        val nodes = dataSource.connection.use { conn ->
+        val activationNodes = dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """SELECT a.id, a.parent_activation_id, a.depth, a.status, a.role,
                           a.step_id, a.stop_reason, a.agent_id,
@@ -119,6 +119,31 @@ class ConstellationRoutes(
                 }
             }
         }
+
+        /*
+         * ── WHEN THERE ARE NO ACTIVATION ROWS, DRAW THE AGENT ANYWAY ─────────
+         *
+         * `agent_activations` is written only on the activation path, which is
+         * behind `AGENT_ACTIVATIONS_ENABLED` and off by default — so a perfectly
+         * ordinary single-agent run has iterations and no activation row, and
+         * this view used to answer it with an apology naming an environment
+         * variable. That is the wrong answer twice over: it tells somebody
+         * reading their run about our deployment configuration, and it implies
+         * nothing is known about the agent when in fact everything on this card
+         * is recorded.
+         *
+         * `agent_iterations` carries the agent, the step, the timings and the
+         * budget deltas. So the node is built from that instead — the same run,
+         * the same numbers, from the record that exists.
+         *
+         * WHAT IS NOT INVENTED: the derived node has no `stopReason` (nothing
+         * recorded one) and there are no EDGES, because handoffs live in
+         * `agent_handoffs` and are written on the same path. `derived` travels
+         * with the response so the view can say that rather than let a reader
+         * conclude a multi-agent run had no handoffs.
+         */
+        val derived = activationNodes.isEmpty()
+        val nodes = if (!derived) activationNodes else derivedNodes(runId, wsId)
 
         val edges = dataSource.connection.use { conn ->
             conn.prepareStatement(
@@ -264,6 +289,7 @@ class ConstellationRoutes(
              *                         the flag was off when it ran.
              *   null                  there are nodes; nothing to explain.
              */
+            "derived" to derived,
             "emptyCause" to if (nodesWithCause.isNotEmpty()) null
                             else emptyCause(runId, wsId),
             /*
@@ -964,6 +990,85 @@ class ConstellationRoutes(
      * this run have an agent step at all, and if it did, was the activation path
      * running when it executed.
      */
+    /**
+     * One node per agent step, reconstructed from `agent_iterations`.
+     *
+     * Every column here is recorded, not inferred:
+     *
+     *   status      from the iteration statuses — `failed` if any iteration
+     *               failed, `running` if any is still open, else `ok`. Not read
+     *               from the run: a run can succeed with a failed agent step
+     *               retried after it, and colouring the agent green because the
+     *               run went green is how a debugger loses trust.
+     *   tokens/cost the per-iteration deltas, summed. The same numbers the
+     *               activation path would have written to its budget ledger.
+     *   iterations  a count of rows, which is what the activation's
+     *               `budget_consumed_json->iterations` also is.
+     *
+     * `stopReason` stays NULL. Nothing recorded one on this path, and "completed"
+     * would be a guess presented as a fact.
+     *
+     * Ordered by first activity so the columns read left to right in the order
+     * the run actually executed them.
+     */
+    private fun derivedNodes(runId: java.util.UUID, workspaceId: java.util.UUID): List<Map<String, Any?>> =
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT i.step_id,
+                              i.agent_id,
+                              COALESCE(ag.name, 'agent')                      AS agent_name,
+                              min(i.started_at)                               AS started_at,
+                              max(i.completed_at)                             AS ended_at,
+                              count(*)::int                                   AS iterations,
+                              COALESCE(sum(i.tokens_delta), 0)::bigint        AS tokens,
+                              COALESCE(sum(i.cost_delta_cents), 0)::float     AS cost_cents,
+                              count(*) FILTER (WHERE i.status = 'failed')::int  AS failed,
+                              count(*) FILTER (WHERE i.status = 'running')::int AS running
+                         FROM agent_iterations i
+                         LEFT JOIN agents ag
+                                ON ag.id = i.agent_id
+                               AND ag.workspace_id = i.workspace_id
+                        WHERE i.run_id = ? AND i.workspace_id = ?
+                        GROUP BY i.step_id, i.agent_id, ag.name
+                        ORDER BY min(i.started_at)"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, workspaceId)
+                    st.executeQuery().use { rs ->
+                        val out = mutableListOf<Map<String, Any?>>()
+                        while (rs.next()) {
+                            val stepId = rs.getString("step_id")
+                            out += mapOf(
+                                /* The step id IS the identity here. There is no
+                                   activation uuid to use, and every consumer of
+                                   this field either selects a node or matches an
+                                   edge — and there are no edges. */
+                                "id" to stepId,
+                                "parentId" to null,
+                                "depth" to 0,
+                                "status" to when {
+                                    rs.getInt("failed") > 0 -> "error"
+                                    rs.getInt("running") > 0 -> "running"
+                                    else -> "ok"
+                                },
+                                "role" to "specialist",
+                                "stepId" to stepId,
+                                "stopReason" to null,
+                                "agentId" to rs.getString("agent_id"),
+                                "agentName" to rs.getString("agent_name"),
+                                "startedAt" to rs.getTimestamp("started_at")?.toInstant()?.toString(),
+                                "endedAt" to rs.getTimestamp("ended_at")?.toInstant()?.toString(),
+                                "tokens" to rs.getLong("tokens"),
+                                "costCents" to rs.getDouble("cost_cents"),
+                                "iterations" to rs.getInt("iterations"),
+                            )
+                        }
+                        out
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
+
     private fun emptyCause(runId: java.util.UUID, workspaceId: java.util.UUID): String =
         runCatching {
             dataSource.connection.use { c ->

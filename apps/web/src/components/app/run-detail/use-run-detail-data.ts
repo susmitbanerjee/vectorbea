@@ -47,6 +47,10 @@ export interface RunDetailData {
   error: VectorbeaApiError | null;
   refetch: () => Promise<void>;
   cancel: () => Promise<void>;
+  /** Re-run one failed step, and everything downstream of it. */
+  retryStep: (nodeId: string) => Promise<void>;
+  /** Re-run the whole workflow from the trigger. */
+  retryRun: () => Promise<void>;
   scope: { workspaceId: string | null; environmentId: string | null };
 }
 
@@ -124,6 +128,29 @@ export function useRunDetailData(runId: string): RunDetailData {
     await refetch();
   }, [api, runId, scope, refetch]);
 
+  /*
+   * ── THE TWO RETRIES ──────────────────────────────────────────────────────
+   *
+   * `POST /api/runs/:id/retry-node` and `POST /api/runs/:id/retry` have both
+   * existed since the run routes were written. The header rendered a button for
+   * each and passed neither a handler, so both were affordances that did
+   * nothing — pressed, the page did not even flicker.
+   *
+   * Each refetches afterwards rather than optimistically restating the status:
+   * the API decides whether the run was in a retryable state at all, and
+   * painting "queued" before it answers would show a state the server may
+   * refuse.
+   */
+  const retryStep = React.useCallback(async (nodeId: string) => {
+    await api.runs.retryNode(runId, nodeId, scope);
+    await refetch();
+  }, [api, runId, scope, refetch]);
+
+  const retryRun = React.useCallback(async () => {
+    await api.runs.retry(runId, scope);
+    await refetch();
+  }, [api, runId, scope, refetch]);
+
   return {
     run: uiRun,
     detail: run.data ?? null,
@@ -136,6 +163,8 @@ export function useRunDetailData(runId: string): RunDetailData {
     error: error?.status === 404 ? null : error,
     refetch,
     cancel,
+    retryStep,
+    retryRun,
     scope,
   };
 }

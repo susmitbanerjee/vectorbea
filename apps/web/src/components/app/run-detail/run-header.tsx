@@ -61,12 +61,94 @@ export interface RunHeaderProps {
   cancelError: string | null;
   onCompare: () => void;
   comparing: boolean;
+  /**
+   * Re-run the failed step only, and then everything after it.
+   *
+   * Separate from [onRetryRun] because they cost differently and mean
+   * differently: one resumes, the other starts again and pays for the steps
+   * that already succeeded. The header shows the price of the first for exactly
+   * that reason.
+   */
+  onRetryStep: (nodeId: string) => void;
+  /** Re-run the whole workflow from the trigger. */
+  onRetryRun: () => void;
+  retrying: boolean;
+  retryError: string | null;
 }
 
 export function RunHeader({
   run, retryCostUsd, onCancel, cancelling, cancelError, onCompare, comparing,
+  onRetryStep, onRetryRun, retrying, retryError,
 }: RunHeaderProps) {
   const { setScrub, select, focusIndex, scrubbing } = useReplay();
+  /*
+   * The step "Retry failed step" actually retries.
+   *
+   * The button was rendered whenever the RUN was failed and carried no handler
+   * at all, so it was an affordance that did nothing — the reported symptom.
+   * Wiring it needs a node, and the node is the first failed one: a run stops at
+   * its first failure, so a second failed node only exists on parallel branches,
+   * where the first in graph order is still the one to resume from.
+   *
+   * Null when the run failed with no failed NODE — an infrastructure failure
+   * before any step ran. There is nothing to retry from, so the button does not
+   * render and "Retry from start" is the honest offer.
+   */
+  const failedNode = run.nodes.find((n) => n.state === "failed") ?? null;
+
+  /*
+   * Match the API, which accepts `waiting_for_approval` too.
+   *
+   * The UI offered Cancel only on `running` and `queued`, so a run parked on an
+   * approval — the state most likely to need cancelling, because it can sit
+   * there for days — had no way to stop from this screen even though
+   * `POST /api/runs/:id/cancel` would have accepted it.
+   */
+  const cancellable =
+    run.status === "running" ||
+    run.status === "queued" ||
+    /* The UI's own spelling. `RunStatus` normalises the API's
+       `waiting_for_approval` to `awaiting-approval`, and comparing against the
+       API's wording here compiled to a constant false — a gate that silently
+       never opens is worse than the one it was meant to widen. */
+    run.status === "awaiting-approval";
+
+  const [copied, setCopied] = React.useState(false);
+
+  /**
+   * The run, as a file.
+   *
+   * The button had no handler at all. Built from the run already in memory
+   * rather than by refetching: this is the same object every other panel on the
+   * page is rendering, so what lands in the file is what the reader was looking
+   * at — and an export that disagrees with the screen is worse than none.
+   *
+   * The object URL is revoked immediately; the browser has already read it by
+   * the time `click()` returns, and leaving it would pin the blob for the life
+   * of the document.
+   */
+  const exportRun = React.useCallback(() => {
+    const blob = new Blob([JSON.stringify(run, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `run-${run.id}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [run]);
+
+  const copyLink = React.useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2_000);
+    } catch {
+      /* Clipboard permission denied, or an insecure origin. The URL is in the
+         address bar either way, so there is nothing to recover and nothing
+         worth interrupting the reader about. */
+    }
+  }, []);
+
   const recovered = run.nodes.filter((n) => n.state === "recovered").length;
   const retries = run.nodes.reduce((sum, n) => sum + ((n.attempt ?? 1) - 1), 0);
   const budgetShare = (run.costUsd / POLICY.dailyBudgetUsd) * 100;
@@ -124,15 +206,21 @@ export function RunHeader({
 
         {/* ── Actions ──────────────────────────────────────────────────────── */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {run.status === "failed" ? (
-            <Button size="sm" variant="primary">
+          {run.status === "failed" && failedNode ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => onRetryStep(failedNode.id)}
+              loading={retrying}
+              loadingLabel="Retrying the failed step"
+            >
               Retry failed step
               {retryCostUsd !== null ? (
                 <span className="tabular opacity-80">· {formatCost(retryCostUsd)}</span>
               ) : null}
             </Button>
           ) : null}
-          {run.status === "running" || run.status === "queued" ? (
+          {cancellable ? (
             <Button
               size="sm"
               variant="danger"
@@ -143,7 +231,15 @@ export function RunHeader({
               Cancel
             </Button>
           ) : null}
-          <Button size="sm" variant="secondary">Retry from start</Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onRetryRun}
+            loading={retrying}
+            loadingLabel="Starting the run again"
+          >
+            Retry from start
+          </Button>
           <Button size="sm" variant={comparing ? "subtle" : "secondary"} onClick={onCompare} aria-pressed={comparing}>
             Compare
           </Button>
@@ -167,12 +263,34 @@ export function RunHeader({
           <Button asChild size="sm" variant="secondary">
             <Link href={`/workflows/${run.workflowId}` as Route}>Open workflow</Link>
           </Button>
-          <Button size="sm" variant="ghost" iconOnly aria-label="Export run">
+          <Button
+            size="sm"
+            variant="ghost"
+            iconOnly
+            aria-label="Export run"
+            onClick={exportRun}
+          >
             <DownloadGlyph />
           </Button>
-          <Button size="sm" variant="ghost" iconOnly aria-label="Copy link to this run">
+          <Button
+            size="sm"
+            variant="ghost"
+            iconOnly
+            aria-label={copied ? "Link copied" : "Copy link to this run"}
+            onClick={() => void copyLink()}
+          >
             <ShareGlyph />
           </Button>
+          {/* The confirmation lives here rather than in a toast: the click was
+              on this row and the eye is already on it. */}
+          {copied ? (
+            <Text variant="caption" tone="secondary" aria-live="polite">Link copied</Text>
+          ) : null}
+          {retryError ? (
+            <Text variant="caption" tone="secondary" className="block text-status-failed">
+              {retryError}
+            </Text>
+          ) : null}
           {cancelError ? (
             <Text variant="caption" tone="inherit" className="text-status-failed" role="alert">
               {cancelError}
