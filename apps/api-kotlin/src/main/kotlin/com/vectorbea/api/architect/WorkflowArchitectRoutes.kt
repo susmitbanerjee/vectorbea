@@ -98,7 +98,7 @@ class WorkflowArchitectRoutes(
             throw ApiError.ValidationError("Goal exceeds ${WorkflowArchitectService.MAX_GOAL_LENGTH} chars")
         if (!service.checkBuildLimit(ctx.workspaceId))
             return limitExceededResponse(service.getUsage(ctx.workspaceId))
-        val envId  = ctx.environmentId ?: throw ApiError.ValidationError("X-Environment-Id header is required")
+        val envId  = ctx.requireEnvironmentId()
         val userId = req.principal?.appUserId ?: throw ApiError.Unauthorized("Authentication required")
 
         val session   = try {

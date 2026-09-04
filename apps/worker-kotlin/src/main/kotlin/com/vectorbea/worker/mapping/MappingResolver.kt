@@ -1,8 +1,8 @@
 package com.vectorbea.worker.mapping
 
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
 import java.util.UUID
 
 /**

@@ -34,8 +34,26 @@ object HttpTester {
         val apiKeyHeaderName: String? = null,
         /** Custom health path to append */
         val healthPath: String? = null,
+        /**
+         * Headers the vendor requires on every request.
+         *
+         * Notion is the reason this exists: without `Notion-Version` it answers
+         * 400 to everything, including a request carrying a perfectly valid
+         * integration token, so Notion could not be connected at all.
+         */
+        val extraHeaders: Map<String, String> = emptyMap(),
         /** Extra safe config fields */
         val extraConfig: Map<String, Any?> = emptyMap(),
+        /**
+         * Whether a credential was actually supplied.
+         *
+         * Read only to keep the SUCCESS MESSAGE honest. A probe that reaches an
+         * endpoint without presenting a credential has proven the vendor is up
+         * and nothing whatsoever about the token, and saying "connection
+         * successful" for that is how an expired credential reaches production
+         * with a green tick beside it.
+         */
+        val credentialSupplied: Boolean = false,
     )
 
     fun test(input: HttpTestInput): ConnectionTestResult {
@@ -128,7 +146,15 @@ object HttpTester {
             return testSlackAuth(input, start)
         }
 
-        // Try HEAD first (no response body), fall back to GET
+        // Provider health endpoints often reject HEAD or skip authentication
+        // for it. Use GET when a deliberate health path was configured so the
+        // credential itself is validated (GitHub /user, Gmail profile, etc.).
+        if (!input.healthPath.isNullOrBlank()) {
+            return doRequest(url, "GET", input, start)
+        }
+
+        // Generic endpoints use HEAD first (no response body), then GET if the
+        // transport itself rejects HEAD.
         return try {
             doRequest(url, "HEAD", input, start)
         } catch (_: Exception) {
@@ -170,12 +196,12 @@ object HttpTester {
                     val botName = json["user"]?.toString() ?: "bot"
                     val team    = json["team"]?.toString() ?: ""
                     ConnectionTestResult.connected(latency,
-                        "Slack token valid — $botName @ $team (chat:write scope required to post)")
+                        "Slack token valid - $botName @ $team (chat:write scope required to post)")
                 }
                 json["ok"] == false -> {
                     val error = json["error"]?.toString() ?: "unknown"
                     ConnectionTestResult.failed(latency, "SLACK_AUTH_FAILED",
-                        "Slack token invalid: $error — check your Bot Token in the connection settings")
+                        "Slack token invalid: $error - check your Bot Token in the connection settings")
                 }
                 else ->
                     ConnectionTestResult.failed(latency, "SLACK_UNEXPECTED",
@@ -194,6 +220,8 @@ object HttpTester {
         conn.readTimeout = READ_TIMEOUT_MS
         conn.setRequestProperty("User-Agent", "vectorbee-connection-tester/1.0")
         conn.instanceFollowRedirects = false
+        // Vendor-mandated headers, before auth so auth cannot be overwritten.
+        for ((name, value) in input.extraHeaders) conn.setRequestProperty(name, value)
 
         // ── Apply auth headers server-side — NEVER add to URL ─────────────────
         applyAuth(conn, input)
@@ -205,18 +233,49 @@ object HttpTester {
 
         return when {
             status in 200..299 ->
-                ConnectionTestResult.connected(latency, "HTTP $method $status — endpoint reachable")
+                ConnectionTestResult.connected(
+                    latency,
+                    if (input.credentialSupplied && !input.healthPath.isNullOrBlank())
+                        "HTTP $status - endpoint reachable and the credential was accepted"
+                    else if (input.credentialSupplied)
+                        "HTTP $method $status - endpoint reachable. This URL does not require the " +
+                            "credential, so it was not verified"
+                    else
+                        "HTTP $method $status - endpoint reachable",
+                    details = mapOf(
+                        "credentialVerified" to (input.credentialSupplied && !input.healthPath.isNullOrBlank()),
+                    ),
+                )
             status == 401 ->
-                ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed — check API key")
+                ConnectionTestResult.failed(latency, "AUTH_FAILED", "Authentication failed - check API key")
             status == 403 ->
                 ConnectionTestResult.failed(latency, "AUTH_FAILED", "Endpoint returned 403 Forbidden")
+            status == 404 && !input.healthPath.isNullOrBlank() ->
+                ConnectionTestResult.failed(latency, "ENDPOINT_NOT_FOUND", "Configured test endpoint was not found")
+            /* A 404 with a credential in hand is NOT a pass.
+               It used to report "Endpoint reachable (404)" as CONNECTED, which
+               is true about the host and silent about the token — the endpoint
+               never authenticated anything. An expired key therefore tested
+               green and failed on the first run. The host being up is still
+               worth saying; claiming the credential works is not. */
+            status == 404 && input.credentialSupplied ->
+                ConnectionTestResult.failed(latency, "CREDENTIAL_UNVERIFIED",
+                    "The host answered, but this URL does not authenticate anything, so the " +
+                        "credential was never checked. Point the connection at an endpoint that " +
+                        "requires the credential")
             status == 404 ->
-                // 404 on health path is still a reachable server
-                ConnectionTestResult.connected(latency, "Endpoint reachable (404 — health path not found)")
+                ConnectionTestResult.connected(latency, "Endpoint reachable (404)")
             status == 429 ->
                 ConnectionTestResult.failed(latency, "RATE_LIMITED", "Rate limit exceeded")
+            /* A redirect on a credentialled API call is nearly always a bounce
+               to a sign-in page, which means the credential was NOT accepted.
+               Reporting it as reachable turned a rejected token into a pass. */
+            status in 300..399 && input.credentialSupplied && !input.healthPath.isNullOrBlank() ->
+                ConnectionTestResult.failed(latency, "AUTH_REDIRECT",
+                    "The API redirected instead of answering (HTTP $status), which usually means " +
+                        "the credential was not accepted. Check that the token is still valid")
             status in 300..399 ->
-                ConnectionTestResult.connected(latency, "Endpoint redirects (status=$status) — reachable")
+                ConnectionTestResult.connected(latency, "Endpoint redirects (status=$status) - reachable")
             status in 500..599 ->
                 ConnectionTestResult.failed(latency, "SERVER_ERROR", "Server returned $status")
             else ->
@@ -258,9 +317,9 @@ object HttpTester {
         e.javaClass.name.contains("SSL") || e.javaClass.name.contains("TLS") ->
             "TLS_FAILED" to "TLS/SSL handshake failed"
         e is java.net.UnknownHostException ->
-            "DNS_FAILED" to "DNS resolution failed — check URL"
+            "DNS_FAILED" to "DNS resolution failed - check URL"
         e is java.net.ConnectException ->
-            "CONNECTION_REFUSED" to "Connection refused — check host and port"
+            "CONNECTION_REFUSED" to "Connection refused - check host and port"
         else -> "CONNECTION_ERROR" to "Connection failed"
     }
 }

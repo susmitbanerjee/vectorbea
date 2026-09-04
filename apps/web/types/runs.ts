@@ -157,4 +157,12 @@ export interface RecoverySummary {
   selfCorrectionAttempts: number;
   unresolvedBlockers: string[];
   replaySafeResumeAvailable: boolean;
+  /**
+   * Provider calls recorded for this run.
+   *
+   * Zero means the run cannot be replayed — it predates complete call recording —
+   * and the Replay control is disabled with that explanation rather than offered
+   * and then failing.
+   */
+  recordedModelCalls?: number;
 }

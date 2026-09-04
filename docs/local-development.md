@@ -255,6 +255,64 @@ curl -s -X POST "http://localhost:3000/api/agent-runs/{RUN_ID}/report-usage" \
 
 ---
 
+## Running the Kotlin test suites
+
+There are two tiers, and the difference is whether they need Docker.
+
+```bash
+./gradlew test              # unit — no containers, runs anywhere, ~26s
+./gradlew integrationTest   # everything, including container-backed — ~2m45s
+./gradlew benchmark         # the load measurements, run deliberately
+```
+
+`test` excludes the `integration` tag. `integrationTest` runs both tiers; it is
+what CI runs on merge.
+
+### Getting the containers
+
+Either let Testcontainers start them, or bring them up yourself — the suite
+prefers whatever is already there:
+
+```bash
+docker compose --profile test up -d postgres redis jaeger
+```
+
+then point the suite at them:
+
+```bash
+export TEST_DATABASE_URL="jdbc:postgresql://localhost:5432/vectorbea_test?user=vectorbea&password=vectorbea"
+export TEST_REDIS_URL="redis://localhost:6379"
+export TEST_OTLP_ENDPOINT="http://localhost:4318"
+export TEST_JAEGER_QUERY_URL="http://localhost:16686"
+```
+
+Use a **separate database** (`vectorbea_test`), not the dev one. The compose
+Postgres keeps a named volume, so the dev database is whatever schema you last
+left behind; the suite migrates its own from empty and tracks what it applied in
+`_test_migrations`.
+
+### Integration tests FAIL when the containers are missing
+
+They do not skip. `Infra` throws, naming what is absent and how to get it.
+
+This is deliberate and it is worth understanding why. Every container-backed test
+used to open with `assumeTrue(reachable, "no database — skipping")`, which is a
+PASS on a machine without Postgres — and CI never had one. Five acceptance
+criteria accumulated behind that: real OTLP ingestion, the Redis Lua parity
+check, worker-kill recovery, fan-out starvation, replay fidelity. Nobody was
+ignoring failures, because there were none to ignore.
+
+A red test gets fixed. A green one that never ran does not.
+
+### Windows
+
+Docker Desktop's active context is `desktop-linux`, whose endpoint is
+`dockerDesktopLinuxEngine`; Testcontainers probes the standard
+`npipe:////./pipe/docker_engine`, which Desktop no longer creates, and reports
+"Could not find a valid Docker environment" — which reads as "Docker is not
+installed" when it is running fine. The `integrationTest` task sets `DOCKER_HOST`
+for you on Windows when you have not set your own.
+
 ## Creating a custom mock job
 
 1. **Create the job** via the UI at **/agent-jobs/new**, or via API:

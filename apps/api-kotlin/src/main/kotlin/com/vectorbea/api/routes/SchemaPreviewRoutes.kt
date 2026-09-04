@@ -1,7 +1,9 @@
 package com.vectorbea.api.routes
 
 import com.vectorbea.api.api.context
+import com.vectorbea.api.connector.ConnectionTester
 import com.vectorbea.api.connector.DbSchemaFetcher
+import com.vectorbea.api.connector.DbTester
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
@@ -55,22 +57,30 @@ class SchemaPreviewRoutes(
             val host: String? = null,
             val port: Int? = null,
             val database: String? = null,
+            val config: Map<String, Any?>? = null,
         )
 
         val body = req.bodyAs<Body>()
         val dbType = body.dbType?.trim()?.takeIf { it.isNotBlank() }
             ?: throw ApiError.ValidationError("dbType is required (e.g. postgresql, mysql)")
 
-        val result = fetchSchema(
-            dbType        = dbType,
-            connectionUrl = body.plaintextSecret,
-            password      = null,
-            username      = body.username,
-            host          = body.host,
-            port          = body.port,
-            database      = body.database,
+        /* Resolved through the same function the connection tester uses, so an
+           unsaved preview and an unsaved test read the same string the same way.
+           The explicit fields still win, because on this path the caller typed
+           them into their own form inputs. */
+        val resolved = ConnectionTester.databaseInput(
+            provider = dbType,
+            config = buildMap {
+                putAll(body.config ?: emptyMap())
+                body.username?.let { put("username", it) }
+                body.host?.let { put("host", it) }
+                body.port?.let { put("port", it) }
+                body.database?.let { put("database", it) }
+            },
+            secret = body.plaintextSecret,
         )
-        return Response.ok(result)
+
+        return Response.ok(fetchSchema(resolved))
     }
 
     // ── POST /api/connections/:id/schema-preview (saved connection) ───────────
@@ -111,39 +121,32 @@ class SchemaPreviewRoutes(
                 .readValue(conn.configJson, Map::class.java) as Map<String, Any?>
         } catch (_: Exception) { emptyMap<String, Any?>() }
 
-        val result = fetchSchema(
-            dbType        = conn.provider,
-            connectionUrl = if (secret.startsWith("postgres") || secret.startsWith("jdbc:") || secret.startsWith("mysql")) secret else null,
-            password      = if (!(secret.startsWith("postgres") || secret.startsWith("jdbc:") || secret.startsWith("mysql"))) secret else null,
-            username      = config["username"] as? String ?: config["user"] as? String,
-            host          = config["host"] as? String,
-            port          = (config["port"] as? Number)?.toInt(),
-            database      = config["database"] as? String,
-        )
-        return Response.ok(result)
+        /*
+         * ── THE SAME RESOLVER THE TEST USES ──────────────────────────────────
+         *
+         * This route used to decide for itself what a saved connection meant,
+         * and its copy had drifted from `ConnectionTester.testDatabase`. The
+         * copy never read `config.connectionUrl`, so a connection whose secret
+         * is a bare PASSWORD — the URL living in config — resolved to no URL at
+         * all, fell through to the host/port/database fields it also did not
+         * have, and `resolvePostgresTarget` defaulted to
+         * `jdbc:postgresql://localhost:5432/postgres`. The API dialled its own
+         * loopback, was refused, and told the user to "verify credentials and
+         * network access" for a connection they had just watched turn green.
+         * It dropped `config.db` and `sslRequired` for the same reason.
+         *
+         * One function now answers "what does this connection point at", for
+         * both the test and the preview. They cannot disagree again.
+         */
+        val resolved = ConnectionTester.databaseInput(conn.provider, config, secret)
+        return Response.ok(fetchSchema(resolved))
     }
 
     // ── Shared ────────────────────────────────────────────────────────────────
 
-    private fun fetchSchema(
-        dbType: String,
-        connectionUrl: String?,
-        password: String?,
-        username: String?,
-        host: String?,
-        port: Int?,
-        database: String?,
-    ): Map<String, Any?> {
+    private fun fetchSchema(input: DbTester.DbTestInput): Map<String, Any?> {
         return try {
-            val result = DbSchemaFetcher.fetch(DbSchemaFetcher.SchemaInput(
-                dbType        = dbType,
-                connectionUrl = connectionUrl,
-                password      = password,
-                username      = username,
-                host          = host,
-                port          = port,
-                database      = database,
-            ))
+            val result = DbSchemaFetcher.fetch(DbSchemaFetcher.from(input))
             mapOf(
                 "schemas"      to result.schemas,
                 "tables"       to result.tables.map { t ->
@@ -171,16 +174,29 @@ class SchemaPreviewRoutes(
         } catch (e: UnsupportedOperationException) {
             throw ApiError.ValidationError(e.message ?: "Unsupported database type")
         } catch (e: Exception) {
-            log.warn("Schema preview failed [dbType={}]: {}", dbType, e.javaClass.simpleName)
-            // Sanitize — don't expose connection details in error
-            val msg = when {
-                e.message?.contains("timeout", ignoreCase = true) == true -> "Connection timed out — check host and port"
-                e.message?.contains("password", ignoreCase = true) == true ||
-                e.message?.contains("auth", ignoreCase = true) == true    -> "Authentication failed — check credentials"
-                e.message?.contains("unknown host", ignoreCase = true) == true -> "Host not found — check connection string"
-                else -> "Could not connect to database — verify credentials and network access"
-            }
-            throw ApiError.ValidationError(msg)
+            /*
+             * CLASSIFIED THE WAY THE CONNECTION TEST CLASSIFIES.
+             *
+             * This used to match on `e.message` of the TOP exception only. JDBC
+             * drivers put the useful sentence in a CAUSE — pgjdbc wraps a
+             * `ConnectException` inside a generic `PSQLException` — so almost
+             * every real failure missed all three patterns and fell to
+             * "Could not connect to database — verify credentials and network
+             * access". That one sentence was shown for a refused connection, a
+             * wrong password, an expired certificate and a pooler rejecting a
+             * prepared statement alike, and it named the two things the user had
+             * just proved were fine.
+             *
+             * `DbTester.classifyException` walks twelve levels of cause and reads
+             * the SQLSTATE, and the host guidance beside it is the same sentence
+             * the test screen already gives.
+             */
+            val (code, message) = DbTester.classifyException(e)
+            val guidance = DbTester.hostGuidance(code, DbTester.hostOf(input))
+            log.warn("Schema preview failed [dbType={}, code={}]: {}", input.dbType, code, e.javaClass.simpleName)
+            throw ApiError.ValidationError(
+                if (guidance == null) message else "$message. $guidance"
+            )
         }
     }
 }

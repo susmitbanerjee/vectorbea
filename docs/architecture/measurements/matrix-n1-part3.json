@@ -1,0 +1,118 @@
+{
+  "tag": "n1-part3",
+  "at": "2026-08-19T02:27:11.263Z",
+  "results": [
+    {
+      "scenario": "h",
+      "name": "Saturation — push until degradation",
+      "tag": "n1-part3",
+      "at": "2026-08-19T02:27:11.258Z",
+      "enqueued": 1550,
+      "completed": 1550,
+      "succeeded": 1550,
+      "failed": 0,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 0,
+      "wallClockSeconds": 456.082,
+      "enqueueSeconds": 28.989,
+      "throughputPerSec": 3.398511671146855,
+      "wait": {
+        "n": 1550,
+        "p50": 211.364046,
+        "p95": 409.11184,
+        "p99": 427.082103,
+        "max": 431.074793
+      },
+      "split": null,
+      "fairness": 1.0129870129870129,
+      "completedByTenant": {
+        "loadtest-t01": 78,
+        "loadtest-t02": 78,
+        "loadtest-t03": 78,
+        "loadtest-t04": 78,
+        "loadtest-t05": 78,
+        "loadtest-t06": 78,
+        "loadtest-t07": 78,
+        "loadtest-t08": 78,
+        "loadtest-t09": 78,
+        "loadtest-t10": 78,
+        "loadtest-t11": 77,
+        "loadtest-t12": 77,
+        "loadtest-t13": 77,
+        "loadtest-t14": 77,
+        "loadtest-t15": 77,
+        "loadtest-t16": 77,
+        "loadtest-t17": 77,
+        "loadtest-t18": 77,
+        "loadtest-t19": 77,
+        "loadtest-t20": 77
+      },
+      "peakQueueDepth": 1459,
+      "peakSlotsActive": {
+        "unknown": 0
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 1,
+      "peakTenantClassConcurrency": 1,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 38.833984,
+        "peakMB": 109.30732,
+        "endMB": 68.58092,
+        "slopeMBPerHour": -22.016076326796277
+      },
+      "threads": {
+        "start": 78,
+        "peak": 78,
+        "end": 78
+      },
+      "dbConnections": {
+        "start": 17,
+        "peak": 23,
+        "end": 17,
+        "slopePerHour": -19.503846329774046
+      },
+      "guards": {
+        "throttled": 0,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": 0.025,
+      "samples": 454,
+      "scrapeFailures": 0,
+      "note": null,
+      "steps": [
+        {
+          "size": 50,
+          "enqueueMs": 156
+        },
+        {
+          "size": 100,
+          "enqueueMs": 187
+        },
+        {
+          "size": 200,
+          "enqueueMs": 343
+        },
+        {
+          "size": 400,
+          "enqueueMs": 1135
+        },
+        {
+          "size": 800,
+          "enqueueMs": 1876
+        }
+      ]
+    }
+  ]
+}

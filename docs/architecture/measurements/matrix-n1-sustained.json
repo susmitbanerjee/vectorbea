@@ -1,0 +1,97 @@
+{
+  "tag": "n1-sustained",
+  "at": "2026-08-19T03:00:04.642Z",
+  "results": [
+    {
+      "scenario": "e",
+      "name": "Sustained — 200 concurrent for 30 minutes",
+      "tag": "n1-sustained",
+      "at": "2026-08-19T03:00:04.631Z",
+      "enqueued": 6822,
+      "completed": 6822,
+      "succeeded": 6822,
+      "failed": 0,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 0,
+      "wallClockSeconds": 1865.333,
+      "enqueueSeconds": 1802.739,
+      "throughputPerSec": 3.6572558358212715,
+      "wait": {
+        "n": 6822,
+        "p50": 50.543913,
+        "p95": 57.39774,
+        "p99": 73.057959,
+        "max": 79.016078
+      },
+      "split": null,
+      "fairness": 1.002932551319648,
+      "completedByTenant": {
+        "loadtest-t01": 342,
+        "loadtest-t02": 342,
+        "loadtest-t03": 341,
+        "loadtest-t04": 341,
+        "loadtest-t05": 341,
+        "loadtest-t06": 341,
+        "loadtest-t07": 341,
+        "loadtest-t08": 341,
+        "loadtest-t09": 341,
+        "loadtest-t10": 341,
+        "loadtest-t11": 341,
+        "loadtest-t12": 341,
+        "loadtest-t13": 341,
+        "loadtest-t14": 341,
+        "loadtest-t15": 341,
+        "loadtest-t16": 341,
+        "loadtest-t17": 341,
+        "loadtest-t18": 341,
+        "loadtest-t19": 341,
+        "loadtest-t20": 341
+      },
+      "peakQueueDepth": 200,
+      "peakSlotsActive": {
+        "unknown": 0
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 2,
+      "peakTenantClassConcurrency": 2,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 39.322136,
+        "peakMB": 111.27224,
+        "endMB": 28.643808,
+        "slopeMBPerHour": 4.482926839822119
+      },
+      "threads": {
+        "start": 78,
+        "peak": 81,
+        "end": 78
+      },
+      "dbConnections": {
+        "start": 17,
+        "peak": 25,
+        "end": 17,
+        "slopePerHour": -1.9294238516135414
+      },
+      "guards": {
+        "throttled": 0,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": 0.025,
+      "samples": 1839,
+      "scrapeFailures": 0,
+      "note": "held ~200 in flight for 30min; 6822 runs total (6622 topped up)",
+      "steps": null
+    }
+  ]
+}

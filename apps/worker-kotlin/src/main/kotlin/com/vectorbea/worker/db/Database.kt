@@ -1,5 +1,6 @@
 package com.vectorbea.worker.db
 
+import com.vectorbea.worker.config.OutboundTimeouts
 import com.vectorbea.worker.config.WorkerConfig
 import com.vectorbea.worker.logging.logger
 import com.zaxxer.hikari.HikariConfig
@@ -18,7 +19,20 @@ import javax.sql.DataSource
  *   db.dataSource     // raw DataSource for all DB operations
  *   db.close()        // called in shutdown hook
  */
-class Database private constructor(val dataSource: HikariDataSource) {
+class Database private constructor(
+    /**
+     * The Hikari pool itself. Only `close()` needs it; everything else takes
+     * [dataSource], which is the metered wrapper.
+     */
+    private val pool: HikariDataSource,
+) {
+    /**
+     * The DataSource every caller uses, wrapped so `db_pool_wait_seconds` sees every
+     * connection acquisition rather than the subset someone remembered to instrument.
+     */
+    val dataSource: javax.sql.DataSource = com.vectorbea.observability.db.TimedDataSource(
+        pool, "platform") { s, p -> com.vectorbea.worker.metrics.WorkerMetrics.dbPoolWaitSeconds.observeSeconds(s, p) }
+
 
     private val log = logger()
 
@@ -35,18 +49,18 @@ class Database private constructor(val dataSource: HikariDataSource) {
     }
 
     fun close() {
-        dataSource.close()
+        pool.close()
         log.info("[db] connection pool closed")
     }
 
     companion object {
         private val log = logger("com.vectorbea.worker.db.Database")
 
-        fun create(config: WorkerConfig): Database {
+        fun create(config: WorkerConfig, timeouts: OutboundTimeouts = OutboundTimeouts.fromEnv()): Database {
             log.info("[db] initialising HikariCP pool (maxPoolSize={})", config.dbMaxPoolSize)
 
             // Determine JDBC URL: postgres:// → jdbc:postgresql://
-            val jdbcUrl = when {
+            val rawUrl = when {
                 config.dbUrl.startsWith("jdbc:") -> config.dbUrl
                 config.dbUrl.startsWith("postgresql://") ->
                     "jdbc:postgresql://" + config.dbUrl.removePrefix("postgresql://")
@@ -55,23 +69,39 @@ class Database private constructor(val dataSource: HikariDataSource) {
                 else -> config.dbUrl
             }
 
+            // The platform DB is managed, but it is still reached over the network.
+            // Every worker thread touches it (status transitions, run_events, lease
+            // renewal), so an unbounded read here stalls the whole process — the
+            // same failure mode as a hung tenant DB, with a wider blast radius.
+            val jdbcUrl = JdbcTimeouts.applyTo(rawUrl, "postgresql", timeouts)
+
             val hk = HikariConfig().apply {
                 // jdbcUrl is the secret — not logged by HikariCP when set via property
                 this.jdbcUrl = jdbcUrl
                 driverClassName = "org.postgresql.Driver"
                 poolName = "vectorbea-worker"
                 maximumPoolSize = config.dbMaxPoolSize
-                connectionTimeout = config.dbConnectionTimeoutMs
-                idleTimeout = 600_000L
-                keepaliveTime = 300_000L
-                maxLifetime = 1_800_000L
-                connectionTestQuery = "SELECT 1"
-                isRegisterMbeans = false
-                leakDetectionThreshold = 60_000L
+                keepaliveTime = timeouts.platformPoolKeepaliveMs
+                // connectionTestQuery is intentionally unset — see JdbcTimeouts.applyPoolBounds.
             }
+            JdbcTimeouts.applyPoolBounds(
+                cfg = hk,
+                t = timeouts,
+                connectionTimeoutMs = config.dbConnectionTimeoutMs,
+                idleTimeoutMs = 600_000L,
+                maxLifetimeMs = 1_800_000L,
+                validationTimeoutMs = timeouts.platformPoolValidationTimeoutMs,
+                leakDetectionMs = 60_000L,
+            )
 
             val ds = HikariDataSource(hk)
-            log.info("[db] HikariCP pool ready")
+            log.info(
+                "[db] HikariCP pool ready — driver: {} | hikari: connectionTimeout={}ms validationTimeout={}ms " +
+                    "keepalive={}ms maxLifetime={}ms leakDetection={}ms",
+                JdbcTimeouts.paramsFor("postgresql", timeouts).entries.joinToString(" ") { (k, v) -> "$k=$v" },
+                config.dbConnectionTimeoutMs, hk.validationTimeout,
+                timeouts.platformPoolKeepaliveMs, 1_800_000L, 60_000L,
+            )
             return Database(ds)
         }
 

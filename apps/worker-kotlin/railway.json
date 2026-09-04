@@ -2,8 +2,8 @@
   "$schema": "https://railway.app/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile",
-    "watchPatterns": ["apps/worker-kotlin/**"]
+    "dockerfilePath": "apps/worker-kotlin/Dockerfile",
+    "watchPatterns": ["apps/worker-kotlin/**", "packages/observability-kotlin/**", "packages/graph-kotlin/**"]
   },
   "deploy": {
     "restartPolicyType": "ON_FAILURE",

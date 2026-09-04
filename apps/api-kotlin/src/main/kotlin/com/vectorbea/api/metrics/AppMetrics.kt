@@ -41,6 +41,19 @@ object AppMetrics {
         "operation",
     )
 
+    /**
+     * §5.4: `db_pool_wait_seconds`. Registered in the SHARED registry, not this one.
+     *
+     * The API's local Counter/Gauge/Histogram predate observability-kotlin and are still
+     * what the rest of this file uses. New metrics go to the shared registry so the API
+     * and the worker render them identically - in particular in seconds, where the local
+     * histogram is in milliseconds. Both registries are rendered by MetricsRoutes.
+     *
+     * The remaining local metrics are a migration, not a design; see D35.
+     */
+    val dbPoolWaitSeconds = com.vectorbea.observability.metrics.secondsHistogram(
+        "db_pool_wait_seconds", "Time waiting to acquire a pooled connection", "pool")
+
     // ── Redis metrics ─────────────────────────────────────────────────────────
 
     /** Redis command duration in milliseconds. Labels: command */
@@ -71,6 +84,20 @@ object AppMetrics {
         "api_redis_stream_input_omitted_total",
         "Queue messages where oversized inputJson was omitted (worker loads it from DB)",
         "job_type",
+    )
+
+    /**
+     * Enqueues by typed stream. Labels: execution_class, job_type.
+     *
+     * This is the producer half of the typed-queue contract, and the series to
+     * compare against the worker's per-class consumption: a class whose enqueue
+     * rate consistently exceeds its completion rate is a pool that needs slots,
+     * and now that is visible without inferring it from an untyped backlog.
+     */
+    val enqueuedByClass: Counter = counter(
+        "api_runs_enqueued_by_class_total",
+        "Runs enqueued, by execution class and job type",
+        "execution_class", "job_type",
     )
 
     // ── Workflow run state gauges ─────────────────────────────────────────────

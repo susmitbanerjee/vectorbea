@@ -1,7 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 
 /**
  * Executor for JOIN nodes.
@@ -15,7 +15,7 @@ import com.vectorbea.worker.runtime.graph.WorkflowNode
  * join policy is satisfied (e.g., all branches have completed for wait_all).
  */
 class JoinNodeExecutor : NodeExecutor {
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

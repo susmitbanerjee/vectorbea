@@ -16,6 +16,7 @@ data class Workflow(
     val name: String,
     val slug: String,
     val description: String?,
+    val creationMode: String,
     val status: String,
     val currentVersionId: UUID?,
     val createdAt: Instant,
@@ -28,6 +29,7 @@ data class CreateWorkflowRequest(
     val name: String,
     val slug: String,
     val description: String? = null,
+    val creationMode: String = "native",
     val status: String = "draft",
 )
 
@@ -77,7 +79,7 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
     override val log = LoggerFactory.getLogger(WorkflowRepository::class.java)
 
     private val cols = """
-        id, workspace_id, environment_id, name, slug, description,
+        id, workspace_id, environment_id, name, slug, description, creation_mode,
         status, current_version_id, created_at, updated_at
     """.trimIndent()
 
@@ -178,8 +180,8 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
 
     fun create(req: CreateWorkflowRequest): Workflow = executeReturning(
         """
-        INSERT INTO workflows (workspace_id, environment_id, name, slug, description, status)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO workflows (workspace_id, environment_id, name, slug, description, creation_mode, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -188,7 +190,8 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
             setString(3, req.name)
             setString(4, req.slug)
             setString(5, req.description)
-            setString(6, req.status)
+            setString(6, req.creationMode)
+            setString(7, req.status)
         },
         ::mapRow,
     )
@@ -233,6 +236,36 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
         { setUuid(1, versionId) },
         ::mapVersionRow,
     )
+
+    // ── Execution class memo (V020) ───────────────────────────────────────────
+    //
+    // A version's graph is immutable, so its execution class is too. These two
+    // methods are the durable half of the classification memo: computed once by
+    // whichever API instance first triggers the version, then read by every
+    // other instance — including cold ones with an empty in-process cache.
+    // Deliberately narrow reads/writes of a single column rather than going
+    // through the full version row, since this sits on the trigger hot path.
+
+    /** Persisted class for [versionId], or null when it has never been classified. */
+    fun findVersionExecutionClass(versionId: UUID): String? = queryOne(
+        "SELECT execution_class FROM workflow_versions WHERE id = ?",
+        { setUuid(1, versionId) },
+    ) { rs -> rs.getString("execution_class") }
+
+    /**
+     * Memoise [executionClass] for [versionId].
+     *
+     * `IS NULL` in the predicate makes this write-once: two instances racing on
+     * the first trigger of a version both compute the same value (the classifier
+     * is pure), and the loser's UPDATE simply affects zero rows.
+     */
+    fun setVersionExecutionClass(versionId: UUID, executionClass: String): Boolean =
+        execute(
+            "UPDATE workflow_versions SET execution_class = ? WHERE id = ? AND execution_class IS NULL"
+        ) {
+            setString(1, executionClass)
+            setUuid(2, versionId)
+        } > 0
 
     fun listVersions(workflowId: UUID, params: PageParams = PageParams()): Page<WorkflowVersion> = queryPage(
         sql = "SELECT $vCols FROM workflow_versions WHERE workflow_id = ? ORDER BY version DESC",
@@ -282,6 +315,7 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
         name = rs.getString("name"),
         slug = rs.getString("slug"),
         description = rs.getString("description"),
+        creationMode = rs.getString("creation_mode"),
         status = rs.getString("status"),
         currentVersionId = rs.uuidOrNull("current_version_id"),
         createdAt = rs.instant("created_at"),

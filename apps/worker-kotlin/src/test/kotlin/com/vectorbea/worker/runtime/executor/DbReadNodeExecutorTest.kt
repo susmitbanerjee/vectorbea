@@ -1,13 +1,15 @@
 package com.vectorbea.worker.runtime.executor
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.connector.ConnectionRecord
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.ResolvedConnection
 import com.vectorbea.worker.connector.pool.ClientDbPoolManager
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.sql.*
@@ -64,7 +66,7 @@ class DbReadNodeExecutorTest {
     // ── Query validation ──────────────────────────────────────────────────────
 
     @Test
-    fun `rejects INSERT statement`() {
+    fun `rejects INSERT statement`(): Unit = runBlocking {
         val executor = DbReadNodeExecutor(stubResolver(connectionRecord()), StubPoolManager(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "db_query",
             config = mapOf(
@@ -77,7 +79,7 @@ class DbReadNodeExecutorTest {
     }
 
     @Test
-    fun `rejects UPDATE statement`() {
+    fun `rejects UPDATE statement`(): Unit = runBlocking {
         val executor = DbReadNodeExecutor(stubResolver(connectionRecord()), StubPoolManager(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "db_query",
             config = mapOf(
@@ -89,7 +91,7 @@ class DbReadNodeExecutorTest {
     }
 
     @Test
-    fun `rejects multi-statement SQL`() {
+    fun `rejects multi-statement SQL`(): Unit = runBlocking {
         val executor = DbReadNodeExecutor(stubResolver(connectionRecord()), StubPoolManager(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "db_query",
             config = mapOf(
@@ -102,7 +104,7 @@ class DbReadNodeExecutorTest {
     }
 
     @Test
-    fun `rejects query referencing non-allowed table`() {
+    fun `rejects query referencing non-allowed table`(): Unit = runBlocking {
         val record   = connectionRecord(allowedTables = listOf("orders"))
         val executor = DbReadNodeExecutor(stubResolver(record), StubPoolManager(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "db_query",
@@ -116,7 +118,7 @@ class DbReadNodeExecutorTest {
     }
 
     @Test
-    fun `accepts SELECT query when table in allowedTables`() {
+    fun `accepts SELECT query when table in allowedTables`(): Unit = runBlocking {
         val record   = connectionRecord(allowedTables = listOf("users"))
         // Use a pool manager that returns in-memory rows
         val rows     = listOf(mapOf("id" to 1, "name" to "Alice"))
@@ -138,7 +140,7 @@ class DbReadNodeExecutorTest {
     // ── Missing connectionId ──────────────────────────────────────────────────
 
     @Test
-    fun `returns Failed when connectionId missing`() {
+    fun `returns Failed when connectionId missing`(): Unit = runBlocking {
         val executor = DbReadNodeExecutor(stubResolver(connectionRecord()), StubPoolManager(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "db_query",
             config = mapOf("query" to "SELECT 1"))
@@ -150,7 +152,7 @@ class DbReadNodeExecutorTest {
     // ── Missing query ─────────────────────────────────────────────────────────
 
     @Test
-    fun `returns Failed when query missing`() {
+    fun `returns Failed when query missing`(): Unit = runBlocking {
         val executor = DbReadNodeExecutor(stubResolver(connectionRecord()), StubPoolManager(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "db_query",
             config = mapOf("connectionId" to UUID.randomUUID().toString()))

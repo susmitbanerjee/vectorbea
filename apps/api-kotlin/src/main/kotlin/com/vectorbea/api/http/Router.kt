@@ -31,6 +31,16 @@ class Router {
 
     private val routes = mutableListOf<Route>()
 
+    /**
+     * Authorization hook, invoked with the MATCHED route pattern before the
+     * handler runs. Throws [ApiError.Forbidden] to refuse.
+     *
+     * A hook rather than a direct dependency: the router stays a pure
+     * path-and-method matcher with no idea what a workspace role is, and the
+     * policy lives in the auth package where it can be read as policy.
+     */
+    var authorize: ((Request, String, String) -> Unit)? = null
+
     /** Register a route for [method] + [pathPattern]. */
     fun route(method: String, pathPattern: String, handler: (Request) -> Response) {
         routes += Route(
@@ -120,6 +130,12 @@ class Router {
             // Extract path params and dispatch
             val pathParams = matchPath(methodMatch.segments, pathSegments)!!
             val enrichedRequest = request.copy(pathParams = pathParams)
+            // Authorization runs on the MATCHED ROUTE PATTERN, not the concrete
+            // path, so the policy keys off `/api/agents/:id` rather than a UUID.
+            // Placed here so a route cannot be registered without passing
+            // through it — the reason the previous per-handler approach left
+            // every write unguarded.
+            authorize?.invoke(enrichedRequest, methodMatch.method, methodMatch.pathPattern)
             methodMatch.handler(enrichedRequest)
         } catch (e: ApiError) {
             Response.fromApiError(e, request.requestId)

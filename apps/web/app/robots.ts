@@ -14,6 +14,7 @@ import { SITE, absoluteUrl } from "@/lib/seo";
 // with the (app) route group and the standalone auth pages.
 const PRIVATE_PREFIXES = [
   "/api/",
+  "/control",
   "/dashboard",
   "/workflows",
   "/runs",

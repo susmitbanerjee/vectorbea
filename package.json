@@ -20,8 +20,8 @@
     "dev:infra:stop": "docker compose stop postgres redis",
     "dev:infra:down": "docker compose down",
 
-    "build:api": "bash -c 'cd apps/api-kotlin && gradle fatJar --no-daemon --console=plain'",
-    "build:worker": "bash -c 'cd apps/worker-kotlin && gradle fatJar --no-daemon --console=plain'",
+    "build:api": "node scripts/run-gradle.mjs apps/api-kotlin fatJar --no-daemon --console=plain",
+    "build:worker": "node scripts/run-gradle.mjs apps/worker-kotlin fatJar --no-daemon --console=plain",
     "build:web": "npm run build --workspace=apps/web",
     "build": "npm run build:api && npm run build:worker && npm run build:web",
 
@@ -39,6 +39,9 @@
     "db:studio": "prisma studio --schema prisma/schema.prisma",
     "db:generate": "prisma generate --schema prisma/schema.prisma",
     "db:reset": "prisma migrate reset --schema prisma/schema.prisma --force",
+
+    "verify:screen": "node scripts/verify/verify-screen.ts",
+    "check:fixtures": "node scripts/check-fixtures.mjs",
 
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",

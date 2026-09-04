@@ -1,218 +1,308 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import * as React from "react";
 import Link from "next/link";
-import { CheckCircle2, Loader2, XCircle, LogIn } from "lucide-react";
-import { createBrowserClient } from "@supabase/ssr";
+import type { Route } from "next";
+import { useRouter, useSearchParams } from "next/navigation";
 
-type State =
-  | { phase: "loading" }
-  | { phase: "needs_auth"; token: string }
-  | { phase: "accepting" }
-  | { phase: "success"; workspaceId: string; role: string }
-  | { phase: "error"; message: string };
+import { Button } from "~/components/ui/button";
+import { Text } from "~/components/ui/text";
+import { Wordmark } from "~/components/app/shell/wordmark";
+import { cn } from "~/lib/cn";
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   ACCEPT AN INVITATION
+
+   THIS PAGE RAN ON SUPABASE BROWSER AUTH. It built a `createBrowserClient` from
+   `NEXT_PUBLIC_SUPABASE_URL`, asked it for a session, and sent that session's
+   token to the API. This product's sessions are its own HS256 cookie — Supabase
+   never issues one — so `getSession()` returned null forever and the page
+   either sat on "Sign in to accept" or failed. Worse, on ANY failure it printed
+   a fixed paragraph: "the link has expired, was already accepted, or was
+   revoked". That sentence is why a freshly issued invitation reported itself as
+   expired: the page was guessing, and guessing wrong, about a request that had
+   failed for an unrelated reason.
+
+   IT NO LONGER ACCEPTS ON LOAD. Redeeming is single-use, so it is now a button.
+   A page that POSTs on mount hands the one-shot token to whatever opens the URL
+   first — a mail gateway's link scanner, a prefetch, a preview pane — and the
+   invitee then finds a link that has already been used.
+
+   The reason a link does not work comes from the server, one sentence per
+   cause, so nobody is left choosing between three explanations.
+══════════════════════════════════════════════════════════════════════════════ */
+
+type Role = "owner" | "admin" | "developer" | "viewer";
+
+interface ValidPreview {
+  valid: true;
+  workspaceName: string;
+  role: Role;
+  inviterName: string;
+  invitedEmail: string;
+  expiresAt: string;
+  viewer: { email: string | null } | null;
+  emailMatches: boolean | null;
+}
+
+interface InvalidPreview {
+  valid: false;
+  reason: "expired" | "accepted" | "revoked" | "unknown";
+  message: string;
+}
+
+type Preview = ValidPreview | InvalidPreview;
+
+const ROLE_SUMMARY: Record<Role, string> = {
+  owner: "full control, including billing and deleting the workspace",
+  admin: "manage members, settings and connections",
+  developer: "build and run workflows",
+  viewer: "read-only access across the workspace",
+};
+
+const ROLE_LABEL: Record<Role, string> = {
+  owner: "Owner", admin: "Admin", developer: "Developer", viewer: "Viewer",
+};
 
 export default function AcceptInvitePage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [state, setState] = useState<State>({ phase: "loading" });
+  const token = searchParams.get("token");
 
-  useEffect(() => {
-    const token = searchParams.get("token");
+  const [preview, setPreview] = React.useState<Preview | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [accepting, setAccepting] = React.useState(false);
+  const [failure, setFailure] = React.useState<string | null>(null);
+  const [joined, setJoined] = React.useState<{ workspaceId: string; role: Role } | null>(null);
+
+  React.useEffect(() => {
     if (!token) {
-      setState({ phase: "error", message: "No invitation token found in the URL." });
+      setPreview({ valid: false, reason: "unknown", message: "This link is missing its invitation token. Check you copied the whole link." });
+      setLoading(false);
       return;
     }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/auth/accept-invite?token=${encodeURIComponent(token)}`, { cache: "no-store" });
+        // The wire shape is one of the two union arms, or an error envelope
+        // from the generic handler. Narrowed on `valid` rather than cast, so a
+        // response the server never sends cannot slip through as a preview.
+        const json = (await response.json()) as
+          | ValidPreview
+          | InvalidPreview
+          | { valid?: undefined; error?: string };
+        if (cancelled) return;
+        setPreview(
+          json.valid === undefined
+            ? { valid: false, reason: "unknown", message: json.error ?? "This invitation could not be read." }
+            : json,
+        );
+      } catch {
+        if (!cancelled) {
+          setPreview({ valid: false, reason: "unknown", message: "The invitation could not be checked. Your connection may be offline — try again." });
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token]);
 
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    );
-
-    async function run() {
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session) {
-        // Store token in sessionStorage so we can continue after login
-        sessionStorage.setItem("pending_invite_token", token!);
-        setState({ phase: "needs_auth", token: token! });
+  async function accept() {
+    if (!token) return;
+    setAccepting(true);
+    setFailure(null);
+    try {
+      const response = await fetch("/api/auth/accept-invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token }),
+      });
+      const json = (await response.json()) as { workspaceId?: string; role?: Role; error?: string };
+      if (!response.ok) {
+        setFailure(json.error ?? "The invitation could not be accepted.");
         return;
       }
-
-      setState({ phase: "accepting" });
-
-      try {
-        const res = await fetch("/api/auth/accept-invite", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ token }),
-        });
-        const json = await res.json() as { workspaceId?: string; role?: string; error?: string };
-
-        if (!res.ok) {
-          setState({ phase: "error", message: json.error ?? "Failed to accept invitation." });
-          return;
-        }
-
-        // Clear any pending token
-        sessionStorage.removeItem("pending_invite_token");
-
-        setState({
-          phase: "success",
-          workspaceId: json.workspaceId ?? "",
-          role: json.role ?? "editor",
-        });
-
-        // Redirect after a short delay
-        setTimeout(() => {
-          const destination = json.workspaceId
-            ? `/?org=${encodeURIComponent(json.workspaceId)}`
-            : "/";
-          router.push(destination as Parameters<typeof router.push>[0]);
-        }, 2500);
-      } catch {
-        setState({ phase: "error", message: "Network error. Please try again." });
-      }
+      setJoined({ workspaceId: json.workspaceId ?? "", role: json.role ?? "viewer" });
+      // Straight in, no timed redirect: a countdown on a page whose only job is
+      // done is a delay, not a confirmation.
+      router.replace(
+        (json.workspaceId ? `/control?org=${encodeURIComponent(json.workspaceId)}` : "/control") as Route,
+      );
+      router.refresh();
+    } catch {
+      setFailure("The request did not complete. Check your connection and try again.");
+    } finally {
+      setAccepting(false);
     }
+  }
 
-    void run();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // After login, continue with stored token
-  useEffect(() => {
-    const stored = sessionStorage.getItem("pending_invite_token");
-    if (!stored || state.phase !== "needs_auth") return;
-
-    const supabase = createBrowserClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    );
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session) {
-        subscription.unsubscribe();
-        setState({ phase: "accepting" });
-        fetch("/api/auth/accept-invite", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${session.access_token}`,
-          },
-          body: JSON.stringify({ token: stored }),
-        })
-          .then((r) => r.json() as Promise<{ workspaceId?: string; role?: string; error?: string }>)
-          .then((json) => {
-            sessionStorage.removeItem("pending_invite_token");
-            if (json.error) {
-              setState({ phase: "error", message: json.error });
-            } else {
-              setState({ phase: "success", workspaceId: json.workspaceId ?? "", role: json.role ?? "editor" });
-              setTimeout(() => {
-                router.push(
-                  json.workspaceId
-                    ? `/?org=${encodeURIComponent(json.workspaceId)}` as Parameters<typeof router.push>[0]
-                    : "/" as Parameters<typeof router.push>[0],
-                );
-              }, 2500);
-            }
-          })
-          .catch(() => setState({ phase: "error", message: "Network error. Please try again." }));
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.phase]);
+  const next = token ? `/auth/accept-invite?token=${encodeURIComponent(token)}` : "/";
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 shadow-xl text-center space-y-5">
-        {/* Logo wordmark */}
-        <div className="mb-2">
-          <span className="text-lg font-bold tracking-tight text-foreground">VectorBea</span>
-          <p className="text-[11px] text-muted-foreground uppercase tracking-widest mt-0.5">AI Release Control</p>
+    <main className="bg-canvas grid min-h-screen place-items-center px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-5 flex justify-center">
+          <Wordmark />
         </div>
 
-        {state.phase === "loading" && (
-          <>
-            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
-            <p className="text-sm text-muted-foreground">Validating invitation…</p>
-          </>
-        )}
+        <section className="border-subtle bg-surface-base rounded-xl border p-6 shadow-2">
+          {loading ? <PreviewSkeleton /> : null}
 
-        {state.phase === "needs_auth" && (
-          <>
-            <div className="flex h-14 w-14 mx-auto items-center justify-center rounded-2xl border border-primary/30 bg-primary/10">
-              <LogIn className="h-6 w-6 text-primary" />
-            </div>
-            <h1 className="text-xl font-bold">Sign in to accept</h1>
-            <p className="text-sm text-muted-foreground">
-              Sign in to your VectorBea account to accept this workspace invitation. You&apos;ll be redirected back automatically.
-            </p>
-            <Link
-              href={`/login?next=${encodeURIComponent(`/auth/accept-invite?token=${state.token}`)}`}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground shadow hover:bg-primary/90 transition-colors"
-            >
-              <LogIn className="h-4 w-4" />
-              Sign in to continue
-            </Link>
-            <p className="text-xs text-muted-foreground">
-              Don&apos;t have an account?{" "}
-              <Link href={`/signup?next=${encodeURIComponent(`/auth/accept-invite?token=${state.token}`)}`} className="text-primary hover:underline">
-                Create one for free
-              </Link>
-            </p>
-          </>
-        )}
+          {!loading && preview && !preview.valid ? (
+            <Invalid message={preview.message} reason={preview.reason} />
+          ) : null}
 
-        {state.phase === "accepting" && (
-          <>
-            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
-            <h1 className="text-xl font-bold">Accepting invitation…</h1>
-            <p className="text-sm text-muted-foreground">Adding you to the workspace.</p>
-          </>
-        )}
+          {!loading && preview?.valid && joined ? (
+            <Centred
+              tone="success"
+              title={`You have joined ${preview.workspaceName}`}
+              body="Taking you to the workspace now."
+            />
+          ) : null}
 
-        {state.phase === "success" && (
-          <>
-            <div className="flex h-14 w-14 mx-auto items-center justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/10">
-              <CheckCircle2 className="h-7 w-7 text-emerald-400" />
-            </div>
-            <h1 className="text-xl font-bold text-emerald-400">Invitation accepted!</h1>
-            <p className="text-sm text-muted-foreground">
-              You&apos;ve joined the workspace as <strong className="text-foreground capitalize">{state.role}</strong>. Redirecting you now…
-            </p>
-            <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-              <div className="h-full bg-emerald-500 animate-[grow_2.5s_linear_forwards]" style={{ width: "100%" }} />
-            </div>
-          </>
-        )}
+          {!loading && preview?.valid && !joined ? (
+            <div className="grid gap-4">
+              <div>
+                <Text variant="eyebrow" tone="muted" className="block">Workspace invitation</Text>
+                <Text variant="heading-md" tone="max" as="h1" className="mt-1 block">
+                  Join {preview.workspaceName}
+                </Text>
+                <Text variant="body-sm" tone="secondary" className="mt-1.5 block leading-snug">
+                  {preview.inviterName} invited{" "}
+                  <strong className="text-fg-primary">{preview.invitedEmail}</strong> as{" "}
+                  <strong className="text-fg-primary">{ROLE_LABEL[preview.role]}</strong> —{" "}
+                  {ROLE_SUMMARY[preview.role]}.
+                </Text>
+              </div>
 
-        {state.phase === "error" && (
-          <>
-            <div className="flex h-14 w-14 mx-auto items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10">
-              <XCircle className="h-7 w-7 text-red-400" />
+              {preview.viewer === null ? (
+                <>
+                  <Note>
+                    Sign in as {preview.invitedEmail} to accept. If you do not have an account yet, create
+                    one with that address and you will come straight back here.
+                  </Note>
+                  <div className="grid gap-2">
+                    <Button asChild size="md" variant="primary" fullWidth>
+                      <Link href={`/signin?next=${encodeURIComponent(next)}` as Route}>Sign in to accept</Link>
+                    </Button>
+                    <Button asChild size="md" variant="secondary" fullWidth>
+                      <Link href={`/signup?next=${encodeURIComponent(next)}` as Route}>Create an account</Link>
+                    </Button>
+                  </div>
+                </>
+              ) : preview.emailMatches === false ? (
+                <>
+                  <Note tone="waiting">
+                    You are signed in as <strong>{preview.viewer.email}</strong>, but this invitation was
+                    sent to <strong>{preview.invitedEmail}</strong>. Sign in as that address to accept it.
+                  </Note>
+                  <Button asChild size="md" variant="primary" fullWidth>
+                    <Link href={`/signin?next=${encodeURIComponent(next)}` as Route}>
+                      Sign in as {preview.invitedEmail}
+                    </Link>
+                  </Button>
+                </>
+              ) : (
+                <>
+                  {failure ? <Note tone="failed">{failure}</Note> : null}
+                  <Button
+                    size="md"
+                    variant="primary"
+                    fullWidth
+                    loading={accepting}
+                    loadingLabel="Joining"
+                    onClick={() => void accept()}
+                  >
+                    Accept invitation
+                  </Button>
+                  <Text variant="caption" tone="muted" className="block text-center leading-snug">
+                    Expires {new Date(preview.expiresAt).toLocaleDateString()}. Accepting adds you to this
+                    workspace and is recorded in its audit log.
+                  </Text>
+                </>
+              )}
             </div>
-            <h1 className="text-xl font-bold text-red-400">Invitation invalid</h1>
-            <p className="text-sm text-muted-foreground">{state.message}</p>
-            <p className="text-xs text-muted-foreground">
-              Possible reasons: the link has expired, was already accepted, or was revoked.
-              Contact the person who invited you to request a new invitation.
-            </p>
-            <Link
-              href="/"
-              className="inline-flex w-full items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold shadow-sm hover:bg-accent/40 transition-colors"
-            >
-              Go to dashboard
-            </Link>
-          </>
-        )}
+          ) : null}
+        </section>
       </div>
+    </main>
+  );
+}
+
+/* ── Pieces ───────────────────────────────────────────────────────────────── */
+
+function Invalid({ message, reason }: { message: string; reason: InvalidPreview["reason"] }) {
+  return (
+    <div className="grid gap-4 text-center">
+      <div>
+        <Text variant="heading-sm" tone="max" as="h1" className="block">
+          {reason === "accepted" ? "This invitation has been used" : "This invitation is not valid"}
+        </Text>
+        <Text variant="body-sm" tone="secondary" className="mt-1.5 block leading-snug">{message}</Text>
+      </div>
+      <Button asChild size="md" variant="secondary" fullWidth>
+        <Link href={"/control" as Route}>Go to Vectorbea</Link>
+      </Button>
+    </div>
+  );
+}
+
+function Centred({ tone, title, body }: { tone: "success"; title: string; body: string }) {
+  return (
+    <div className="grid gap-2 text-center">
+      <Text
+        variant="heading-sm"
+        tone="inherit"
+        as="p"
+        className={cn("block", tone === "success" && "text-status-success")}
+      >
+        {title}
+      </Text>
+      <Text variant="body-sm" tone="secondary" className="block">{body}</Text>
+    </div>
+  );
+}
+
+function Note({
+  children, tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "waiting" | "failed";
+}) {
+  return (
+    <div
+      role={tone === "failed" ? "alert" : "status"}
+      className={cn(
+        "rounded-md border px-3 py-2",
+        tone === "failed" ? "border-status-failed-border bg-status-failed-subtle"
+          : tone === "waiting" ? "border-status-waiting-border bg-status-waiting-subtle"
+            : "border-subtle bg-surface-sunken",
+      )}
+    >
+      <Text
+        variant="caption"
+        tone={tone === "neutral" ? "secondary" : "inherit"}
+        className={cn(
+          "block leading-snug",
+          tone === "failed" && "text-status-failed",
+          tone === "waiting" && "text-status-waiting",
+        )}
+      >
+        {children}
+      </Text>
+    </div>
+  );
+}
+
+function PreviewSkeleton() {
+  return (
+    <div className="grid gap-3" aria-hidden="true">
+      <div className="bg-surface-active h-3 w-28 animate-pulse rounded-xs" />
+      <div className="bg-surface-active h-6 w-56 animate-pulse rounded-xs" />
+      <div className="bg-surface-active h-3 w-full animate-pulse rounded-xs" />
+      <div className="bg-surface-active mt-2 h-9 w-full animate-pulse rounded-md" />
     </div>
   );
 }

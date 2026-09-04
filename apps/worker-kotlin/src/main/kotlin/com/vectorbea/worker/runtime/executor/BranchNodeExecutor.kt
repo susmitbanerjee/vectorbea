@@ -1,7 +1,7 @@
 package com.vectorbea.worker.runtime.executor
 
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 
 /**
  * Executor for BRANCH nodes.
@@ -14,7 +14,7 @@ import com.vectorbea.worker.runtime.graph.WorkflowNode
  * Edge condition evaluation happens in [GraphScheduler.selectEdgesAfterNode].
  */
 class BranchNodeExecutor : NodeExecutor {
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         ctx: RuntimeContext,

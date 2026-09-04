@@ -28,6 +28,7 @@ vectorbea-ui/out/
 # ── Gradle / JVM ─────────────────────────────────────────────────────────────
 vectorbea-proxy/build/
 vectorbea-proxy/.gradle/
+.gradle/
 *.class
 *.war
 *.ear
@@ -47,6 +48,8 @@ build/
 .venv/
 venv/
 env/
+!packages/observability-kotlin/src/main/kotlin/com/vectorbea/observability/env/
+!packages/observability-kotlin/src/main/kotlin/com/vectorbea/observability/env/EnvironmentFilter.kt
 .env
 .env.local
 .env.*.local
@@ -59,9 +62,21 @@ env/
 coverage/
 .nyc_output/
 test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# ── Storybook ────────────────────────────────────────────────────────────────
+storybook-static/
 
 # ── Secrets ──────────────────────────────────────────────────────────────────
 *.pem
 *.key
 *.p12
 secrets/
+
+# Generated visual artifacts — Playwright/Storybook captures and print exports.
+# These were untracked noise in `git status` (264 files) and 110MB on disk.
+# Regenerate with `npm run test:visual` / `npm run capture:storybook`.
+screenshots/
+*.stackdump

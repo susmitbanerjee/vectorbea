@@ -21,6 +21,7 @@ import com.vectorbea.api.http.mapper
 import com.vectorbea.api.repository.Connection
 import com.vectorbea.api.repository.ConnectionRepository
 import com.vectorbea.api.repository.CreateConnectionRequest
+import com.vectorbea.api.repository.EnvironmentRepository
 import com.vectorbea.api.repository.Page
 import com.vectorbea.api.secrets.SecretService
 import com.vectorbea.api.secrets.SecretServiceUnavailableException
@@ -34,6 +35,8 @@ private data class CreateConnectionBody(
     val type: String?,
     val provider: String?,
     val authType: String?,
+    /** Environment slug selected by the user (development/staging/production). */
+    val environment: String? = null,
     val config: Map<String, Any>? = null,
     val allowedHosts: List<String>? = null,
     val allowedPaths: List<String>? = null,
@@ -124,6 +127,13 @@ class ConnectionRoutes(
     private val cache: CacheService,
     private val secretService: SecretService? = null,
     private val telemetry: com.vectorbea.api.telemetry.TelemetryClient? = null,
+    /**
+     * Governance trail. Connections are the highest-value audit target in the
+     * product: they are where credentials live and where a change has the widest
+     * blast radius.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
+    private val environmentRepo: EnvironmentRepository? = null,
 ) {
     private val log = LoggerFactory.getLogger(ConnectionRoutes::class.java)
     fun register(router: Router) {
@@ -153,8 +163,15 @@ class ConnectionRoutes(
 
     private fun create(req: Request): Response {
         val ctx = req.context()
-        val envId = ctx.requireEnvironmentId()
         val body = req.bodyAs<CreateConnectionBody>()
+
+        val envId = body.environment?.trim()?.takeIf { it.isNotBlank() }?.let { requested ->
+            val slug = requireOneOf(
+                requested, "environment", setOf("development", "staging", "production"),
+            )
+            environmentRepo?.findOrCreate(ctx.workspaceId, slug)?.id
+                ?: throw ApiError.ServiceUnavailable("Environment repository is not available")
+        } ?: ctx.requireEnvironmentId()
 
         val name = requireMaxLength(requireField(body.name, "name"), "name", 255)
         val type = requireOneOf(requireField(body.type, "type"), "type", CONNECTION_TYPES)
@@ -195,8 +212,31 @@ class ConnectionRoutes(
             connectionId = conn.id.toString(),
             appUserId = req.principal?.appUserId?.toString(),
             properties = mapOf("type" to type, "provider" to provider))
+        audit?.recordUserAction(
+            req, ctx.workspaceId,
+            com.vectorbea.api.audit.AuditLog.Action.CONNECTION_CREATE,
+            targetType = "connection", targetId = conn.id, environmentId = envId,
+            after = mapOf("name" to conn.name, "type" to type, "provider" to provider),
+        )
         return Response.created(conn.toResponse())
     }
+
+    /**
+     * What of a connection is safe and useful to keep in the audit trail.
+     *
+     * Explicitly enumerated rather than serialising the record: `secret_ref` and
+     * `config_json` can carry credential material, and an audit trail is the last
+     * place a secret should end up — it is append-only, so a leak into it cannot
+     * be deleted.
+     */
+    private fun auditProjection(c: com.vectorbea.api.repository.Connection) = mapOf(
+        "name" to c.name,
+        "status" to c.status,
+        "allowedHosts" to c.allowedHosts,
+        "allowedPaths" to c.allowedPaths,
+        "allowedSchemas" to c.allowedSchemas,
+        "allowedTables" to c.allowedTables,
+    )
 
     private fun getById(req: Request): Response {
         val ctx = req.context()
@@ -209,6 +249,11 @@ class ConnectionRoutes(
         val ctx = req.context()
         val id = req.pathUUID("id")
         val body = req.bodyAs<UpdateConnectionBody>()
+
+        // Read the prior state BEFORE mutating. "Someone changed the connection"
+        // is not an audit trail; "someone changed its allowed hosts from A to B"
+        // is, and after the update the previous value is gone.
+        val prior = repo.findById(id, ctx.workspaceId)
 
         if (body.config != null) validateConfigJsonNotContainsSecrets(body.config, "config")
 
@@ -232,6 +277,14 @@ class ConnectionRoutes(
             secretRef = secretRef?.ref,
         ) ?: throw ApiError.NotFound("Connection")
 
+        audit?.recordUserAction(
+            req, ctx.workspaceId,
+            com.vectorbea.api.audit.AuditLog.Action.CONNECTION_UPDATE,
+            targetType = "connection", targetId = id, environmentId = conn.environmentId,
+            before = prior?.let { auditProjection(it) },
+            after = auditProjection(conn),
+        )
+
         if (secretRef != null) {
             cache.del(CacheKeys.connectionTest(ctx.workspaceId.toString(), id.toString()))
         }
@@ -245,6 +298,19 @@ class ConnectionRoutes(
         val existing = repo.findById(id, ctx.workspaceId) ?: throw ApiError.NotFound("Connection")
         repo.delete(id, ctx.workspaceId)
         invalidateListCache(ctx.workspaceId, existing.environmentId)
+        // `before` only — there is no after. The shape of the record is what makes
+        // "what was deleted, and by whom" answerable a year later, when the row
+        // itself is long gone. Secrets are not in the projection.
+        audit?.recordUserAction(
+            req, ctx.workspaceId,
+            com.vectorbea.api.audit.AuditLog.Action.CONNECTION_DELETE,
+            targetType = "connection", targetId = id,
+            environmentId = existing.environmentId,
+            before = mapOf(
+                "name" to existing.name, "type" to existing.type,
+                "provider" to existing.provider, "status" to existing.status,
+            ),
+        )
         return Response.noContent()
     }
 

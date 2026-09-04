@@ -70,10 +70,14 @@ each built from this monorepo:
 
 | Service     | Root / Dockerfile               | Notes                          |
 | ----------- | ------------------------------- | ------------------------------ |
-| `api`       | `apps/api-kotlin/Dockerfile`    | public domain                  |
+| `api`       | `apps/api-kotlin/Dockerfile`    | public domain; also serves telemetry ingestion and the admin console at `/admin/telemetry` |
 | `worker`    | `apps/worker-kotlin/Dockerfile` | no domain; needs Redis         |
-| `telemetry` | `apps/telemetry/Dockerfile`     | public domain (admin-only)     |
 | `redis`     | Railway Redis plugin            | one per environment            |
+
+> `telemetry` was a fourth service. It is now a library compiled into `api` and
+> `worker` — delete the Railway service and retire `telemetry.vectorbea.com`. Point
+> `TELEMETRY_ENDPOINT` at the API host. See
+> [`../architecture/OBSERVABILITY.md`](../architecture/OBSERVABILITY.md).
 
 In each service: **Settings → Source → Branch**
 - production env services → deploy from **`master`**
@@ -234,10 +238,18 @@ TELEMETRY_PUBLIC_URL=https://telemetry.vectorbea.com
 OTEL_ENABLED=false                              # true + endpoint to ship traces to Grafana
 ```
 
-The dashboard is served by the service itself (static files under
-`apps/telemetry/.../static`). Open `https://telemetry.vectorbea.com`, paste an
-admin JWT (an `ADMIN_EMAILS` user's access token from `app.vectorbea.com`
-DevTools → Local Storage), and you're in.
+The dashboard is served by the **API** now, from static files under
+`apps/api-kotlin/src/main/resources/static/admin-telemetry/`. Open
+`https://api.vectorbea.com/admin/telemetry`, sign in as an `ADMIN_EMAILS` user, and
+you're in — it uses the API's own auth, so there is no JWT to paste any more.
+
+Its data endpoints moved from `/api/dashboard/*` to `/api/admin/telemetry/*`, because
+the API already serves a different resource at `/api/dashboard/summary` (the product
+dashboard on Home). See
+[`../architecture/OBSERVABILITY.md`](../architecture/OBSERVABILITY.md).
+
+The **operational** dashboards — fleet health, run health, cost — are in Grafana on the
+Hetzner box, not here. `ops/monitoring/docker-compose.yml` brings up the whole stack.
 
 ### 4.3 Auth
 

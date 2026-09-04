@@ -9,13 +9,12 @@ import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.metrics.WorkerMetrics
+import com.vectorbea.worker.net.OutboundHttp
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
-import java.time.Duration
 import java.util.UUID
 
 /**
@@ -38,14 +37,24 @@ import java.util.UUID
  *  - Authorization headers are REDACTED in all event summaries.
  *  - Secrets are never placed in URLs.
  *  - Response body is never logged raw.
+ *
+ * AVAILABILITY:
+ *  `timeoutMs` here is the value a tool row's `timeout_ms` column resolves to.
+ *  It is enforced as a **total-call** budget by [OutboundHttp.send] — connect,
+ *  headers, and body streaming — not merely as the JDK's headers-phase request
+ *  timeout, which a server can evade by answering 200 and then stalling the body.
  */
 class HttpNodeExecutor(
     private val connectionResolver: ConnectionResolver,
     private val eventStore: RunEventStore,
-    private val httpClient: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(10))
-        .followRedirects(HttpClient.Redirect.NORMAL)
-        .build(),
+    /** Injectable for tests; production always uses the shared, bounded client. */
+    private val httpClient: java.net.http.HttpClient = OutboundHttp.client,
+    /**
+     * Exactly-once guard for the outbound call. Null disables deduplication —
+     * acceptable in unit tests, never in production, where an at-least-once
+     * queue plus an unguarded POST means duplicate side effects.
+     */
+    private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -57,9 +66,50 @@ class HttpNodeExecutor(
         private val REDACTED_HEADER_NAMES = setOf(
             "authorization", "x-api-key", "api-key", "x-auth-token", "x-secret"
         )
+
+        /** A `{placeholder}` in the URL that nothing supplied a value for. */
+        class UnresolvedPathParam(val name: String) : Exception(name)
+
+        private val PATH_PARAM = Regex("""\{\{?\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}?\}""")
+
+        /**
+         * Fill `{name}` placeholders in a URL from the node's resolved inputs.
+         *
+         * WHY THIS EXISTS. A REST API puts its identifiers in the path — GitHub's
+         * pull request is `/repos/{owner}/{repo}/pulls/{number}`, Airtable's record
+         * is `/v0/{base}/{table}`. Without substitution the only tools that could be
+         * registered were ones whose every path segment was fixed forever, so "read
+         * a pull request" could read exactly one pull request. Body templates have
+         * been resolvable since the beginning; URLs simply never were, which quietly
+         * decided which integrations were expressible.
+         *
+         * VALUES ARE PATH-ENCODED, ALWAYS. These come from workflow inputs and, one
+         * step further back, from a model. An unencoded `../` or a `?` would climb
+         * out of the intended resource or graft a query string onto the request —
+         * turning "read issue N" into a call at a different path entirely. Encoding
+         * happens before the SSRF and allowed-path checks run, so those inspect the
+         * URL that will actually be sent.
+         *
+         * An unresolved placeholder FAILS rather than being left in place. A literal
+         * `{number}` in a path produces a 404 from the vendor, and a vendor 404 is
+         * the single least informative way to learn that an input mapping is missing.
+         */
+        fun substitutePathParams(url: String, resolvedInputs: Map<String, Any>): String {
+            if (!url.contains('{')) return url
+            return PATH_PARAM.replace(url) { match ->
+                val name = match.groupValues[1]
+                val value = resolvedInputs[name]
+                    ?: resolvedInputs[name.substringAfterLast('.')]
+                    ?: throw UnresolvedPathParam(name)
+                java.net.URLEncoder.encode(value.toString(), Charsets.UTF_8)
+                    // URLEncoder is a FORM encoder: it writes a space as `+`, which
+                    // is a literal plus inside a path segment. `%20` is the path form.
+                    .replace("+", "%20")
+            }
+        }
     }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         context: RuntimeContext,
@@ -114,8 +164,17 @@ class HttpNodeExecutor(
         }
 
         // ── Build URL ─────────────────────────────────────────────────────────
-        val rawUrl = resolveUrl(cfg, resolvedInputs, baseUrl)
+        val templateUrl = resolveUrl(cfg, resolvedInputs, baseUrl)
             ?: return NodeResult.Failed("HTTP node '${node.id}': no URL provided (set 'url' in config or attach an HTTP connection with baseUrl)")
+
+        val rawUrl = try {
+            substitutePathParams(templateUrl, resolvedInputs)
+        } catch (e: UnresolvedPathParam) {
+            return NodeResult.Failed(
+                "HTTP node '${node.id}': the URL needs a value for '${e.name}' and the input did not " +
+                    "supply one. Map it from an earlier node, or bind it on the tool."
+            )
+        }
 
         // ── SSRF check ────────────────────────────────────────────────────────
         try {
@@ -139,7 +198,10 @@ class HttpNodeExecutor(
 
         // ── Build request ─────────────────────────────────────────────────────
         val method      = (cfg["method"] as? String ?: "GET").uppercase()
-        val timeoutMs   = (cfg["timeoutMs"] as? Number)?.toLong() ?: DEFAULT_TIMEOUT_MS
+        // tools.timeout_ms lands here. Clamp into the process ceiling so a tool
+        // row cannot configure an unbounded call.
+        val timeoutMs   = OutboundHttp.policy()
+            .clampTotalCallMs((cfg["timeoutMs"] as? Number)?.toLong() ?: DEFAULT_TIMEOUT_MS)
         val maxRespBytes = (cfg["maxResponseBytes"] as? Number)?.toLong() ?: DEFAULT_MAX_RESPONSE_BYTES
 
         @Suppress("UNCHECKED_CAST")
@@ -164,14 +226,74 @@ class HttpNodeExecutor(
             title = "HTTP request started",
             summary = "$method ${sanitizeUrlForLog(rawUrl)}")
 
+        // ── Exactly-once guard ────────────────────────────────────────────────
+        // An HTTP tool call is an external side effect: it sends the email, posts
+        // to Slack, writes to the customer's CRM. The queue is at-least-once, so
+        // without this a redelivery repeats it.
+        val guard = sideEffects
+        val reservation = if (guard != null && method != "GET" && method != "HEAD") {
+            when (val outcome = guard.begin(
+                workspaceId = context.workspaceId,
+                runId = context.runId,
+                nodeId = node.id,
+                attemptGroup = context.attemptGroup,
+                effectType = "http",
+                target = runCatching { URI.create(rawUrl).host }.getOrNull(),
+                leaseToken = context.leaseToken,
+            )) {
+                is com.vectorbea.worker.durable.SideEffectGuard.Outcome.AlreadyDone -> {
+                    // This exact call already succeeded. Replay the stored
+                    // response and do NOT contact the endpoint again.
+                    emitEvent(context, node.id, EventType.HTTP_REQUEST_COMPLETED, "success",
+                        title = "HTTP request deduplicated",
+                        summary = "Identical call already performed — replaying stored response")
+                    val parsed: Any = try {
+                        mapper.readValue(outcome.response ?: "{}", Any::class.java)
+                    } catch (_: Exception) { outcome.response ?: "" }
+                    return NodeResult.Completed(
+                        output = mapOf("statusCode" to 200, "body" to parsed,
+                            "headers" to emptyMap<String, String>(), "deduplicated" to true),
+                        metadata = mapOf("deduplicated" to true, "idempotencyKey" to outcome.key),
+                    )
+                }
+                is com.vectorbea.worker.durable.SideEffectGuard.Outcome.Undetermined -> {
+                    // A previous attempt died mid-call. We cannot tell whether the
+                    // endpoint received it, so we refuse rather than risk sending
+                    // it twice. A human resolves the side_effects row.
+                    return NodeResult.Failed(
+                        "HTTP node '${node.id}': ${outcome.reason} " +
+                            "(idempotencyKey=${outcome.key})")
+                }
+                is com.vectorbea.worker.durable.SideEffectGuard.Outcome.Proceed -> outcome
+            }
+        } else null
+
         val (statusCode, responseBody, responseHeaders) = try {
-            doRequest(rawUrl, method, authHeader, extraHeaders, bodyJson, timeoutMs, maxRespBytes)
-        } catch (e: ResponseTooLargeException) {
+            doRequest(rawUrl, method, authHeader, extraHeaders, bodyJson, timeoutMs, maxRespBytes,
+                idempotencyKey = reservation?.key)
+        } catch (e: OutboundHttp.ResponseTooLargeException) {
+            WorkerMetrics.toolCallDurationSeconds.observeMs(
+                System.currentTimeMillis() - startMs, method, "too_large")
             return NodeResult.Failed(
                 "HTTP response exceeded size limit for node '${node.id}': > ${e.limitBytes} bytes"
             )
+        } catch (e: OutboundHttp.TotalCallTimeoutException) {
+            // A timeout is NOT a clean failure: the request may have reached the
+            // endpoint. Left as in_flight so the next attempt refuses rather than
+            // duplicating — see SideEffectGuard.Outcome.Undetermined.
+            WorkerMetrics.toolCallDurationSeconds.observeMs(e.budgetMs, method, "timeout")
+            log.warn("[http] request exceeded total budget [nodeId={}, method={}, budgetMs={}]",
+                node.id, method, e.budgetMs)
+            return NodeResult.Failed(
+                "HTTP request for node '${node.id}' exceeded its ${e.budgetMs}ms budget and was aborted. " +
+                    "Raise the tool's timeout, or check that the endpoint is responding."
+            )
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startMs
+            // Connection-level failure: the request did not land, so a retry is
+            // legitimate and the reservation is released.
+            reservation?.let { guard?.fail(it.sideEffectId, e.message ?: e.javaClass.simpleName) }
+            WorkerMetrics.toolCallDurationSeconds.observeMs(durationMs, method, "error")
             log.warn("[http] request failed [nodeId={}, method={}, durationMs={}]: {}",
                 node.id, method, durationMs, e.javaClass.simpleName)
             return NodeResult.Failed("HTTP request failed for node '${node.id}': ${e.message?.take(200)}")
@@ -186,8 +308,16 @@ class HttpNodeExecutor(
             durationMs = durationMs)
 
         if (!success) {
+            // The endpoint answered — it saw the request. A 4xx will not become a
+            // 2xx on retry, so record it as a genuine failure and let the retry
+            // policy decide.
+            reservation?.let { guard?.fail(it.sideEffectId, "HTTP $statusCode") }
             return NodeResult.Failed("HTTP node '${node.id}': server returned HTTP $statusCode")
         }
+
+        // Succeeded. Store the response so any later attempt replays it instead
+        // of calling again.
+        reservation?.let { guard?.complete(it.sideEffectId, responseBody) }
 
         // ── Parse response ────────────────────────────────────────────────────
         val parsedBody: Any = try {
@@ -231,10 +361,6 @@ class HttpNodeExecutor(
 
     // ── HTTP execution ────────────────────────────────────────────────────────
 
-    /** Thrown when a response exceeds the configured size cap mid-stream. */
-    private class ResponseTooLargeException(val limitBytes: Long) :
-        Exception("HTTP response exceeded $limitBytes bytes")
-
     private fun doRequest(
         url: String,
         method: String,
@@ -243,10 +369,15 @@ class HttpNodeExecutor(
         bodyJson: String?,
         timeoutMs: Long,
         maxResponseBytes: Long,
+        idempotencyKey: String? = null,
     ): Triple<Int, String, Map<String, List<String>>> {
-        val reqBuilder = HttpRequest.newBuilder()
-            .uri(URI.create(url))
-            .timeout(Duration.ofMillis(timeoutMs))
+        val reqBuilder = HttpRequest.newBuilder().uri(URI.create(url))
+
+        // Pass the key through so providers that support native idempotency
+        // (Stripe, OpenAI, and anything following that convention) dedupe on
+        // their side too. Belt and braces: ours stops the second call being
+        // made, theirs stops it counting if it somehow is.
+        idempotencyKey?.let { reqBuilder.header("Idempotency-Key", it) }
 
         // Auth header first — never in URL
         authHeader?.let { (name, value) -> reqBuilder.header(name, value) }
@@ -263,32 +394,21 @@ class HttpNodeExecutor(
                 reqBuilder.header("Content-Type", "application/json")
                 HttpRequest.BodyPublishers.ofString(bodyJson)
             }
-            method in setOf("POST", "PUT", "PATCH") -> HttpRequest.BodyPublishers.noBody()
             else -> HttpRequest.BodyPublishers.noBody()
         }
 
         reqBuilder.method(method, bodyPublisher)
 
-        // Stream the body and enforce the size cap WHILE reading — a huge
-        // (or malicious) response is aborted at the limit instead of being
-        // buffered fully into memory first.
-        val response = httpClient.send(reqBuilder.build(), HttpResponse.BodyHandlers.ofInputStream())
-        val body = response.body().use { ins -> readBounded(ins, maxResponseBytes) }
-        return Triple(response.statusCode(), body, response.headers().map())
-    }
-
-    private fun readBounded(ins: java.io.InputStream, maxBytes: Long): String {
-        val out = java.io.ByteArrayOutputStream()
-        val buf = ByteArray(8_192)
-        var total = 0L
-        while (true) {
-            val n = ins.read(buf)
-            if (n == -1) break
-            total += n
-            if (total > maxBytes) throw ResponseTooLargeException(maxBytes)
-            out.write(buf, 0, n)
+        // The size cap is enforced WHILE reading and the total-call ceiling covers
+        // body streaming — a peer that answers 200 and then stalls is aborted at
+        // [timeoutMs] rather than holding this pool thread indefinitely.
+        val result = WorkerMetrics.timeBlocking {
+            OutboundHttp.send(reqBuilder, totalCallMs = timeoutMs,
+                maxResponseBytes = maxResponseBytes, httpClient = httpClient)
         }
-        return out.toString(Charsets.UTF_8.name())
+        WorkerMetrics.toolCallDurationSeconds.observeMs(
+            result.durationMs, method, if (result.statusCode in 200..299) "ok" else "http_error")
+        return Triple(result.statusCode, result.body, result.headers)
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

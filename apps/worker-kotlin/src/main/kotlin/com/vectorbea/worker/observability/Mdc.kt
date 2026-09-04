@@ -15,18 +15,41 @@ import org.slf4j.MDC
  * SECURITY: Never put secret values, connection strings, or API keys into MDC.
  * MDC values appear in every log line for the duration they are set.
  */
+/**
+ * Envelope keys, delegating to the shared library.
+ *
+ * These were camelCase (`runId`, `nodeId`) and defined twice, once per service. They
+ * are now snake_case and defined once, in `LogContext`, because:
+ *
+ *  - Loki, Prometheus and the OpenTelemetry conventions are all snake_case, and a
+ *    mixed-case envelope means every query is a guess about which convention won.
+ *  - Two definitions of "what the run id field is called" is one definition too many.
+ *    They agreed today by inspection, not by construction.
+ *
+ * THIS BREAKS EXISTING LOG QUERIES. A saved Loki query for `runId` finds nothing after
+ * this deploy; it wants `run_id`. That is called out in docs/architecture/OBSERVABILITY.md
+ * rather than softened with a transition period emitting both, which would double the
+ * envelope size forever to spare one search-and-replace.
+ *
+ * The constant names are unchanged, so every `MDC.put(MdcKeys.RUN_ID, ...)` call site
+ * keeps working and starts writing the new key.
+ */
 object MdcKeys {
-    const val SERVICE        = "service"
-    const val WORKER_ID      = "workerId"
-    const val RUN_ID         = "runId"
-    const val WORKFLOW_ID    = "workflowId"
-    const val NODE_ID        = "nodeId"
-    const val JOB_TYPE       = "jobType"
-    const val WORKSPACE_ID   = "workspaceId"
-    const val ENVIRONMENT_ID = "environmentId"
-    const val ERROR_CODE     = "errorCode"
-    const val TRACE_ID       = "traceId"
-    const val CORRELATION_ID = "correlationId"
+    // Envelope keys — shared with the API/worker peer and with the log encoder.
+    const val SERVICE        = com.vectorbea.observability.logging.LogContext.SERVICE
+    const val WORKER_ID      = com.vectorbea.observability.logging.LogContext.WORKER_ID
+    const val RUN_ID         = com.vectorbea.observability.logging.LogContext.RUN_ID
+    const val NODE_ID        = com.vectorbea.observability.logging.LogContext.NODE_ID
+    const val WORKSPACE_ID   = com.vectorbea.observability.logging.LogContext.WORKSPACE_ID
+    const val ENVIRONMENT_ID = com.vectorbea.observability.logging.LogContext.ENVIRONMENT_ID
+    const val TRACE_ID       = com.vectorbea.observability.logging.LogContext.TRACE_ID
+    const val SPAN_ID        = com.vectorbea.observability.logging.LogContext.SPAN_ID
+
+    // Service-local keys — these land in the `fields` sub-object, not the envelope.
+    const val JOB_TYPE       = "job_type"
+    const val WORKFLOW_ID    = "workflow_id"
+    const val ERROR_CODE     = "error_code"
+    const val CORRELATION_ID = "correlation_id"
 }
 
 /**

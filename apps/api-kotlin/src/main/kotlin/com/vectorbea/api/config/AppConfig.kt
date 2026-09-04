@@ -35,11 +35,30 @@ data class AppConfig(
     val maxRequestBodyBytes: Int,
 
     // ── Private beta / production controls ─────────────────────────────────
-    val privateBetaMode: Boolean = false,
     val publicSignupEnabled: Boolean = true,
     /** Comma-separated admin email addresses */
     val adminEmails: Set<String> = emptySet(),
-    val defaultExecutionMode: String = "simulation_only",
+    /**
+     * Shared secret for `/internal/telemetry/events`.
+     *
+     * Was the telemetry service's own; now the API's, because the API is the process
+     * that owns that endpoint. Null disables internal ingestion rather than defaulting
+     * to something guessable - an analytics store anyone can write to is a store you
+     * cannot trust, which is worse than not having one.
+     */
+    val telemetryInternalToken: String? = null,
+    /**
+     * What a workspace with no explicit `workspace_beta_controls` row may do.
+     *
+     * Was "simulation_only", which is the right default for a closed beta and
+     * the wrong one for a live product: every new workspace could build
+     * workflows and none could run them for real, with no self-service way out.
+     * Set DEFAULT_EXECUTION_MODE=simulation_only to restore the beta posture.
+     *
+     * An explicit row still wins in both directions — a workspace an admin has
+     * disabled stays disabled.
+     */
+    val defaultExecutionMode: String = "real_execution_enabled",
     val realExecutionRequiresAdminApproval: Boolean = true,
     val byokRequiredForRealExecution: Boolean = true,
     val allowPlatformLlmForWorkflowExecution: Boolean = false,
@@ -155,17 +174,14 @@ data class AppConfig(
             val architectApiKey  = env("AI_ARCHITECT_API_KEY") ?: env("OPENAI_API_KEY")
             val architectModel   = env("AI_ARCHITECT_MODEL") ?: "gpt-4o-mini"
 
-            // ── Private beta / production controls ───────────────────────────
-            // Safe production defaults: beta gate ON, signup CLOSED unless explicitly opened.
-            // In production (APP_ENV=production) these default to the restrictive direction.
+            // ── Production controls ─────────────────────────────────────────
+            // Signup remains closed by default in production.
             val isProductionEnv = appEnv == "production"
-            val privateBetaMode    = env("PRIVATE_BETA_MODE")?.lowercase()?.let { it == "true" }
-                ?: isProductionEnv   // production defaults to beta mode ON
             val publicSignupEnabled = env("PUBLIC_SIGNUP_ENABLED")?.lowercase()?.let { it != "false" }
                 ?: !isProductionEnv  // production defaults to signup CLOSED
             val adminEmails        = (env("ADMIN_EMAILS") ?: "")
                 .split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-            val defaultExecMode    = env("DEFAULT_EXECUTION_MODE") ?: "simulation_only"
+            val defaultExecMode    = env("DEFAULT_EXECUTION_MODE") ?: "real_execution_enabled"
             val realExecApproval   = env("REAL_EXECUTION_REQUIRES_ADMIN_APPROVAL")?.lowercase() != "false"
             val byokRequired       = env("BYOK_REQUIRED_FOR_REAL_EXECUTION")?.lowercase() != "false"
             val allowPlatformLlm   = env("ALLOW_PLATFORM_LLM_FOR_WORKFLOW_EXECUTION")?.lowercase() == "true"
@@ -187,9 +203,9 @@ data class AppConfig(
                 architectEnabled = architectEnabled,
                 architectApiKey  = architectApiKey,
                 architectModel   = architectModel,
-                privateBetaMode  = privateBetaMode,
                 publicSignupEnabled = publicSignupEnabled,
                 adminEmails      = adminEmails,
+                telemetryInternalToken = env("TELEMETRY_INTERNAL_TOKEN"),
                 defaultExecutionMode = defaultExecMode,
                 realExecutionRequiresAdminApproval = realExecApproval,
                 byokRequiredForRealExecution = byokRequired,

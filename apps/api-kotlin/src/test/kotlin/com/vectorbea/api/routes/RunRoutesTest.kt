@@ -95,6 +95,7 @@ class RunRoutesTest {
         slug = "test-workflow",
         description = null,
         status = status,
+        creationMode = "native",
         currentVersionId = versionId,
         createdAt = Instant.now(),
         updatedAt = Instant.now(),
@@ -189,6 +190,78 @@ class RunRoutesTest {
     fun `GET runs by id returns 404 for unknown run`() {
         val resp = get("/api/runs/${UUID.randomUUID()}")
         assertEquals(404, resp.status)
+    }
+
+    // ── Detail payload shape ──────────────────────────────────────────────────
+    //
+    // `output_json` / `error_json` are read out of Postgres as raw column TEXT.
+    // Putting that text straight into the response map made Jackson escape it, so
+    // the detail arrived as `"errorJson": "{\"code\":...}"` — a string. The web
+    // client validates this endpoint against a contract, rejected the whole
+    // response with "Expected object, received string", and the run detail screen
+    // could not open a failed run at all.
+    //
+    // The old tests only ever seeded nulls, which is why nothing caught it.
+
+    @Test
+    fun `GET run by id returns errorJson as an object, not a string`() {
+        val run = runRepo.seed(
+            workspaceId, workflowId, versionId, environmentId,
+            status = "failed",
+            errorJson = """{"code":"WORKER_ERROR","message":"Node agent-1 failed"}""",
+        )
+
+        val resp = get("/api/runs/${run.id}")
+        assertEquals(200, resp.status)
+
+        val body = fromJson<Map<String, Any?>>(resp.body)
+        val error = body["errorJson"]
+        assertTrue(error is Map<*, *>, "errorJson must be JSON, got ${error?.javaClass?.simpleName}")
+        assertEquals("WORKER_ERROR", error["code"])
+        assertEquals("Node agent-1 failed", error["message"])
+    }
+
+    @Test
+    fun `GET run by id returns outputJson as an object, not a string`() {
+        val run = runRepo.seed(
+            workspaceId, workflowId, versionId, environmentId,
+            status = "succeeded",
+            outputJson = """{"cities":["Lisbon","Vienna"]}""",
+        )
+
+        val body = fromJson<Map<String, Any?>>(get("/api/runs/${run.id}").body)
+        val output = body["outputJson"]
+        assertTrue(output is Map<*, *>, "outputJson must be JSON, got ${output?.javaClass?.simpleName}")
+        assertEquals(listOf("Lisbon", "Vienna"), output["cities"])
+    }
+
+    @Test
+    fun `GET run by id passes a JSON array output through as an array`() {
+        // jsonb is not restricted to objects. A workflow whose last node returns a
+        // list stores an array, and the endpoint must not flatten or reject it.
+        val run = runRepo.seed(
+            workspaceId, workflowId, versionId, environmentId,
+            status = "succeeded",
+            outputJson = """[{"city":"Lisbon"}]""",
+        )
+
+        val output = fromJson<Map<String, Any?>>(get("/api/runs/${run.id}").body)["outputJson"]
+        assertTrue(output is List<*>, "an array column must stay an array, got ${output?.javaClass?.simpleName}")
+        assertEquals(1, output.size)
+    }
+
+    @Test
+    fun `GET run by id keeps an unparseable column rather than dropping it`() {
+        // A row written by something that did not store valid JSON is still the
+        // evidence whoever is debugging came for.
+        val run = runRepo.seed(
+            workspaceId, workflowId, versionId, environmentId,
+            status = "failed",
+            errorJson = "not json at all",
+        )
+
+        val body = fromJson<Map<String, Any?>>(get("/api/runs/${run.id}").body)
+        assertEquals("not json at all", body["errorJson"])
     }
 
     @Test
@@ -301,6 +374,16 @@ class RunRoutesTest {
 
         assertTrue(events.any { it.first == "run_complete" }, "Expected run_complete for terminal run")
     }
+
+    @Test
+    fun `purge queued cancels all queued runs in workspace`() {
+        runRepo.purgeResult = 3
+        val response = post("/api/runs/purge-queued", emptyMap<String, Any>())
+
+        assertEquals(200, response.status)
+        assertEquals(workspaceId, runRepo.purgedWorkspaceId)
+        assertEquals(3, fromJson<Map<String, Any>>(response.body)["purged"])
+    }
 }
 
 // ── Stub implementations ──────────────────────────────────────────────────────
@@ -308,6 +391,8 @@ class RunRoutesTest {
 class StubRunRepository : RunRepository(FakeDs()) {
     val created = mutableListOf<AgentRun>()
     val statusUpdates = mutableListOf<String>()
+    var purgeResult = 0
+    var purgedWorkspaceId: UUID? = null
     private val store = mutableMapOf<UUID, AgentRun>()
 
     fun seed(
@@ -316,8 +401,12 @@ class StubRunRepository : RunRepository(FakeDs()) {
         versionId: UUID,
         environmentId: UUID,
         status: String = "queued",
+        /* Raw jsonb column TEXT, which is what RunRepository.getJsonbStringOrNull returns. */
+        outputJson: String? = null,
+        errorJson: String? = null,
     ): AgentRun {
         val run = makeRun(workspaceId, workflowId, versionId, environmentId, status)
+            .copy(outputJson = outputJson, errorJson = errorJson)
         store[run.id] = run
         return run
     }
@@ -335,6 +424,11 @@ class StubRunRepository : RunRepository(FakeDs()) {
     override fun updateStatus(id: UUID, workspaceId: UUID, status: String): Boolean {
         statusUpdates += status
         return true
+    }
+
+    override fun purgeQueued(workspaceId: UUID): Int {
+        purgedWorkspaceId = workspaceId
+        return purgeResult
     }
 
     override fun list(

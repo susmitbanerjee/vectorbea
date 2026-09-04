@@ -1,0 +1,81 @@
+{
+  "tag": "smoke",
+  "at": "2026-08-19T02:02:50.337Z",
+  "results": [
+    {
+      "scenario": "a",
+      "name": "Baseline — 1 tenant, 1 linear workflow",
+      "tag": "smoke",
+      "at": "2026-08-19T02:02:50.332Z",
+      "enqueued": 1,
+      "completed": 1,
+      "succeeded": 1,
+      "failed": 0,
+      "stuck": 0,
+      "timedOut": false,
+      "errorRatePct": 0,
+      "wallClockSeconds": 2.609,
+      "enqueueSeconds": 0.034,
+      "throughputPerSec": 0.3832886163280951,
+      "wait": {
+        "n": 1,
+        "p50": 0.076819,
+        "p95": 0.076819,
+        "p99": 0.076819,
+        "max": 0.076819
+      },
+      "split": null,
+      "fairness": 1,
+      "completedByTenant": {
+        "loadtest-t01": 1
+      },
+      "peakQueueDepth": 1,
+      "peakSlotsActive": {
+        "system": 0,
+        "agent": 0,
+        "long": 0,
+        "short": 1
+      },
+      "slotsTotal": {
+        "system": 2,
+        "agent": 6,
+        "long": 2,
+        "short": 8
+      },
+      "peakTenantConcurrency": 1,
+      "peakTenantClassConcurrency": 1,
+      "tenantDb": {
+        "peakActive": 0,
+        "peakQueue": 0
+      },
+      "heap": {
+        "startMB": 15.241824,
+        "peakMB": 28.054448,
+        "endMB": 28.054448,
+        "slopeMBPerHour": 22970.839840637447
+      },
+      "threads": {
+        "start": 31,
+        "peak": 34,
+        "end": 34
+      },
+      "dbConnections": {
+        "start": 15,
+        "peak": 15,
+        "end": 15,
+        "slopePerHour": 0
+      },
+      "guards": {
+        "throttled": 0,
+        "deadLetters": 0,
+        "leaseExpiry": 0,
+        "suspended": 0
+      },
+      "claimLatencyP95": null,
+      "samples": 3,
+      "scrapeFailures": 0,
+      "note": null,
+      "steps": null
+    }
+  ]
+}

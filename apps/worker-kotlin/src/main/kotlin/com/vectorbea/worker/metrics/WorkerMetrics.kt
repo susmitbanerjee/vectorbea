@@ -23,12 +23,24 @@ import java.util.concurrent.atomic.DoubleAdder
 internal class WCounter(val name: String, val help: String, val labelNames: List<String>) {
     val cells = ConcurrentHashMap<List<String>, AtomicLong>()
     fun inc(vararg lv: String, delta: Long = 1) {
-        cells.getOrPut(lv.toList()) { AtomicLong(0) }.addAndGet(delta)
+        cells.getOrPut(LabelGuard.guard(name, lv.toList())) { AtomicLong(0) }.addAndGet(delta)
     }
     fun exposition() = buildString {
-        append("# HELP $name $help\n# TYPE $name counter\n")
-        if (cells.isEmpty()) append("${name}_total 0.0\n")
-        else cells.forEach { (lbs, c) -> append("${name}_total${ls(lbs)} ${c.get().toDouble()}\n") }
+        // The HELP/TYPE header must name the SAME family as the samples.
+        //
+        // This emitted `# TYPE lease_expiry counter` while the samples were named
+        // `lease_expiry_total` — so the declared family had no samples and the samples
+        // belonged to no declared family. Prometheus ingests it either way, which is why
+        // nobody noticed: the series exists but is UNTYPED, so nothing validates that
+        // `rate()` is being applied to a counter, and a type-aware consumer sees nothing
+        // at all.
+        //
+        // Found by scripts/load/verify-metrics.mjs, which looked for each §5.4 metric by
+        // its documented name and could not find five of them.
+        val family = "${name}_total"
+        append("# HELP $family $help\n# TYPE $family counter\n")
+        if (cells.isEmpty()) append("$family 0.0\n")
+        else cells.forEach { (lbs, c) -> append("$family${ls(lbs)} ${c.get().toDouble()}\n") }
     }
     private fun ls(v: List<String>): String {
         if (labelNames.isEmpty() || v.isEmpty()) return ""
@@ -39,11 +51,11 @@ internal class WCounter(val name: String, val help: String, val labelNames: List
 internal class WGauge(val name: String, val help: String, val labelNames: List<String>) {
     val cells = ConcurrentHashMap<List<String>, DoubleAdder>()
     fun set(value: Double, vararg lv: String) {
-        val a = cells.getOrPut(lv.toList()) { DoubleAdder() }
+        val a = cells.getOrPut(LabelGuard.guard(name, lv.toList())) { DoubleAdder() }
         synchronized(a) { a.reset(); a.add(value) }
     }
-    fun inc(vararg lv: String) { cells.getOrPut(lv.toList()) { DoubleAdder() }.add(1.0) }
-    fun dec(vararg lv: String) { cells.getOrPut(lv.toList()) { DoubleAdder() }.add(-1.0) }
+    fun inc(vararg lv: String) { cells.getOrPut(LabelGuard.guard(name, lv.toList())) { DoubleAdder() }.add(1.0) }
+    fun dec(vararg lv: String) { cells.getOrPut(LabelGuard.guard(name, lv.toList())) { DoubleAdder() }.add(-1.0) }
     fun exposition() = buildString {
         append("# HELP $name $help\n# TYPE $name gauge\n")
         if (cells.isEmpty()) append("$name 0.0\n")
@@ -83,6 +95,171 @@ internal class WHistogram(val name: String, val help: String, val labelNames: Li
     }
 }
 
+/**
+ * Histogram whose unit is **seconds** (Prometheus base unit) with buckets that
+ * span the range this worker actually sees: sub-millisecond DB reads through
+ * five-minute agent runs. Observations are still supplied in milliseconds
+ * because that is what the call sites measure.
+ */
+/**
+ * A histogram over a RATIO, bucketed tightly around 1.0.
+ *
+ * `WSecondsHistogram`'s buckets jump 0.5 → 1.0 → 2.5, which cannot answer the
+ * question this exists for: "is the estimate within 10% at p95". Reading that off
+ * a bucket boundary requires boundaries at 1.05 and 1.10, so it gets its own
+ * scale rather than a rescaled reuse of a latency one.
+ *
+ * Buckets are dense between 0.9 and 1.3 because that is where a working estimator
+ * lives, and sparse outside it because anything past 1.5 is a single verdict:
+ * badly wrong, in the direction that causes 429s.
+ */
+internal class WRatioHistogram(val name: String, val help: String, val labelNames: List<String>) {
+    companion object {
+        val BUCKETS = doubleArrayOf(
+            0.5, 0.8, 0.9, 0.95, 1.0, 1.05, 1.10, 1.15, 1.20, 1.30, 1.50, 2.0, 3.0,
+        )
+        private fun fmt(d: Double) = if (d == d.toLong().toDouble()) "${d.toLong()}.0" else d.toString()
+    }
+
+    class Cell(val bc: Array<AtomicLong>, val sum: DoubleAdder, val count: AtomicLong)
+
+    val cells = ConcurrentHashMap<List<String>, Cell>()
+
+    fun observe(ratio: Double, vararg lv: String) {
+        if (ratio.isNaN() || ratio.isInfinite()) return
+        val key = LabelGuard.guard(name, lv.toList())
+        val c = cells.getOrPut(key) {
+            Cell(Array(BUCKETS.size + 1) { AtomicLong(0) }, DoubleAdder(), AtomicLong(0))
+        }
+        for (i in BUCKETS.indices) if (ratio <= BUCKETS[i]) c.bc[i].incrementAndGet()
+        c.bc[BUCKETS.size].incrementAndGet()
+        c.sum.add(ratio)
+        c.count.incrementAndGet()
+    }
+
+    /** The quantile, read off the buckets. Used by tests and by the estimate report. */
+    fun quantile(q: Double, vararg lv: String): Double? {
+        val c = cells[LabelGuard.guard(name, lv.toList())] ?: return null
+        val total = c.count.get()
+        if (total == 0L) return null
+        val target = Math.ceil(q * total).toLong()
+        for (i in BUCKETS.indices) if (c.bc[i].get() >= target) return BUCKETS[i]
+        return Double.POSITIVE_INFINITY
+    }
+
+    fun exposition() = buildString {
+        append("# HELP $name $help\n# TYPE $name histogram\n")
+        cells.forEach { (lbs, c) ->
+            for (i in BUCKETS.indices) {
+                append("${name}_bucket${ls(lbs, "le" to fmt(BUCKETS[i]))} ${c.bc[i].get().toDouble()}\n")
+            }
+            append("${name}_bucket${ls(lbs, "le" to "+Inf")} ${c.bc[BUCKETS.size].get().toDouble()}\n")
+            append("${name}_count${ls(lbs)} ${c.count.get().toDouble()}\n")
+            append("${name}_sum${ls(lbs)} ${c.sum.sum()}\n")
+        }
+    }
+
+    private fun ls(v: List<String>, extra: Pair<String, String>? = null): String {
+        val parts = labelNames.zip(v).map { (k, x) -> "$k=\"$x\"" } +
+            (extra?.let { listOf("${it.first}=\"${it.second}\"") } ?: emptyList())
+        return if (parts.isEmpty()) "" else "{" + parts.joinToString(",") + "}"
+    }
+}
+
+internal class WSecondsHistogram(val name: String, val help: String, val labelNames: List<String>) {
+    companion object {
+        val BUCKETS = doubleArrayOf(
+            0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5,
+            1.0, 2.5, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0,
+        )
+        private fun fmt(d: Double) = if (d == d.toLong().toDouble()) "${d.toLong()}.0" else d.toString()
+    }
+
+    class Cell(val bc: Array<AtomicLong>, val sum: DoubleAdder, val count: AtomicLong)
+
+    val cells = ConcurrentHashMap<List<String>, Cell>()
+
+    fun observeSeconds(seconds: Double, vararg lv: String) {
+        val key = LabelGuard.guard(name, lv.toList())
+        val c = cells.getOrPut(key) {
+            Cell(Array(BUCKETS.size + 1) { AtomicLong(0) }, DoubleAdder(), AtomicLong(0))
+        }
+        for (i in BUCKETS.indices) if (seconds <= BUCKETS[i]) c.bc[i].incrementAndGet()
+        c.bc[BUCKETS.size].incrementAndGet()
+        c.sum.add(seconds)
+        c.count.incrementAndGet()
+    }
+
+    fun observeMs(ms: Long, vararg lv: String) = observeSeconds(ms / 1000.0, *lv)
+
+    fun exposition() = buildString {
+        append("# HELP $name $help\n# TYPE $name histogram\n")
+        if (cells.isEmpty()) {
+            for (b in BUCKETS) append("${name}_bucket{le=\"${fmt(b)}\"} 0.0\n")
+            append("${name}_bucket{le=\"+Inf\"} 0.0\n${name}_count 0.0\n${name}_sum 0.0\n")
+        } else cells.forEach { (lbs, c) ->
+            for (i in BUCKETS.indices) {
+                append("${name}_bucket${ls(lbs, "le" to fmt(BUCKETS[i]))} ${c.bc[i].get().toDouble()}\n")
+            }
+            append("${name}_bucket${ls(lbs, "le" to "+Inf")} ${c.bc[BUCKETS.size].get().toDouble()}\n")
+            append("${name}_count${ls(lbs)} ${c.count.get().toDouble()}\n")
+            append("${name}_sum${ls(lbs)} ${c.sum.sum()}\n")
+        }
+    }
+
+    private fun ls(v: List<String>, extra: Pair<String, String>? = null): String {
+        val pairs = labelNames.zip(v) + listOfNotNull(extra)
+        if (pairs.isEmpty()) return ""
+        return "{" + pairs.joinToString(",") { (k, vv) -> "$k=\"${vv.esc()}\"" } + "}"
+    }
+}
+
+/**
+ * Counter accumulating a floating-point quantity (e.g. seconds of blocked time).
+ * Unlike [WCounter] the exposed series name is used verbatim — no `_total`
+ * suffix is appended — because the metric name already carries its unit.
+ */
+internal class WDoubleCounter(val name: String, val help: String, val labelNames: List<String>) {
+    val cells = ConcurrentHashMap<List<String>, DoubleAdder>()
+    fun add(delta: Double, vararg lv: String) {
+        cells.getOrPut(LabelGuard.guard(name, lv.toList())) { DoubleAdder() }.add(delta)
+    }
+    fun exposition() = buildString {
+        append("# HELP $name $help\n# TYPE $name counter\n")
+        if (cells.isEmpty()) append("$name 0.0\n")
+        else cells.forEach { (lbs, a) -> append("$name${ls(lbs)} ${a.sum()}\n") }
+    }
+    private fun ls(v: List<String>): String {
+        if (labelNames.isEmpty() || v.isEmpty()) return ""
+        return "{" + labelNames.zip(v).joinToString(",") { (k, vv) -> "$k=\"${vv.esc()}\"" } + "}"
+    }
+}
+
+/**
+ * Bounds label cardinality per metric.
+ *
+ * Several metrics below are labelled by `workspace`, which is a UUID supplied by
+ * whoever is using the platform. Left unbounded that is a memory leak in the
+ * worker and a cardinality explosion in Prometheus: one time series per
+ * workspace per label combination, retained forever. Once a metric has seen
+ * [MAX_SERIES_PER_METRIC] distinct label sets, further ones collapse into a
+ * single `overflow` series so the endpoint degrades in fidelity rather than
+ * taking the process with it.
+ */
+internal object LabelGuard {
+    private const val MAX_SERIES_PER_METRIC = 1_000
+    private val seen = ConcurrentHashMap<String, MutableSet<List<String>>>()
+
+    fun guard(metric: String, labels: List<String>): List<String> {
+        if (labels.isEmpty()) return labels
+        val set = seen.getOrPut(metric) { ConcurrentHashMap.newKeySet() }
+        if (set.contains(labels)) return labels
+        if (set.size >= MAX_SERIES_PER_METRIC) return labels.map { "overflow" }
+        set.add(labels)
+        return labels
+    }
+}
+
 private fun String.esc() = replace("\\","\\\\").replace("\"","\\\"").replace("\n","\\n")
 
 // ── Worker metric definitions ─────────────────────────────────────────────────
@@ -91,7 +268,15 @@ object WorkerMetrics {
     private val log = LoggerFactory.getLogger(WorkerMetrics::class.java)
 
     // Gauge: currently-active (in-flight) tasks
-    internal val activeTasks = WGauge("worker_active_tasks", "Number of workflow run tasks currently executing", emptyList())
+    /**
+     * §5.4: `worker_in_flight{worker_id}`.
+     *
+     * Renamed from `worker_active_tasks` and given the worker_id label it was missing.
+     * Without the label a three-replica fleet summed to one number, which answers "is
+     * the fleet busy" and not "is THIS worker stuck" - and the second question is the
+     * one you ask when a run is not progressing.
+     */
+    internal val activeTasks = WGauge("worker_in_flight", "Runs currently executing on this worker", listOf("worker_id"))
 
     // Gauge: seconds since the last heartbeat was written (updated by heartbeat component)
     internal val heartbeatAgeSeconds = WGauge("worker_heartbeat_age_seconds", "Seconds since the last worker heartbeat was written", emptyList())
@@ -125,6 +310,57 @@ object WorkerMetrics {
     internal val tenantThrottled  = WCounter("worker_tenant_throttled",  "Times a tenant was throttled",               emptyList())
     internal val poolSaturated    = WCounter("worker_pool_saturated",    "Times a pool had no capacity for a ready job", listOf("pool"))
     internal val runYields        = WCounter("worker_run_yields",        "Runs that yielded mid-execution (budget exhausted)", listOf("reason"))
+
+    /**
+     * Spans that never reached Postgres, by cause.
+     *
+     * Two causes, deliberately separate, because they call for different responses:
+     * `buffer_full` means the writer is behind and the fix is throughput;
+     * `write_failed` means the table rejected the batch and the fix is the database.
+     * Either being non-zero means a trace is incomplete and the UI must say so.
+     */
+    internal val spansDropped     = WCounter("worker_trace_spans_dropped",   "Spans discarded before reaching Postgres",  listOf("cause"))
+    internal val spansWritten     = WCounter("worker_trace_spans_written",   "Spans durably written to run_spans",        emptyList())
+
+    /**
+     * Run events discarded, by reason.
+     *
+     * ── WHY EVENTS GET THEIR OWN COUNTER ────────────────────────────────────
+     * A dropped SPAN is a degraded trace. A dropped EVENT is a hole in the run
+     * timeline, which pages on `?afterSequence=` — the reader sees a gap it
+     * cannot explain and one event is never delivered to an open stream. The two
+     * are not the same severity and must not share a series, or an alert tuned
+     * for the tolerable one will not fire for the intolerable one.
+     *
+     * `write_failed` is the only reason that should ever appear. The buffer
+     * applies back-pressure rather than dropping (see RunEventStore), so a
+     * non-zero count here means the database refused a write, not that we were
+     * busy.
+     */
+    internal val eventsDropped    = WCounter("worker_run_events_dropped",    "Run events discarded before reaching Postgres", listOf("cause"))
+
+    /** Finished traces never shipped to a workspace's OTLP endpoint, by reason. */
+    internal val traceExportsDropped = WCounter("worker_trace_exports_dropped", "Trace exports discarded", listOf("cause"))
+
+    /**
+     * Partition drops the export gate refused, by reason. ALERT ON `gate_unavailable`.
+     *
+     * Two causes, and they need different responses:
+     *
+     *   `work_outstanding`  — the archiver has partitions queued past the hot
+     *                         window. Expected while an export catches up; a
+     *                         problem only if it persists for days.
+     *   `gate_unavailable`  — the gate could not be evaluated at all. Nothing will
+     *                         ever be dropped, for ANY table, until it is fixed:
+     *                         retention has stopped and the disk is filling. The
+     *                         usual cause is a worker with TRACE_ARCHIVE_DIR set
+     *                         reaching a database where V047 has not been applied.
+     *
+     * A metric and not only a log line because the failure is quiet by nature —
+     * nothing errors, nothing retries, a job simply declines to act and keeps
+     * declining. That is invisible until someone notices the disk.
+     */
+    internal val partitionDropsGated = WCounter("worker_partition_drops_gated", "Partition drops refused by the export gate", listOf("cause"))
     internal val runReenqueued    = WCounter("worker_run_reenqueued",    "RESUME_RUN jobs re-enqueued after a yield",   emptyList())
     // Histogram: per-tick execution duration
     internal val runTickDuration  = WHistogram("worker_run_tick_duration_ms", "Duration of a single run execution tick", listOf("job_type"))
@@ -139,10 +375,543 @@ object WorkerMetrics {
     internal val pollBackoffMs    = WGauge("worker_poll_backoff_ms",            "Current adaptive poll-loop backoff in ms",           emptyList())
     // Gauge: local prefetch buffer size per pool
     internal val localBufferSize  = WGauge("worker_local_buffer_size",          "Messages buffered locally awaiting a free slot",     listOf("pool"))
+    /**
+     * Current adaptive XREADGROUP batch size. Falling toward 1 means messages are
+     * being parked in the PEL — the worker is pulling work it cannot start and
+     * backing off. Pinned at the configured maximum means every read is placeable.
+     */
+    internal val readBatchSize    = WGauge("worker_read_batch_size",            "Current adaptive XREADGROUP COUNT",                  emptyList())
+
+    // ── Capacity, latency and fairness — the scheduling contract ───────────────
+    //
+    // These answer the four questions an operator has during an incident:
+    //   "is the worker full?"           → pool_slots_total / pool_slots_active
+    //   "is it hoarding work?"          → pel_depth
+    //   "how long until a run starts?"  → job_wait_before_start_seconds
+    //   "is one tenant eating it?"      → tenant_active_runs / tenant_throttled_total
+
+    /** Configured width of each execution pool. */
+    internal val poolSlotsTotal = WGauge("worker_pool_slots_total", "Configured execution slots per pool", listOf("pool"))
+
+    /** Slots currently occupied by an in-flight run. */
+    internal val poolSlotsActive = WGauge("worker_pool_slots_active", "Occupied execution slots per pool", listOf("pool"))
+
+    /**
+     * Messages THIS worker has read from the consumer group and not yet XACKed.
+     *
+     * This is the metric that makes §1.2 of the execution architecture visible:
+     * a message in this worker's PEL cannot be taken by any other worker until
+     * the idle threshold expires. Depth rising while [poolSlotsActive] is flat
+     * is head-of-line blocking at the stream layer, not a capacity problem.
+     */
+    internal val pelDepth = WGauge("worker_pel_depth", "Stream messages held unacked by this worker", listOf("stream"))
+
+    /** Cost of the classifier's Postgres probe, which sits on the hot path (§6.1). */
+    internal val jobClassifyDurationSeconds = WSecondsHistogram(
+        "job_classify_duration_seconds", "Time to classify a job into an execution class", listOf("result"))
+
+    /**
+     * XADD → RUN_STARTED: the latency a user actually experiences between
+     * pressing Run and the run beginning. Measured from the Redis stream message
+     * ID, which is a millisecond timestamp assigned at enqueue.
+     */
+    internal val jobWaitBeforeStartSeconds = WSecondsHistogram(
+        "job_wait_before_start_seconds", "Seconds between enqueue (XADD) and RUN_STARTED", listOf("class"))
+
+    /** In-flight runs per (workspace, execution class). */
+    internal val tenantActiveRuns = WGauge(
+        "tenant_active_runs", "In-flight runs per workspace and execution class", listOf("workspace", "class"))
+
+    /** Admission refusals, by why. */
+    internal val tenantThrottledTotal = WCounter(
+        "tenant_throttled", "Times a workspace was refused admission", listOf("workspace", "reason"))
+
+    /**
+     * Times the authoritative `run_leases` count came back **above** the
+     * workspace's limit — i.e. the advisory cache admitted more than policy
+     * allows during its staleness window.
+     *
+     * This is the honest price of not putting a database round trip on the
+     * admission hot path, and it is measured rather than assumed. Flat means the
+     * window is small enough. Climbing means either shorten
+     * `TENANT_LOAD_STALENESS_MS` or fold the check into the claim (S06), which
+     * removes the window entirely.
+     *
+     * Note what this does NOT indicate: duplicate execution. That is prevented
+     * by the unique lease row per run, independently of anything here.
+     */
+    internal val tenantAdmissionOvershoot = WCounter(
+        "tenant_admission_overshoot",
+        "Times the authoritative lease count exceeded the workspace limit",
+        listOf("workspace", "dimension"))
+
+    /**
+     * Runs that acquired a lease and were then refused by the hard gate.
+     *
+     * This is the "wasted acquire attempt" the design trades for keeping the
+     * admission hot path off the database: the run took a lease, discovered an
+     * older lease already filled the tenant's quota, and released it. Cheap and
+     * self-correcting — but if it climbs, the advisory cache is too stale and
+     * `TENANT_LOAD_STALENESS_MS` should come down.
+     */
+    internal val tenantClaimRejected = WCounter(
+        "tenant_claim_rejected", "Runs refused at lease-claim time by the hard gate",
+        listOf("workspace", "class"))
+
+    /** Cost of the shared admission query — it runs off the hot path, but not for free. */
+    internal val tenantLoadQuerySeconds = WSecondsHistogram(
+        "tenant_load_query_seconds", "Duration of the run_leases tenant-load query", emptyList())
+
+    /** Outbound call latency, by outcome — timeouts are visible as their own series. */
+    internal val llmCallDurationSeconds = WSecondsHistogram(
+        "llm_call_duration_seconds", "LLM provider call duration", listOf("provider", "outcome"))
+    internal val toolCallDurationSeconds = WSecondsHistogram(
+        "tool_call_duration_seconds", "HTTP tool call duration", listOf("method", "outcome"))
+    internal val tenantDbCallDurationSeconds = WSecondsHistogram(
+        "tenant_db_call_duration_seconds", "Tenant database call duration", listOf("op", "outcome"))
+
+    /**
+     * Accumulated seconds that pool threads spent parked on blocking outbound
+     * I/O. Divide by the scrape interval for "threads blocked on average" — if
+     * that approaches [poolSlotsTotal] for a pool, that pool is not computing,
+     * it is waiting, and adding replicas buys nothing.
+     */
+    internal val threadBlockedSeconds = WDoubleCounter(
+        "thread_blocked_seconds", "Seconds pool threads spent blocked on outbound I/O", listOf("pool"))
+
+    /** Leases that expired rather than being renewed or released — crash proxy. */
+    internal val leaseExpiryTotal = WCounter("lease_expiry", "Run leases observed expired", listOf("source"))
+
+    // ── The resume reconciler ─────────────────────────────────────────────────
+    //
+    // `resumeReconciled` climbing steadily is not a healthy platform: every
+    // increment is a run that was parked with nothing coming for it, rescued by
+    // a sweep. The label says WHICH of the four broken enqueue paths did it, so
+    // a rise points at the one to fix rather than at "Redis was flaky".
+    internal val resumeReconciled = WCounter("resume_reconciled",
+        "Parked runs re-enqueued by the reconciler", listOf("reason"))
+    internal val resumeReconcileFailed = WCounter("resume_reconcile_failed",
+        "Reconciler enqueue attempts that threw", listOf("reason"))
+    // Any increment here is a run a person has to look at.
+    internal val resumeDeadLettered = WCounter("resume_dead_lettered",
+        "Parked runs the reconciler gave up on", listOf("reason"))
+
+    // ── Exactly-once guards ───────────────────────────────────────────────────
+
+    /**
+     * Writes rejected because the worker no longer held the lease.
+     *
+     * A non-zero *rate* is a real signal, not noise: it means leases are being
+     * lost while work is still running, so either the TTL is too short for the
+     * workload or workers are overloaded enough to miss their heartbeats. Either
+     * way, runs are being executed twice up to the point of the fence.
+     */
+    internal val fencedWriteTotal = WCounter(
+        "fenced_write", "Writes rejected because the lease was reassigned", listOf("operation"))
+
+    /**
+     * External calls skipped because the same logical operation already
+     * succeeded — the mechanism doing its job.
+     *
+     * Near zero in steady state. **Non-zero under chaos testing is the proof it
+     * works**: it counts the emails that would otherwise have been sent twice.
+     */
+    internal val sideEffectDedupeTotal = WCounter(
+        "side_effect_dedupe", "External calls skipped because already performed", listOf("effect_type"))
+
+    /**
+     * Side effects whose outcome could not be established — a previous attempt
+     * died mid-call and we refuse to guess.
+     *
+     * Every one of these needs a human. The node fails rather than risk a
+     * duplicate, which is the right trade for an email or a payment and should
+     * be rare enough to investigate individually.
+     */
+    internal val sideEffectUndeterminedTotal = WCounter(
+        "side_effect_undetermined", "Side effects with an unresolvable outcome", listOf("effect_type"))
+
+    /** Jobs that exhausted max_attempts and were dead-lettered. */
+    internal val deadLetterTotal = WCounter(
+        "dead_letter", "Jobs moved to dead_letters after exhausting attempts", listOf("reason"))
+
+    /** Lease extensions that failed because the lease had been reassigned. */
+    internal val leaseStolenTotal = WCounter(
+        "lease_stolen", "Lease heartbeats that found the lease reassigned", emptyList())
+
+    /** Messages recovered from another consumer's PEL via XAUTOCLAIM. */
+    internal val xautoclaimReclaimTotal = WCounter("xautoclaim_reclaim", "Messages reclaimed via XAUTOCLAIM", emptyList())
+
+    // ── Postgres-claim scheduler ──────────────────────────────────────────────
+
+    /**
+     * Claim round-trip latency. The number the brief asks to keep under 100ms p95.
+     *
+     * This is the cost of the transport swap: every claim is now a Postgres query
+     * rather than an XREADGROUP. If it degrades, the index is not being used —
+     * check that the plan still walks `agent_runs_claim_idx` rather than sorting.
+     */
+    internal val claimDurationSeconds = WSecondsHistogram(
+        // §5.4 names this `job_claim_latency_seconds`. Renamed from
+        // `claim_duration_seconds` so the dashboards, the alert and the doc all say the
+        // same word; the metric is unchanged.
+        "job_claim_latency_seconds", "SKIP LOCKED claim round-trip", listOf("class"))
+
+    /**
+     * Run-level ceilings hit, by dimension.
+     *
+     * `steps` climbing is the signal that matters most: it usually means agent
+     * loops in the wild are not reaching their exit conditions, which is a product
+     * problem the ceiling is only containing. `cost` climbing means the default is
+     * too low for real workloads, or too high to protect anyone.
+     */
+    internal val ceilingBreachTotal = WCounter(
+        "run_ceiling_breach", "Runs ended by a per-run ceiling", listOf("dimension"))
+
+    /**
+     * Circuit breaker activity.
+     *
+     * `opened` climbing is a provider incident, not a platform one — the label
+     * that matters is which connection. `rejected` is the win being measured:
+     * every increment is a call that failed in microseconds instead of burning a
+     * 30s socket timeout and a worker permit with it.
+     */
+    internal val circuitOpenedTotal = WCounter("circuit_opened", "Connection circuits opened", emptyList())
+    internal val circuitClosedTotal = WCounter("circuit_closed", "Connection circuits recovered", emptyList())
+    // No connection label: connection ids are unbounded, and one Prometheus series
+    // per connection is how a metrics backend falls over. Which connection is open
+    // is already in `connections.circuit_state`, queryable and shown in the UI.
+    internal val circuitRejectedTotal = WCounter(
+        "circuit_rejected", "Calls rejected fast by an open circuit", emptyList())
+
+    /** Provider 429s that suspended a run instead of holding its permit. */
+    internal val providerThrottleSuspendTotal = WCounter(
+        // §5.4: `provider_429_total{provider}`. The `_total` suffix is appended by the
+        // counter renderer, so the name here stops at `provider_429`.
+        "provider_429", "Runs suspended after a provider 429", listOf("provider", "dimension"))
+
+    /**
+     * Provider calls the capacity bucket refused. §12.4.
+     *
+     * Separate from `provider_429`, and the difference is the point: a 429 is the
+     * provider refusing us, this is us refusing ourselves BEFORE the request. The
+     * first rising while the second stays flat means the bucket is set too high.
+     */
+    internal val providerCapacityExhaustedTotal = WCounter(
+        "provider_capacity_exhausted", "Calls deferred by the local token bucket",
+        listOf("provider", "model", "dimension"))
+
+    /**
+     * Provider 429s actually received, by which limit the provider named.
+     *
+     * `dimension` comes from the rate-limit headers, not from a guess. Together
+     * with `provider_capacity_exhausted` this answers the question the bucket
+     * exists for: refusals rising while 429s stay flat is the bucket working;
+     * 429s rising while refusals stay flat means the limits are set too high.
+     */
+    internal val provider429Total = WCounter(
+        "provider_429_received", "Provider 429 responses received",
+        listOf("provider", "model", "dimension"))
+
+    /**
+     * A 429 that arrived AFTER the bucket admitted the call. **This is a bug in
+     * the bucket, and is counted as one.**
+     *
+     * Distinct from a refusal on purpose. A refusal means the bucket held a call
+     * back and did its job. This means it let one through that it should have
+     * held — so the configured limit is above the provider's real one, the
+     * estimate is short, or something outside this fleet is spending the same
+     * account's budget. Any non-zero value is worth investigating; a rising one
+     * means capacity control is not actually in control.
+     */
+    internal val provider429AfterAdmitTotal = WCounter(
+        "provider_429_after_admit", "429s received on calls the capacity bucket admitted",
+        listOf("provider", "model", "dimension"))
+
+    /** Bucket headroom at reservation time, as a fraction of depth, per dimension. */
+    internal val capacityUtilisation = WRatioHistogram(
+        "provider_capacity_utilisation", "Bucket fill at reserve time (0-1)",
+        listOf("provider", "model", "dimension"))
+
+    /** Reservations granted, by account fingerprint prefix and lane. */
+    internal val capacityReservedTotal = WCounter(
+        "provider_capacity_reserved", "Reservations granted", listOf("provider", "model", "lane"))
+
+    /**
+     * Reservations reclaimed by TTL rather than settled — a LEAKED reservation.
+     *
+     * Expected to be near zero. Non-zero means workers are dying mid-call, which
+     * the bucket survives by design (the lease expires and the tokens come back)
+     * but which is worth seeing, because until the TTL fires that capacity is
+     * unavailable to everyone else on the account.
+     */
+    internal val capacityLeasesExpiredTotal = WCounter(
+        "provider_capacity_leases_expired", "Reservations returned by TTL, not by settle",
+        emptyList())
+
+    /**
+     * Actual input tokens divided by what was reserved for them.
+     *
+     * 1.0 is a perfect estimate; above 1.0 is UNDER-reservation, which is the
+     * direction that causes 429s. The distribution is the point — a mean near 1.0
+     * hides a p95 of 1.4, and it is the p95 calls that breach the limit.
+     */
+    internal val estimateErrorRatio = WRatioHistogram(
+        "provider_estimate_error_ratio", "actual input tokens / reserved input tokens",
+        listOf("model", "shape"))
+
+    /** Runs claimed, by class. */
+    internal val claimedTotal = WCounter("claimed", "Runs claimed from Postgres", listOf("class"))
+
+    /**
+     * Runs claimed while only the reserved priority permits were free.
+     *
+     * Every increment is a run that would have queued behind ordinary traffic
+     * without the reserve. Flat at zero means the reserve is never being used and
+     * could be released back to general capacity; climbing steadily means the pool
+     * is undersized, and the demo lane is masking it.
+     */
+    internal val claimReservedLaneTotal = WCounter(
+        "claim_reserved_lane", "Runs claimed from the reserved priority slots", listOf("class"))
+
+    /** Runs recovered from a stale `claimed` state — a worker died before leasing. */
+    internal val claimReclaimedTotal = WCounter(
+        "claim_reclaimed", "Runs returned to the queue after a stale claim", emptyList())
+
+    /**
+     * Wakeups, by source.
+     *
+     * `notify` near zero while `safety_poll` climbs is the pooler trap: LISTEN
+     * was silently dropped and the system is running on the fallback poll while
+     * looking event-driven. See ClaimWakeup.
+     */
+    internal val claimWakeupTotal = WCounter(
+        "claim_wakeup", "Claim-loop wakeups by source", listOf("source"))
+
+    // ── Isolated tenant-database dispatcher ───────────────────────────────────
+    //
+    // Watched separately from the execution pools on purpose: the whole point of
+    // the dispatcher is that these numbers can saturate without any pool metric
+    // moving. `tenant_db_slots_active` at its ceiling while
+    // `worker_pool_slots_active` is healthy is containment working, not an outage.
+
+    internal val tenantDbSlotsTotal = WGauge(
+        "tenant_db_slots_total", "Threads available for tenant-database node execution", emptyList())
+    internal val tenantDbSlotsActive = WGauge(
+        "tenant_db_slots_active", "Tenant-database queries currently executing", emptyList())
+    internal val tenantDbQueueDepth = WGauge(
+        "tenant_db_queue_depth", "Tenant-database node executions waiting for a thread", emptyList())
+
+    /**
+     * Nodes refused because the dispatcher was full.
+     *
+     * Non-zero means one or more tenant databases are unresponsive and the
+     * platform chose to fail those runs rather than let the hang spread. It is
+     * the metric to alert on for "a customer's database is down", and it should
+     * be read alongside `tenant_db_call_duration_seconds{outcome="socket_timeout"}`.
+     */
+    internal val tenantDbRejectedTotal = WCounter(
+        "tenant_db_rejected", "Tenant-database nodes refused because the dispatcher was full", emptyList())
+
+    // ── JVM cost of the configured pool sizes ─────────────────────────────────
+    //
+    // Thread-per-run has a real ceiling and these are how it is found. Sampled at
+    // scrape time rather than tracked continuously — they are process facts, not
+    // events.
+
+    internal val jvmThreads = WGauge("jvm_threads_live", "Live JVM threads", emptyList())
+    internal val jvmThreadsPeak = WGauge("jvm_threads_peak", "Peak live JVM threads since start", emptyList())
+    internal val jvmHeapUsedBytes = WGauge("jvm_heap_used_bytes", "Used heap", emptyList())
+    internal val jvmHeapMaxBytes = WGauge("jvm_heap_max_bytes", "Maximum heap", emptyList())
+    internal val jvmCpuSeconds = WGauge("jvm_process_cpu_seconds", "Process CPU time consumed", emptyList())
+    internal val jvmCpuLoad = WGauge("jvm_process_cpu_load", "Process CPU load, 0..1 across all cores", emptyList())
+
+    // ── §5.4 metrics that did not exist before ────────────────────────────────
+
+    /**
+     * Free execution slots across every pool on this worker.
+     *
+     * §5.4 lists `worker_slots_available` unlabelled, and that is deliberate: it is the
+     * number an operator glances at to answer "can this worker take more work". The
+     * per-pool breakdown is still there as `worker_pool_capacity_available{pool}` for
+     * when the answer is "yes overall, no for agents".
+     */
+    internal val workerSlotsAvailable = WGauge(
+        "worker_slots_available", "Free execution slots across all pools on this worker", emptyList())
+
+    /**
+     * Runs waiting in Postgres, by workspace and priority.
+     *
+     * Sampled rather than incremented: queue depth is a property of a table that many
+     * processes write, so counting locally would drift the moment anything else claimed
+     * or enqueued. [sampleQueueDepth] runs on scrape.
+     */
+    internal val jobQueueDepth = WGauge(
+        "job_queue_depth", "Runs queued and not yet claimed", listOf("workspace", "priority"))
+
+    /**
+     * How long a node took, by kind.
+     *
+     * `worker_run_duration_ms` measures whole runs, which conflates "the model was slow"
+     * with "the workflow has forty nodes". §5.4 asks for the per-node view by node_kind,
+     * which is the one that identifies WHICH step is slow.
+     */
+    internal val jobExecutionDurationSeconds = WSecondsHistogram(
+        "job_execution_duration_seconds", "Node execution duration", listOf("node_kind", "outcome"))
+
+    /**
+     * Time spent waiting for a connection from the pool.
+     *
+     * §5.4: "rising means the DB pool is the bottleneck". This is the metric that
+     * distinguishes a slow query from no connection to run it on - two problems with
+     * identical symptoms at the request layer and opposite fixes.
+     */
+    internal val dbPoolWaitSeconds = WSecondsHistogram(
+        "db_pool_wait_seconds", "Time waiting to acquire a pooled connection", listOf("pool"))
+
+    /**
+     * Runs that suspended rather than holding a slot.
+     *
+     * §5.4: "should be free; confirm it isn't holding slots". The confirmation is the
+     * pairing - this counter climbing while `worker_in_flight` does not is suspension
+     * working. Both climbing together means a suspend path is still occupying a permit.
+     */
+    internal val runSuspendedTotal = WCounter(
+        "run_suspended", "Runs suspended without holding an execution slot", listOf("reason"))
+
+    /**
+     * Where the queue-depth sample comes from.
+     *
+     * Set by Main once the DataSource exists. Null in tests and before startup, in which
+     * case the gauge simply reports nothing rather than the process failing to scrape.
+     */
+    @Volatile var queueDepthSource: (() -> List<Triple<String, String, Long>>)? = null
+
+    private fun sampleQueueDepth() {
+        val source = queueDepthSource ?: return
+        try {
+            for ((workspace, priority, depth) in source()) {
+                jobQueueDepth.set(depth.toDouble(), workspace, priority)
+            }
+        } catch (_: Exception) { /* a scrape must not fail because Postgres is busy */ }
+    }
+
+    // ── Cost ──────────────────────────────────────────────────────────────────
+    //
+    // ON THE CARDINALITY OF THESE THREE
+    // ---------------------------------
+    // `workspace` and `workflow` are both unbounded in principle — one series per
+    // (workspace, workflow, model) combination, retained for the full 15 days. That is
+    // the highest-cardinality thing in this process by a wide margin.
+    //
+    // It is accepted rather than avoided, for a specific reason: "which customer is
+    // costing me money" is the question this system's economics depend on, and it
+    // cannot be answered by an aggregate. LabelGuard caps each metric at 1,000 distinct
+    // label sets and collapses the rest into `overflow`, so the failure mode is a
+    // dashboard that stops distinguishing the long tail — not a worker that runs out of
+    // memory.
+    //
+    // If that cap is ever reached, the right move is to drop `workflow` from the labels
+    // and read per-workflow cost from `agent_runs.estimated_cost_usd` in Postgres,
+    // where it already lives and where cardinality is free. Prometheus is the wrong
+    // store for high-cardinality attribution; it is used here only because the
+    // cardinality is currently small and the convenience is real.
+
+    /** Tokens consumed, split by direction so input/output pricing can be applied. */
+    internal val llmTokensTotal = WCounter(
+        "llm_tokens", "Tokens consumed by model calls",
+        listOf("workspace", "workflow", "model", "direction"))
+
+    /**
+     * Estimated spend in USD micros.
+     *
+     * Micros rather than dollars because this is an integer counter and a fractional
+     * cent per call would truncate to zero — the metric would read 0.0 forever while
+     * real money was being spent, which is the worst possible failure for a cost meter.
+     * The dashboard divides by 1e6.
+     */
+    internal val llmCostMicros = WCounter(
+        "llm_cost_usd_micros", "Estimated model spend in USD micros",
+        listOf("workspace", "workflow", "model"))
+
+    /** Model calls, so cost per call and call volume are both available. */
+    internal val llmCallsTotal = WCounter(
+        "llm_calls", "Model calls made", listOf("workspace", "model", "outcome"))
+
+    /** Refresh the JVM gauges. Called on each scrape. */
+    private fun sampleJvm() {
+        try {
+            val threads = java.lang.management.ManagementFactory.getThreadMXBean()
+            jvmThreads.set(threads.threadCount.toDouble())
+            jvmThreadsPeak.set(threads.peakThreadCount.toDouble())
+
+            val heap = java.lang.management.ManagementFactory.getMemoryMXBean().heapMemoryUsage
+            jvmHeapUsedBytes.set(heap.used.toDouble())
+            jvmHeapMaxBytes.set(heap.max.toDouble())
+
+            val os = java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+            if (os is com.sun.management.OperatingSystemMXBean) {
+                jvmCpuSeconds.set(os.processCpuTime / 1_000_000_000.0)
+                jvmCpuLoad.set(os.processCpuLoad.coerceAtLeast(0.0))
+            }
+        } catch (_: Exception) { /* metrics must never break a scrape */ }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Run [block], attributing its wall-clock duration to [threadBlockedSeconds]
+     * for the pool that owns the current thread.
+     *
+     * The pool is read from the thread name (`vectorbea-worker-agent-3` → `agent`)
+     * rather than threaded through every call site, so it stays correct when a
+     * node type moves between pools.
+     */
+    fun <T> timeBlocking(block: () -> T): T {
+        val startedAt = System.nanoTime()
+        try {
+            return block()
+        } finally {
+            val seconds = (System.nanoTime() - startedAt) / 1_000_000_000.0
+            threadBlockedSeconds.add(seconds, currentPoolLabel())
+        }
+    }
+
+    /**
+     * The thread family doing the blocking, derived from the thread name.
+     *
+     *   `vectorbea-worker-agent-3` → `agent`   (a class pool thread)
+     *   `wf-node-42`               → `node`    (the per-node timeout pool)
+     *   `wf-branch-17`             → `branch`  (parallel-branch execution)
+     *   anything else              → `other`
+     *
+     * `node` dominating this metric is the expected — and important — reading:
+     * WorkflowRuntime dispatches every node onto `nodeTimeoutExecutor` and the
+     * class-pool thread then blocks on the future. So outbound I/O is served by
+     * `wf-node-*` threads while the class slot is held by a thread waiting on
+     * them. Both are occupied; only one is doing the socket read. Attributing
+     * the seconds to the thread that is actually blocked is what makes the
+     * distinction visible.
+     */
+    fun currentPoolLabel(): String {
+        val name = Thread.currentThread().name
+        return when {
+            name.startsWith("vectorbea-worker-") ->
+                name.removePrefix("vectorbea-worker-").substringBeforeLast('-').ifEmpty { "other" }
+            name.startsWith("wf-node-") -> "node"
+            name.startsWith("wf-branch-") -> "branch"
+            // The isolated tenant-database dispatcher. Seconds here are the
+            // containment working: this is time a tenant's broken database cost
+            // that no pool thread paid.
+            name.startsWith("tenant-db-") -> "tenant-db"
+            else -> "other"
+        }
+    }
 
     // ── Exposition ────────────────────────────────────────────────────────────
 
     fun scrape(): String = buildString {
+        sampleJvm()
+        sampleQueueDepth()
         listOf(
             activeTasks, heartbeatAgeSeconds,
             runsQueued, runsSucceeded, runsFailed, runsCancelled,
@@ -154,13 +923,40 @@ object WorkerMetrics {
             tenantThrottled, poolSaturated,
             runYields, runReenqueued, runTickDuration,
             redisXadd, redisXreadgroup, redisXack,
-            pelParked, pelReclaimed, pollBackoffMs, localBufferSize,
+            pelParked, pelReclaimed, pollBackoffMs, localBufferSize, readBatchSize,
+            poolSlotsTotal, poolSlotsActive, pelDepth,
+            jobClassifyDurationSeconds, jobWaitBeforeStartSeconds,
+            tenantActiveRuns, tenantThrottledTotal, tenantAdmissionOvershoot, tenantClaimRejected, tenantLoadQuerySeconds,
+            llmCallDurationSeconds, toolCallDurationSeconds, tenantDbCallDurationSeconds,
+            threadBlockedSeconds, leaseExpiryTotal, xautoclaimReclaimTotal,
+            resumeReconciled, resumeReconcileFailed, resumeDeadLettered,
+            claimDurationSeconds, claimedTotal, claimReclaimedTotal, claimWakeupTotal,
+            claimReservedLaneTotal, ceilingBreachTotal,
+            circuitOpenedTotal, circuitClosedTotal, circuitRejectedTotal,
+            providerThrottleSuspendTotal, providerCapacityExhaustedTotal,
+            provider429Total, provider429AfterAdmitTotal, capacityReservedTotal,
+            capacityLeasesExpiredTotal, capacityUtilisation, estimateErrorRatio,
+            fencedWriteTotal, sideEffectDedupeTotal, sideEffectUndeterminedTotal,
+            deadLetterTotal, leaseStolenTotal,
+            tenantDbSlotsTotal, tenantDbSlotsActive, tenantDbQueueDepth, tenantDbRejectedTotal,
+            workerSlotsAvailable, jobQueueDepth, jobExecutionDurationSeconds,
+            dbPoolWaitSeconds, runSuspendedTotal,
+            llmTokensTotal, llmCostMicros, llmCallsTotal,
+            /* Declared since the tracing work landed and never rendered, so
+               `droppedCount()` was readable only from a debugger. The Debug tab
+               asserted drops it had no signal for while the signal sat here
+               unexposed. */
+            spansWritten, spansDropped, eventsDropped, traceExportsDropped, partitionDropsGated,
+            jvmThreads, jvmThreadsPeak, jvmHeapUsedBytes, jvmHeapMaxBytes, jvmCpuSeconds, jvmCpuLoad,
         ).forEach { m ->
             try {
                 append(when (m) {
-                    is WGauge     -> m.exposition()
-                    is WCounter   -> m.exposition()
-                    is WHistogram -> m.exposition()
+                    is WGauge            -> m.exposition()
+                    is WCounter          -> m.exposition()
+                    is WHistogram        -> m.exposition()
+                    is WSecondsHistogram -> m.exposition()
+                    is WRatioHistogram   -> m.exposition()
+                    is WDoubleCounter    -> m.exposition()
                     else -> ""
                 })
             } catch (_: Exception) { /* skip broken metric */ }

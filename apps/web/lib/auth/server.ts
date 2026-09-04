@@ -2,7 +2,7 @@ import "server-only";
 import type { ReadonlyRequestCookies } from "next/dist/server/web/spec-extension/adapters/request-cookies";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 import { verifyToken } from "@/lib/auth/jwt";
-import { getUserById, getUserWorkspaces, isEmailVerified, getUserBetaStatus } from "@/lib/auth/neon-auth";
+import { getUserById, getUserWorkspaces } from "@/lib/auth/neon-auth";
 
 export function getAccessTokenFromCookies(
   cookieStore: Pick<ReadonlyRequestCookies, "get">,
@@ -23,26 +23,13 @@ export async function getAuthenticatedUserFromCookies(
 export async function getPostLoginRedirectForUser(
   userId: string,
 ): Promise<{ redirectTo: string; organizations: import("@/lib/api").OrganizationView[] }> {
-  // Gate ordering mirrors the (app) layout: verify email → beta approval → app.
-  // Already-authenticated visits to /signin and /signup follow this path.
-  try {
-    if (!(await isEmailVerified(userId))) {
-      return { redirectTo: "/verify-email", organizations: [] };
-    }
-    if (process.env.NEXT_PUBLIC_PRIVATE_BETA_MODE !== "false") {
-      const bs = await getUserBetaStatus(userId);
-      const approved = bs?.betaStatus === "approved" || bs?.isPlatformAdmin === true;
-      if (!approved) return { redirectTo: "/beta", organizations: [] };
-    }
-  } catch {
-    // DB hiccup — fall through to the dashboard; the layout gates re-check there
-  }
-
   const workspaces = await getUserWorkspaces(userId);
   const first = workspaces[0];
+  // /control is the landing surface. The old /dashboard is no longer part of the
+  // navigation, so sending people there after sign-in stranded them off the map.
   const redirectTo = first
-    ? `/dashboard?org=${encodeURIComponent(first.id)}`
-    : "/dashboard";
+    ? `/control?org=${encodeURIComponent(first.id)}`
+    : "/control";
 
   // Map each Neon workspace into OrganizationView shape so the WorkspaceSwitcher
   // can list and switch between all workspaces the user belongs to.
@@ -61,6 +48,46 @@ export async function getPostLoginRedirectForUser(
   }));
 
   return { redirectTo, organizations };
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   "ALREADY SIGNED IN — WHERE DO THEY GO?"
+
+   `/signin`, `/signup` and `/login` each answered this themselves, and each got
+   it wrong in the same way: the `redirect()` call sat inside a `try/catch` that
+   existed to tolerate a missing JWT_SECRET. `redirect()` works by THROWING an
+   error carrying the digest `NEXT_REDIRECT`, so the catch swallowed it and the
+   page went on to render the sign-in form — to somebody who was already signed
+   in. Anything that took a user out of the app shell and back in through an auth
+   route therefore demanded a fresh sign-in for a session they still had.
+
+   One implementation, here, so the three pages cannot drift again: everything
+   that can throw happens inside this function, the answer comes back as a value,
+   and the page calls `redirect()` on it where nothing can intercept the throw.
+══════════════════════════════════════════════════════════════════════════════ */
+export async function resolveSignedInDestination(
+  cookieStore: Pick<ReadonlyRequestCookies, "get">,
+  next?: string,
+): Promise<string | null> {
+  try {
+    const user = await getAuthenticatedUserFromCookies(cookieStore);
+    if (!user) return null;
+    // Site-relative only. `//host` is protocol-relative and would leave the site,
+    // so it is rejected alongside absolute URLs.
+    if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+    try {
+      return (await getPostLoginRedirectForUser(user.id)).redirectTo;
+    } catch {
+      // The workspace lookup failed but the SESSION is valid, so the answer is
+      // still "into the app". Falling back to the sign-in form here is what
+      // turned a transient database blip into a forced re-login.
+      return "/control";
+    }
+  } catch {
+    // No JWT_SECRET, or the token is missing/invalid/expired. Genuinely signed
+    // out: the caller should render the form.
+    return null;
+  }
 }
 
 export async function loadProfileForUser(

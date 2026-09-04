@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { CalendarClock, ExternalLink, Pause, Play, RefreshCw, Clock } from "lucide-react";
 
@@ -53,7 +53,7 @@ export default function SchedulesPage() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"ALL" | "ACTIVE" | "PAUSED">("ALL");
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -72,9 +72,9 @@ export default function SchedulesPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [activeWorkspaceId]);
 
-  useEffect(() => { void load(); }, [activeWorkspaceId]);
+  useEffect(() => { void load(); }, [load]);
 
   async function toggleSchedule(s: Schedule) {
     if (!activeWorkspaceId) return;

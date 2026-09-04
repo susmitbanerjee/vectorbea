@@ -10,6 +10,21 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * Who is signed in, and where they belong.
+ *
+ * Read by the marketing nav to decide between "Sign in / Start free" and the
+ * account avatar. 401 is the honest answer for a visitor with no session and is
+ * what makes the landing page fall back cleanly — it is not an error.
+ *
+ * THE PROFILE LOOKUP MUST NOT DECIDE WHETHER YOU ARE SIGNED IN. Both calls
+ * below reach the database, and they used to sit in a bare `Promise.all`: a
+ * transient database fault turned a perfectly valid session into a 500, which
+ * every caller reads as "not signed in". The session is proven by the verified
+ * cookie above and nothing else; the name, the picture and the workspace-scoped
+ * landing path are decoration on top of it, and a decoration that fails degrades
+ * to the plain answer.
+ */
 export async function GET() {
   const cookieStore = await cookies();
   const user = await getAuthenticatedUserFromCookies(cookieStore);
@@ -18,14 +33,16 @@ export async function GET() {
     return NextResponse.json({ authenticated: false, redirectTo: "/login" }, { status: 401 });
   }
 
-  const [{ redirectTo }, profile] = await Promise.all([
-    getPostLoginRedirectForUser(user.id),
-    loadProfileForUser(user.id),
+  const [redirect, profile] = await Promise.all([
+    getPostLoginRedirectForUser(user.id).catch(() => null),
+    loadProfileForUser(user.id).catch(() => null),
   ]);
 
   return NextResponse.json({
     authenticated: true,
-    redirectTo,
+    // /control is the landing surface for an account whose workspaces could not
+    // be read; it resolves the workspace itself.
+    redirectTo: redirect?.redirectTo ?? "/control",
     user: {
       id:       user.id,
       email:    user.email,

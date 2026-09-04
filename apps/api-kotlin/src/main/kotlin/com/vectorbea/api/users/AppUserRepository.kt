@@ -25,6 +25,14 @@ class AppUserRepository(private val ds: DataSource) {
         val fullName: String?,
         val avatarUrl: String?,
         val authorizedWorkspaceIds: Set<UUID>,
+        /**
+         * Workspace id -> role, for the workspaces this user is an ACTIVE member of.
+         *
+         * Membership alone was carried before, which is why every member could
+         * write: the request context could answer "are you in this workspace"
+         * and had no way to answer "as what".
+         */
+        val workspaceRoles: Map<UUID, String> = emptyMap(),
         val betaStatus: String = "waitlisted",
         val isPlatformAdmin: Boolean = false,
     )
@@ -37,13 +45,15 @@ class AppUserRepository(private val ds: DataSource) {
     ): UserProfile {
         ds.connection.use { conn ->
             val userId = upsertUser(conn, supabaseUserId, email, fullName, avatarUrl)
-            var workspaceIds = loadWorkspaces(conn, userId)
+            var roles = loadWorkspaceRoles(conn, userId)
+            var workspaceIds = roles.keys
 
             if (workspaceIds.isEmpty()) {
                 val bootstrapped = bootstrapIfFirst(conn, userId)
                 if (bootstrapped != null) {
                     log.info("[auth] bootstrapped user {} as owner of workspace {}", supabaseUserId, bootstrapped)
-                    workspaceIds = setOf(bootstrapped)
+                    roles = mapOf(bootstrapped to "owner")
+                    workspaceIds = roles.keys
                 } else {
                     log.warn("[auth] user {} has no workspace memberships", supabaseUserId)
                 }
@@ -70,6 +80,7 @@ class AppUserRepository(private val ds: DataSource) {
                 fullName               = fullName,
                 avatarUrl              = avatarUrl,
                 authorizedWorkspaceIds = workspaceIds,
+                workspaceRoles         = roles,
                 betaStatus             = betaStatus,
                 isPlatformAdmin        = isAdmin,
             )
@@ -148,14 +159,15 @@ class AppUserRepository(private val ds: DataSource) {
                 stmt.setObject(1, userId)
                 val rs = stmt.executeQuery()
                 if (!rs.next()) return null
-                val wsIds = loadWorkspaces(conn, userId)
+                val roles = loadWorkspaceRoles(conn, userId)
                 return UserProfile(
                     id                     = UUID.fromString(rs.getString("id")),
                     supabaseUserId         = rs.getString("supabase_user_id"),
                     email                  = rs.getString("email"),
                     fullName               = rs.getString("full_name"),
                     avatarUrl              = rs.getString("avatar_url"),
-                    authorizedWorkspaceIds = wsIds,
+                    authorizedWorkspaceIds = roles.keys,
+                    workspaceRoles         = roles,
                     betaStatus             = rs.getString("beta_status"),
                     isPlatformAdmin        = rs.getBoolean("is_platform_admin"),
                 )
@@ -238,15 +250,24 @@ class AppUserRepository(private val ds: DataSource) {
         }
     }
 
-    private fun loadWorkspaces(conn: Connection, userId: UUID): Set<UUID> {
+    /**
+     * Every active membership and the role it carries.
+     *
+     * Selects the role alongside the id in the same query the auth path already
+     * ran — authorization needs both, and fetching them separately invites the
+     * two to disagree.
+     */
+    private fun loadWorkspaceRoles(conn: Connection, userId: UUID): Map<UUID, String> {
         conn.prepareStatement(
-            "SELECT workspace_id FROM workspace_members WHERE user_id = ? AND status = 'active'"
+            "SELECT workspace_id, role FROM workspace_members WHERE user_id = ? AND status = 'active'"
         ).use { stmt ->
             stmt.setObject(1, userId)
             val rs = stmt.executeQuery()
-            val ids = mutableSetOf<UUID>()
-            while (rs.next()) ids += UUID.fromString(rs.getString("workspace_id"))
-            return ids
+            val roles = mutableMapOf<UUID, String>()
+            while (rs.next()) {
+                roles[UUID.fromString(rs.getString("workspace_id"))] = rs.getString("role") ?: "viewer"
+            }
+            return roles
         }
     }
 

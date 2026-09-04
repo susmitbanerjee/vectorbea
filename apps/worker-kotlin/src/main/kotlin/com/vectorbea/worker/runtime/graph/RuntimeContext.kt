@@ -1,5 +1,8 @@
 package com.vectorbea.worker.runtime.graph
 
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
+
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
@@ -35,6 +38,91 @@ class RuntimeContext(
      * The step-idempotency guard is bypassed for these so a deliberate retry always runs.
      */
     val forceReexecuteNodeIds: Set<String> = emptySet(),
+    /**
+     * Which logical attempt-group this run belongs to.
+     *
+     * Increments only on user-initiated re-runs, never on automatic retries, and
+     * is the third component of every side-effect idempotency key. That is what
+     * makes a retry share a key with the operation it retries (so it dedupes)
+     * while a deliberate re-run gets a fresh one (so it genuinely runs again).
+     */
+    val attemptGroup: Int = 0,
+    /**
+     * The lease token this worker holds for the run, or null when unfenced.
+     * Recorded on side effects so an incident can be traced to a worker+lease.
+     */
+    val leaseToken: String? = null,
+    /**
+     * Whether an agent step may rebuild its loop from persisted iterations instead
+     * of replaying from iteration 1.
+     *
+     * TRUE FOR A CONTINUATION, FALSE FOR A FRESH START. A RESUME_RUN — after an
+     * approval, a timer, a yield, or a crash-recovery re-enqueue — is the same
+     * logical execution picking up where it stopped, and repeating the LLM calls it
+     * already paid for is pure waste. A RETRY_NODE or a REPLAY_RUN is not: someone
+     * asked for the work to happen AGAIN, and a replay in particular exists to
+     * re-exercise the provider calls that reconstruction would skip.
+     *
+     * Passed explicitly rather than derived from [attemptGroup], which would be the
+     * natural home for it, because attemptGroup is currently always 0 — nothing
+     * increments it — and fixing that changes idempotency key derivation, which is
+     * its own decision. When it is wired, this flag should be derived from it and
+     * this parameter deleted.
+     */
+    val allowLoopReconstruction: Boolean = false,
+    /**
+     * Replay this agent step from iteration N, restoring 1..N-1 and running live
+     * from N onward.
+     *
+     * ── WHY THIS IS A CONTEXT FIELD AND NOT A JOB TYPE ──────────────────────
+     * It is not a different kind of execution — it is the SAME agent loop with a
+     * ceiling on how much of its transcript to restore. A separate job type would
+     * duplicate the whole dispatch path to change one integer.
+     *
+     * Null on every ordinary run and every resume, so the resume path is
+     * unchanged by construction. Only a replay request sets it.
+     */
+    val replayFromIteration: Int? = null,
+    /**
+     * Trace bookkeeping for this run execution, or null when tracing is off.
+     *
+     * Carried here because it is the one object every layer already receives.
+     * Observability only: nothing reads it to make a decision, and every call
+     * through it is null-safe, so a run behaves identically with it absent.
+     */
+    val tracer: com.vectorbea.worker.events.RunTracer? = null,
+    /**
+     * When this tick's execution budget runs out, as epoch millis. Null when
+     * unbounded.
+     *
+     * ── WHY A NODE CAN SEE THIS AT ALL ──────────────────────────────────────
+     * `WorkflowRuntime` checks the budget BETWEEN nodes, which is right for every
+     * node that finishes in one bounded operation. An `agent_team` node does not:
+     * it is several agent loops, and a fan-out to five workers can outlast a tick
+     * on its own. Between-nodes checking would let one team node hold a worker for
+     * the whole fan-out and then discover the tick was spent.
+     *
+     * Read-only and advisory. Nothing decides a RUN outcome from it — the team
+     * uses it to stop STARTING new children, and the children it already created
+     * are durable and reattach, so the resumed execution continues rather than
+     * repeating. It is not a second budget, and it is not a scheduler.
+     */
+    val tickDeadlineAtMs: Long? = null,
+    /**
+     * Which queue lane this run came off, or null when unknown.
+     *
+     * ── WHY A NODE NEEDS TO KNOW ────────────────────────────────────────────
+     * §12.4's provider token bucket gives interactive lanes first draw: batch
+     * work may only draw a bucket down to a reserved floor, interactive may draw
+     * it to zero. That is a property of the RUN, decided at claim time, and the
+     * only object every layer already receives is this one.
+     *
+     * Advisory and read-only, like [tickDeadlineAtMs]. Nothing decides a run
+     * outcome from it, and a null lane behaves as batch — the conservative
+     * reading, since mislabelling batch work as interactive is what would let a
+     * fan-out eat the reserve it exists to protect.
+     */
+    val executionLane: com.vectorbea.worker.queue.WorkerJobType? = null,
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()
@@ -204,6 +292,9 @@ class RuntimeContext(
             graph = graph,
             debugMode = debugMode,
             forceReexecuteNodeIds = forceReexecuteNodeIds,
+            /* A forked branch is the same run on the same lane. Dropping it here
+               would silently demote every parallel branch to batch. */
+            executionLane = executionLane,
         )
         child.sequence = sequence
         // Copy parent outputs and edge selections so child can reference prior steps

@@ -1,39 +1,71 @@
 import "server-only";
 
-const APP_URL = () => process.env.APP_URL ?? "https://app.vectorbea.app";
-const PREF_URL = (workspaceId: string) =>
-  `${APP_URL()}/settings?tab=notifications${workspaceId ? `&org=${encodeURIComponent(workspaceId)}` : ""}`;
+/**
+ * Where the links point.
+ *
+ * `NEXT_PUBLIC_APP_URL` first, because that is the variable the rest of the app
+ * reads and the one that is actually set. `APP_URL` was read alone here, is set
+ * nowhere, and its fallback was `app.vectorbea.app` — a host that does not
+ * serve this product. Every link in every email pointed at it.
+ */
+const APP_URL = () =>
+  (process.env.NEXT_PUBLIC_APP_URL ?? process.env.APP_URL ?? "https://vectorbea.com").replace(/\/+$/, "");
+
+const SETTINGS_URL = (workspaceId?: string) =>
+  `${APP_URL()}/settings${workspaceId ? `?org=${encodeURIComponent(workspaceId)}` : ""}`;
 
 type StatusTone = "success" | "warning" | "failure" | "info" | "neutral";
 
-// ─── Design tokens ─────────────────────────────────────────────────────────────
+/* ─── Design tokens ───────────────────────────────────────────────────────────
+   THE PRODUCT'S PALETTE, NOT A SECOND ONE.
+
+   These were a warm cream page (`#F8F5EF`) over generic Tailwind greys and
+   blues — the amber marketing identity, which is a different visual language
+   from the app the recipient lands in. An email that looks like another product
+   is the last thing somebody sees before deciding whether a link is genuine.
+
+   Every value below is the literal resolution of a token in
+   `src/styles/tokens/colour.css`, light theme, named in the comment. Email has
+   no CSS variables, so this is the one place they are restated — the mapping is
+   spelled out so a token change can be followed here.
+─────────────────────────────────────────────────────────────────────────────── */
 const T = {
-  page:          "#F8F5EF",
-  card:          "#FFFFFF",
-  border:        "#E5E0D8",
-  borderStrong:  "#DED8CE",
-  textPrimary:   "#111827",
-  textBody:      "#1F2937",
-  textSecondary: "#374151",
-  textMuted:     "#4B5563",
-  accent:        "#2563EB",
-  accentDark:    "#1D4ED8",
-  successText:   "#047857",
-  successHeading:"#064E3B",
-  successBg:     "#ECFDF5",
-  successBorder: "#A7F3D0",
-  warningText:   "#D97706",
-  warningHeading:"#92400E",
-  warningBg:     "#FFFBEB",
-  warningBorder: "#FDE68A",
-  failureText:   "#DC2626",
-  failureHeading:"#991B1B",
-  failureBg:     "#FEF2F2",
-  failureBorder: "#FECACA",
-  infoText:      "#1D4ED8",
-  infoBg:        "#EFF6FF",
-  infoBorder:    "#BFDBFE",
-  neutralBg:     "#FAF7F0",
+  page:          "#f3f5f9", // --bg-canvas  (paper-100)
+  card:          "#ffffff", // --bg-base    (paper-0)
+  sunken:        "#f3f5f9", // --bg-sunken  (paper-100)
+  border:        "#e9ecf3", // --border-subtle (paper-200)
+  borderStrong:  "#d7dce7", // paper-300
+  textMax:       "#0a0c12", // --fg-max       (paper-1000)
+  textPrimary:   "#1b2030", // --fg-primary   (paper-900)
+  textBody:      "#1b2030", // --fg-primary
+  textSecondary: "#4a5266", // --fg-secondary (paper-700)
+  textMuted:     "#5e6880", // --fg-muted     (paper-600)
+
+  // Brand. Iris is the only hue permitted to mean "Vectorbea".
+  accent:        "#4644d6", // --accent       (iris-600)
+  accentDark:    "#3735ac", // --accent-hover (iris-700)
+  accentSubtle:  "#eff0fe", // --accent-subtle(iris-50)
+
+  successText:   "#0a7a4f", // --status-success        (verdant-700)
+  successHeading:"#0a7a4f",
+  successBg:     "#e6f7ef", // --status-success-subtle (verdant-50)
+  successBorder: "#0e9c66", // --status-success-border (verdant-600)
+
+  warningText:   "#94520f", // --status-waiting        (ember-700)
+  warningHeading:"#94520f",
+  warningBg:     "#ffe3bc", // --status-waiting-subtle (ember-200)
+  warningBorder: "#94520f", // --status-waiting-border (ember-700)
+
+  failureText:   "#ac1c33", // --status-failed        (signal-700)
+  failureHeading:"#ac1c33",
+  failureBg:     "#fdeaed", // --status-failed-subtle (signal-50)
+  failureBorder: "#d62842", // --status-failed-border (signal-600)
+
+  infoText:      "#0a748f", // --status-live        (pulse-700)
+  infoBg:        "#e3f6fb", // --status-live-subtle (pulse-50)
+  infoBorder:    "#0c93b4", // --status-live-border (pulse-600)
+
+  neutralBg:     "#f3f5f9", // --bg-sunken
 } as const;
 
 function toneColors(tone: StatusTone) {
@@ -98,6 +130,32 @@ function nextStep(text: string): string {
 </div>`;
 }
 
+/**
+ * The same destination as the button, in copyable plain text.
+ *
+ * Corporate mail clients and security gateways routinely strip or rewrite
+ * styled anchors, and a recipient staring at a dead button has no way to
+ * proceed. On an invitation this is the difference between joining and giving
+ * up, so it is not optional decoration.
+ */
+function linkFallback(href: string): string {
+  return `<p style="margin:0 0 4px;font-size:12px;color:${T.textMuted};line-height:1.5;">Or paste this into your browser:</p>
+<p style="margin:0 0 20px;font-size:12px;line-height:1.5;word-break:break-all;"><a href="${href}" style="color:${T.accent};text-decoration:none;">${esc(href)}</a></p>`;
+}
+
+/** One line of facts, comma-separated. Lighter than a table when there are two or three. */
+function metaLine(parts: Array<{ label: string; value: string | null | undefined }>): string {
+  const filtered = parts.filter((part) => part.value != null && String(part.value).trim().length > 0);
+  if (filtered.length === 0) return "";
+  const body = filtered
+    .map(
+      (part) =>
+        `<span style="white-space:nowrap;"><span style="color:${T.textMuted};">${esc(part.label)}</span> <span style="color:${T.textPrimary};font-weight:600;">${esc(part.value ?? "")}</span></span>`,
+    )
+    .join(`<span style="color:${T.borderStrong};padding:0 8px;">·</span>`);
+  return `<p style="margin:0 0 22px;font-size:13px;line-height:1.9;">${body}</p>`;
+}
+
 function sectionHeading(text: string): string {
   return `<p style="margin:20px 0 8px;font-size:11px;font-weight:700;color:${T.textMuted};">${esc(text)}</p>`;
 }
@@ -110,7 +168,7 @@ function gateRow(gate: string, status: "passed" | "failed" | "missing" | "not_re
   const icons: Record<string, string> = {
     passed: "✓",
     failed: "✗",
-    missing: "—",
+    missing: "·",
     not_required: "·",
   };
   const colors: Record<string, string> = {
@@ -135,16 +193,39 @@ function layout(args: {
   preheader?: string;
   body: string;
   reason?: string;
+  /**
+   * The one link in the footer. Defaults to this workspace's settings.
+   *
+   * It used to be a hardcoded "Manage notification preferences" pointing at
+   * `/settings?tab=notifications` — a tab that does not exist. A dead link in
+   * the footer of every email the product sends is the sort of detail that
+   * decides whether the rest of it is believed.
+   */
+  footerLink?: { label: string; href: string } | null;
 }) {
   const preheader = args.preheader ?? "";
-  const workspaceName = args.workspaceName ? esc(args.workspaceName) : "VectorBea";
-  const prefsLink = PREF_URL(args.workspaceId ?? "");
+  const workspaceName = args.workspaceName ? esc(args.workspaceName) : "Vectorbea";
+  const footerLink =
+    args.footerLink === null
+      ? null
+      : (args.footerLink ?? { label: "Workspace settings", href: SETTINGS_URL(args.workspaceId) });
   const reason = args.reason ?? "You received this because notifications are enabled for this workspace";
 
-  // Inline SVG logo as base64 data URI — renders in all email clients without
-  // needing an external image request (Gmail, Outlook, Apple Mail all support this).
-  const LOGO_B64 = "PHN2ZyB3aWR0aD0iNjQiIGhlaWdodD0iNjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZyBzdHJva2U9IiM3QzUyMDAiIHN0cm9rZS13aWR0aD0iMS42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPgogICAgPGVsbGlwc2UgY3g9IjcuNSIgY3k9IjgiIHJ4PSIzLjIiIHJ5PSIyLjIiIG9wYWNpdHk9IjAuNjUiIGZpbGw9IiNGOEQzNkEiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMTYuNSIgY3k9IjgiIHJ4PSIzLjIiIHJ5PSIyLjIiIG9wYWNpdHk9IjAuNjUiIGZpbGw9IiNGOEQzNkEiIC8+CiAgICA8ZWxsaXBzZSBjeD0iMTIiIGN5PSIxNCIgcng9IjQuMiIgcnk9IjUuMiIgZmlsbD0iI0Y1Qjk0MiIgZmlsbC1vcGFjaXR5PSIwLjMyIiAvPgogICAgPHBhdGggZD0iTTguNCAxMi42aDcuMiIgLz4KICAgIDxwYXRoIGQ9Ik04LjEgMTUuMmg3LjgiIC8+CiAgICA8cGF0aCBkPSJNOC42IDE3LjhoNi44IiAvPgogICAgPHBhdGggZD0iTTEwLjQgOS4yIEw5LjIgNi40IiAvPgogICAgPHBhdGggZD0iTTEzLjYgOS4yIEwxNC44IDYuNCIgLz4KICAgIDxjaXJjbGUgY3g9IjkuMiIgY3k9IjYuMiIgcj0iMC42IiBmaWxsPSIjN0M1MjAwIiAvPgogICAgPGNpcmNsZSBjeD0iMTQuOCIgY3k9IjYuMiIgcj0iMC42IiBmaWxsPSIjN0M1MjAwIiAvPgogIDwvZz4KPC9zdmc+Cg==";
-  const LOGO_URI = `data:image/svg+xml;base64,${LOGO_B64}`;
+  /*
+   * The mark: a hosted PNG, not an inline SVG.
+   *
+   * The previous logo was a base64 `data:image/svg+xml` of the amber bee — two
+   * problems in one line. It was the marketing identity rather than the
+   * product's, and GMAIL STRIPS SVG ENTIRELY, data URIs included, so for most
+   * recipients there was no logo at all.
+   *
+   * `/email/vectorbea-mark.png` is the checkpoint cell from `app/icon.svg`,
+   * rasterised at 128px for retina and served over https. Remote images can be
+   * blocked by default in some clients, which is exactly why the wordmark
+   * beside it is REAL TEXT: with images off the lockup still reads "Vectorbea"
+   * in the brand colour rather than collapsing to a broken-image box.
+   */
+  const LOGO_URI = `${APP_URL()}/email/vectorbea-mark.png`;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -152,7 +233,7 @@ function layout(args: {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-<title>VectorBea notification</title>
+<title>Vectorbea notification</title>
 <!--[if !mso]><!-->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
@@ -175,12 +256,12 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
           <td style="padding:0 0 6px;">
             <table width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
-                <td style="font-size:18px;font-weight:800;color:${T.textPrimary};letter-spacing:-0.02em;">
-                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textPrimary};">
-                    <img src="${LOGO_URI}" width="20" height="20" alt="VectorBea" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:6px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;letter-spacing:-0.02em;">VectorBea</span>
+                <td style="font-size:17px;font-weight:700;color:${T.textMax};letter-spacing:-0.02em;">
+                  <a href="${APP_URL()}" style="text-decoration:none;color:${T.textMax};">
+                    <img src="${LOGO_URI}" width="22" height="22" alt="" style="display:inline-block;border:0;outline:none;text-decoration:none;vertical-align:middle;margin-right:8px;border-radius:5px;" /><span style="display:inline-block;vertical-align:middle;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;font-size:17px;font-weight:700;letter-spacing:-0.02em;color:${T.textMax};">Vectorbea</span>
                   </a>
                 </td>
-                <td align="right" style="font-size:11px;font-weight:600;color:${T.textMuted};">${workspaceName}</td>
+                <td align="right" style="font-size:12px;font-weight:500;color:${T.textMuted};">${workspaceName}</td>
               </tr>
             </table>
           </td>
@@ -201,9 +282,11 @@ ${preheader ? `<div style="display:none;max-height:0;overflow:hidden;font-size:1
         <tr>
           <td style="padding:16px 4px 8px;">
             <p style="margin:0 0 6px;font-size:12px;color:${T.textMuted};line-height:1.5;">${esc(reason)}</p>
-            <p style="margin:0;font-size:12px;color:${T.textMuted};">
-              <a href="${prefsLink}" style="color:${T.accent};text-decoration:none;font-weight:600;">Manage notification preferences</a>
-            </p>
+            ${footerLink
+              ? `<p style="margin:0;font-size:12px;color:${T.textMuted};">
+              <a href="${footerLink.href}" style="color:${T.accent};text-decoration:none;font-weight:600;">${esc(footerLink.label)}</a>
+            </p>`
+              : ""}
           </td>
         </tr>
 
@@ -274,29 +357,135 @@ export function teamInvitationEmail(args: {
   acceptUrl: string;
   expiresAt: string;
 }) {
-  const subject = `${args.inviterName} invited you to ${args.workspaceName} on VectorBea`;
-  const expiryDate = new Date(args.expiresAt).toLocaleDateString("en-US", { dateStyle: "long" });
+  const subject = `${args.inviterName} invited you to ${args.workspaceName} on Vectorbea`;
+  const expiry = new Date(args.expiresAt);
+  const expiryDate = expiry.toLocaleDateString("en-US", { dateStyle: "long" });
+  const roleLabel = ROLE_LABELS[args.role] ?? args.role;
+
+  /*
+   * ONE THING TO DO, AND EVERYTHING NEEDED TO DECIDE IT.
+   *
+   * The previous version stacked a badge, a heading, a restatement of the
+   * heading, a three-row table, a button, and a "Recommended next step" box
+   * that repeated the expiry date already in the table — six blocks to say
+   * "someone invited you, click here". An invitation is read in four seconds on
+   * a phone: who, where, as what, by when, and the button.
+   *
+   * `ROLE_LABELS` explains the role rather than naming it. "Developer" tells
+   * somebody outside the company nothing about what they are accepting.
+   */
   const body = `
-${statusBadge("Workspace invite", "info")}
-<h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">You have been invited to join ${esc(args.workspaceName)}</h1>
-<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">${esc(args.inviterName)} has invited you to collaborate on VectorBea</p>
-${kvTable([
-  { key: "Workspace", value: args.workspaceName },
-  { key: "Role", value: args.role },
-  { key: "Expires", value: expiryDate },
+<h1 style="margin:0 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:${T.textPrimary};letter-spacing:-0.01em;">Join ${esc(args.workspaceName)} on Vectorbea</h1>
+<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${esc(args.inviterName)} invited you to this workspace as ${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong>. That role can ${esc(roleLabel.summary)}.</p>
+${metaLine([
+  { label: "Workspace", value: args.workspaceName },
+  { label: "Invited by", value: args.inviterName },
+  { label: "Expires", value: expiryDate },
 ])}
 ${actionButton("Accept invitation", args.acceptUrl)}
-${nextStep("Accept this invitation from a secure, trusted device. The link expires on " + expiryDate + ".")}
+${linkFallback(args.acceptUrl)}
 `;
+
   return {
     subject,
     html: layout({
       workspaceName: args.workspaceName,
-      preheader: `Invitation to join ${args.workspaceName} on VectorBea`,
+      preheader: `${args.inviterName} invited you to ${args.workspaceName}. The link expires ${expiryDate}.`,
       body,
-      reason: "You received this because a workspace admin invited your email address",
+      reason: `You received this because ${args.inviterName} invited this address to ${args.workspaceName}. If you were not expecting it, ignore this email. The invitation expires on its own.`,
+      // No footer link: the recipient is not a member yet, so every in-product
+      // destination would refuse them.
+      footerLink: null,
     }),
-    text: `Invited to ${args.workspaceName}\nBy ${args.inviterName}\nRole ${args.role}\nExpires ${expiryDate}\nAccept ${args.acceptUrl}`,
+    text: [
+      `Join ${args.workspaceName} on Vectorbea`,
+      ``,
+      `${args.inviterName} invited you as ${roleLabel.name}. That role can ${roleLabel.summary}.`,
+      `The invitation expires on ${expiryDate}.`,
+      ``,
+      `Accept: ${args.acceptUrl}`,
+      ``,
+      `If you were not expecting this, ignore it. The invitation expires on its own.`,
+    ].join("\n"),
+  };
+}
+
+/**
+ * What a role actually means, for somebody outside the company.
+ *
+ * Matches `ROLE_OPTIONS` in the Members screen. An invitation that says
+ * "Developer" and nothing else asks the recipient to accept a permission set
+ * they cannot see.
+ */
+const ROLE_LABELS: Record<string, { name: string; article: string; summary: string }> = {
+  owner: { name: "Owner", article: "an", summary: "full control, including billing and deleting the workspace" },
+  admin: { name: "Admin", article: "an", summary: "manage members, settings and connections" },
+  developer: { name: "Developer", article: "a", summary: "build and run workflows" },
+  editor: { name: "Developer", article: "a", summary: "build and run workflows" },
+  viewer: { name: "Viewer", article: "a", summary: "read-only access across the workspace" },
+};
+
+// ─── Template 1b: Welcome, after an invitation is accepted ───────────────────
+
+/**
+ * Sent once, to the person who just joined.
+ *
+ * Not a duplicate of the invitation: that one asked a question, this one
+ * confirms the answer and orients somebody who has never seen this workspace
+ * before. It matters most for the case the invitation cannot cover — a person
+ * who already has their own workspace and now has two, and needs to know the
+ * switcher exists before they go looking for work that is not in the one they
+ * are staring at.
+ */
+export function workspaceWelcomeEmail(args: {
+  workspaceName: string;
+  workspaceId: string;
+  role: string;
+  invitedByName?: string | null;
+  /** True when this is not the only workspace they belong to. */
+  hasOtherWorkspaces: boolean;
+}) {
+  const roleLabel = ROLE_LABELS[args.role] ?? { name: args.role, article: "a", summary: "" };
+  const openUrl = `${APP_URL()}/control?org=${encodeURIComponent(args.workspaceId)}`;
+  const subject = `Welcome to ${args.workspaceName} on Vectorbea`;
+
+  const body = `
+${statusBadge("You're in", "success")}
+<h1 style="margin:16px 0 10px;font-size:22px;line-height:1.3;font-weight:800;color:${T.textPrimary};letter-spacing:-0.01em;">Welcome to ${esc(args.workspaceName)}</h1>
+<p style="margin:0 0 18px;font-size:14px;line-height:1.65;color:${T.textSecondary};">${args.invitedByName ? `${esc(args.invitedByName)} added you as ` : "You joined as "}${esc(roleLabel.article)} <strong style="color:${T.textPrimary};">${esc(roleLabel.name)}</strong>${roleLabel.summary ? `. That role can ${esc(roleLabel.summary)}` : ""}.</p>
+${args.hasOtherWorkspaces
+  // Neutral, not `info`: the info tone's blue sits beside the iris button and
+  // reads as a second brand colour, and an orientation note is guidance rather
+  // than a status. Nothing here is a state anybody has to act on.
+  ? calloutBox(
+      `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them. ${args.workspaceName} will not appear in your other workspace's runs, workflows or connections.`,
+      "neutral",
+    )
+  : ""}
+${actionButton(`Open ${args.workspaceName}`, openUrl)}
+${linkFallback(openUrl)}
+`;
+
+  return {
+    subject,
+    html: layout({
+      workspaceId: args.workspaceId,
+      workspaceName: args.workspaceName,
+      preheader: `You joined ${args.workspaceName} as ${roleLabel.name}.`,
+      body,
+      reason: `You received this because you accepted an invitation to ${args.workspaceName}.`,
+      footerLink: { label: "Leave this workspace", href: `${APP_URL()}/settings/members?org=${encodeURIComponent(args.workspaceId)}` },
+    }),
+    text: [
+      `Welcome to ${args.workspaceName}`,
+      ``,
+      `${args.invitedByName ? `${args.invitedByName} added you as ` : "You joined as "}${roleLabel.article} ${roleLabel.name}${roleLabel.summary ? `. That role can ${roleLabel.summary}` : ""}.`,
+      args.hasOtherWorkspaces
+        ? `You are now in more than one workspace. Use the switcher at the top of the sidebar to move between them.`
+        : ``,
+      ``,
+      `Open it: ${openUrl}`,
+    ].filter(Boolean).join("\n"),
   };
 }
 
@@ -331,7 +520,7 @@ export function evaluationCompletedEmail(args: {
   const isBehavioral = args.runType === "behavioral" || args.runType === "behavioral_rubric" || args.runType === "provider_arena";
 
   const subjectVerdict = isFailed ? "needs attention" : isReview ? "needs review" : "passed";
-  const subject = `Evaluation ${subjectVerdict} — ${args.promptName} ${args.versionTag}`;
+  const subject = `Evaluation ${subjectVerdict}: ${args.promptName} ${args.versionTag}`;
 
   const summaryRows = [
     { key: "Evaluation type",  value: fmtRunType(args.runType) },
@@ -381,12 +570,12 @@ ${nextStep(nextStepText)}
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${args.promptName} ${args.versionTag} — ${verdict}`,
+      preheader: `${args.promptName} ${args.versionTag}: ${verdict}`,
       body,
       reason: "You received this because evaluation notifications are enabled for this workspace",
     }),
     text: [
-      `Evaluation completed — ${args.promptName} ${args.versionTag}`,
+      `Evaluation completed: ${args.promptName} ${args.versionTag}`,
       `Verdict: ${verdict}`,
       `Score: ${fmtScore(args.score)}`,
       args.datasetName ? `Dataset: ${args.datasetName}` : "",
@@ -412,7 +601,7 @@ export function evaluationFailedEmail(args: {
   model?: string | null;
   startedBy?: string | null;
 }) {
-  const subject = `Evaluation failed — ${args.promptName} ${args.versionTag}`;
+  const subject = `Evaluation failed: ${args.promptName} ${args.versionTag}`;
   const safeReason = args.reason.slice(0, 300); // never leak full stack traces
 
   const body = `
@@ -440,7 +629,7 @@ ${nextStep("Check provider connectivity and model availability. Inspect executio
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Evaluation failed — ${args.promptName}`,
+      preheader: `Evaluation failed: ${args.promptName}`,
       body,
       reason: "You received this because evaluation failure notifications are enabled for this workspace",
     }),
@@ -463,7 +652,7 @@ export function regressionFailedEmail(args: {
   datasetName?: string | null;
   promptVersion?: string | null;
 }) {
-  const subject = `Regression failed — ${args.scheduleName}`;
+  const subject = `Regression failed: ${args.scheduleName}`;
   const hasScores = args.previousScore != null && args.currentScore != null;
   const scoreDelta = hasScores ? Math.round((args.currentScore! - args.previousScore!) * 100) : null;
 
@@ -493,12 +682,12 @@ ${nextStep("Compare failed cases against previous passing results. Look for rece
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Regression failed — ${args.scheduleName}`,
+      preheader: `Regression failed: ${args.scheduleName}`,
       body,
       reason: "You received this because regression notifications are enabled for this workspace",
     }),
     text: [
-      `Regression failed — ${args.scheduleName}`,
+      `Regression failed: ${args.scheduleName}`,
       args.promptName ? `Prompt: ${args.promptName}` : "",
       hasScores ? `Score: ${fmtScore(args.previousScore)} → ${fmtScore(args.currentScore)}` : "",
       `Reason: ${args.reason}`,
@@ -533,7 +722,7 @@ export function alertTriggeredEmail(args: {
   const isError = args.metricType === "error_rate";
   const tone: StatusTone = isError && args.metricValue >= args.threshold * 2 ? "failure" : "warning";
 
-  const subject = `Alert triggered — ${args.ruleName}`;
+  const subject = `Alert triggered: ${args.ruleName}`;
 
   const body = `
 ${statusBadge("Alert triggered", tone)}
@@ -561,12 +750,12 @@ ${nextStep("Review recent traces for the affected prompt. Compare against the ba
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${args.ruleName} — ${metricLabel} ${metricVal}`,
+      preheader: `${args.ruleName}: ${metricLabel} ${metricVal}`,
       body,
       reason: "You received this because alert notifications are enabled for this workspace",
     }),
     text: [
-      `Alert triggered — ${args.ruleName}`,
+      `Alert triggered: ${args.ruleName}`,
       `Metric: ${metricLabel}`,
       `Current: ${metricVal}`,
       `Threshold: ${comparison} ${threshVal}`,
@@ -591,7 +780,7 @@ export function rolloutBlockedEmail(args: {
   rolloutPercentage?: number | null;
   gateResults?: Array<{ gate: string; status: "passed" | "failed" | "missing" | "not_required" }>;
 }) {
-  const subject = `Rollout blocked — ${args.promptName} ${args.versionTag}`;
+  const subject = `Rollout blocked: ${args.promptName} ${args.versionTag}`;
 
   const reasonsList = args.reasons
     .map((r) => `<li style="margin:0 0 6px;color:${T.textBody};font-size:13px;line-height:1.5;">${esc(r)}</li>`)
@@ -606,7 +795,7 @@ ${args.gateResults.map((g) => gateRow(g.gate, g.status)).join("")}
   const body = `
 ${statusBadge("Rollout blocked", "failure")}
 <h1 style="margin:16px 0 8px;font-size:22px;line-height:1.25;font-weight:800;color:${T.textPrimary};">Rollout blocked for ${esc(args.promptName)}</h1>
-<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">VectorBea blocked this rollout because one or more safety gates failed</p>
+<p style="margin:0 0 20px;font-size:14px;line-height:1.6;color:${T.textSecondary};">Vectorbea blocked this rollout because one or more safety gates failed</p>
 ${calloutBox("This version cannot be rolled out until the failing gates are resolved.", "failure")}
 ${sectionHeading("Rollout details")}
 ${kvTable([
@@ -628,12 +817,12 @@ ${nextStep("Open the failing gate and review the latest evaluation result. Fix t
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Rollout blocked — ${args.promptName} ${args.versionTag}`,
+      preheader: `Rollout blocked: ${args.promptName} ${args.versionTag}`,
       body,
       reason: "You received this because rollout notifications are enabled for this workspace",
     }),
     text: [
-      `Rollout blocked — ${args.promptName} ${args.versionTag}`,
+      `Rollout blocked: ${args.promptName} ${args.versionTag}`,
       `Reasons: ${args.reasons.join("; ")}`,
       `Open: ${args.promptUrl}`,
     ].filter(Boolean).join("\n"),
@@ -655,8 +844,8 @@ export function quotaWarningEmail(args: {
   const label = args.usageType.replaceAll("_", " ");
   const tone: StatusTone = isExceeded ? "failure" : "warning";
   const subject = isExceeded
-    ? `Usage limit reached — ${args.workspaceName}`
-    : `Usage nearing limit — ${args.workspaceName}`;
+    ? `Usage limit reached: ${args.workspaceName}`
+    : `Usage nearing limit: ${args.workspaceName}`;
 
   const body = `
 ${statusBadge(isExceeded ? "Quota exceeded" : "Quota nearing", tone)}
@@ -683,11 +872,11 @@ ${nextStep("Review usage patterns and consider upgrading the plan or adjusting r
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `${label} ${pct}% — ${args.workspaceName}`,
+      preheader: `${label} ${pct}%: ${args.workspaceName}`,
       body,
       reason: "You received this because quota notifications are enabled and you are a workspace admin or owner",
     }),
-    text: `Usage notification — ${args.workspaceName}\n${label}: ${args.used.toLocaleString()} / ${args.limit.toLocaleString()} (${pct}%)\nManage: ${args.billingUrl}`,
+    text: `Usage notification: ${args.workspaceName}\n${label}: ${args.used.toLocaleString()} / ${args.limit.toLocaleString()} (${pct}%)\nManage: ${args.billingUrl}`,
   };
 }
 
@@ -701,7 +890,7 @@ export function promptPromotedEmail(args: {
   promotedBy: string;
   promptUrl: string;
 }) {
-  const subject = `Rollout approved — ${args.promptName} ${args.versionTag}`;
+  const subject = `Rollout approved: ${args.promptName} ${args.versionTag}`;
 
   const body = `
 ${statusBadge("Rollout approved", "success")}
@@ -722,10 +911,10 @@ ${nextStep("Continue monitoring metrics, alerts, and scheduled regressions as tr
     html: layout({
       workspaceName: args.workspaceName,
       workspaceId: args.workspaceId,
-      preheader: `Rollout approved — ${args.promptName} ${args.versionTag}`,
+      preheader: `Rollout approved: ${args.promptName} ${args.versionTag}`,
       body,
       reason: "You received this because rollout notifications are enabled for this workspace",
     }),
-    text: `Rollout approved — ${args.promptName} ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen: ${args.promptUrl}`,
+    text: `Rollout approved: ${args.promptName} ${args.versionTag}\nApproved by ${args.promotedBy}\nOpen: ${args.promptUrl}`,
   };
 }

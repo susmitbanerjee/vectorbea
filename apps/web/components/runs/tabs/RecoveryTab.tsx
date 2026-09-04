@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api/client";
+import { RunOperations } from "../RunOperations";
 
 // ─── Failure incident from Recovery Engine ────────────────────────────────────
 
@@ -319,13 +320,21 @@ export function RecoveryTab({ run, viewMode, onAction }: { run: WorkflowRun; vie
         </div>
       </div>
 
-      {/* Replay action */}
-      {viewMode === "engineering" && r.replaySafeResumeAvailable && !inc && (
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => onAction("resume")}
-            className="inline-flex h-9 items-center gap-1.5 rounded-[9px] bg-[#007F4E] px-4 text-[13px] font-semibold text-white transition-colors hover:bg-[#006B45]">
-            <RefreshCw className="h-3.5 w-3.5" /> Resume from checkpoint
-          </button>
+      {/* The three operations.
+          Replaces a single "Resume from checkpoint" button that sat next to a
+          "Replay available" claim the backend did not honour — the replay it
+          referred to re-executed everything. Each control now states what it
+          calls and what it costs. See docs/architecture/REPLAY-AUDIT.md. */}
+      {viewMode === "engineering" && !inc && (
+        <div>
+          <h4 className="mb-2 text-[12px] font-semibold text-[#111827]">Run this again</h4>
+          <RunOperations
+            runId={run.id}
+            replayable={(r.recordedModelCalls ?? 0) > 0}
+            recordedCalls={r.recordedModelCalls}
+            resumable={!!r.replaySafeResumeAvailable}
+            onRun={(op) => onAction(op)}
+          />
         </div>
       )}
     </div>

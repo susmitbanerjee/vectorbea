@@ -21,6 +21,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      // Mirrors tsconfig. Without it seo.test.ts cannot even load app/sitemap.ts,
+      // which imports the docs registry through `~`.
+      "~": path.resolve(__dirname, "src"),
       // Stub `server-only` so Vitest doesn't error on the boundary check
       "server-only": path.resolve(__dirname, "__tests__/mocks/server-only.ts"),
     },

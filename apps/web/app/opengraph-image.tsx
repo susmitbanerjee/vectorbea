@@ -5,7 +5,7 @@ import { SITE } from "@/lib/seo";
 // override by adding their own opengraph-image; otherwise this one is attached
 // automatically to every page's OpenGraph + Twitter metadata.
 
-export const alt = "Vectorbea — Durable Agentic AI Workflows";
+export const alt = "Vectorbea - Durable Agentic AI Workflows";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 

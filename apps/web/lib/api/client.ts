@@ -3,9 +3,7 @@
  *
  * Single typed fetch layer used by all frontend code to talk to the backend.
  *
- * TARGET: points at NEXT_PUBLIC_VECTORBEA_API_URL (the Kotlin API service).
- * CURRENT: falls back to "" (relative) so existing Next.js internal API routes
- *          continue to work until each route is migrated to the Kotlin service.
+ * Points at the same Kotlin API base URL as the primary typed transport.
  *
  * Rules:
  *  - NO database imports
@@ -17,16 +15,11 @@
 
 // ─── Base URL ─────────────────────────────────────────────────────────────────
 
-/**
- * Root of the backend API.
- * Set NEXT_PUBLIC_VECTORBEA_API_URL to point at the Kotlin API once deployed.
- * Defaults to "" so all relative /api/* paths continue to work during migration.
- */
+import { getApiBaseUrl } from "~/lib/api/config";
+
+/** Root of the Kotlin API, shared with the primary typed transport. */
 function apiBase(): string {
-  if (typeof process !== "undefined" && process.env.NEXT_PUBLIC_VECTORBEA_API_URL) {
-    return process.env.NEXT_PUBLIC_VECTORBEA_API_URL.replace(/\/$/, "");
-  }
-  return "";
+  return getApiBaseUrl();
 }
 
 // ─── Error type ───────────────────────────────────────────────────────────────

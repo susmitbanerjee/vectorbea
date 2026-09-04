@@ -1,7 +1,7 @@
 package com.vectorbea.worker.runtime.debug
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.UUID

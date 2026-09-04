@@ -8,8 +8,9 @@ import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.events.RunEventStore.EventType
 import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
+import com.vectorbea.worker.metrics.WorkerMetrics
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.sql.ResultSetMetaData
 import java.util.UUID
 
@@ -47,7 +48,7 @@ class DbReadNodeExecutor(
         const val DEFAULT_TIMEOUT_SECS   = 30
     }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         context: RuntimeContext,
@@ -100,10 +101,42 @@ class DbReadNodeExecutor(
             summary = "paramCount=${params.size} maxRows=$maxRows")
 
         // ── Get pool and execute ──────────────────────────────────────────────
+        // Pool creation is itself outbound I/O: HikariCP opens and validates a
+        // physical connection here, so an unreachable tenant blocks for
+        // loginTimeout before this returns. It must be timed like any other
+        // tenant-DB call — otherwise the single most common tenant-DB failure
+        // ("we cannot connect at all") is absent from the latency metric.
+        val poolStartMs = System.currentTimeMillis()
         val dataSource = try {
-            poolManager.getOrCreate(resolved.record, resolved.secret)
+            WorkerMetrics.timeBlocking {
+                poolManager.getOrCreate(resolved.record, resolved.secret)
+            }
         } catch (e: Exception) {
+            WorkerMetrics.tenantDbCallDurationSeconds.observeMs(
+                System.currentTimeMillis() - poolStartMs, "connect", classifyDbError(e))
             return NodeResult.Failed("DB_QUERY node '${node.id}': cannot create DB pool: ${e.message}")
+        }
+
+        /*
+         * The query and its parameters have to agree BEFORE the driver is asked.
+         *
+         * Same failure as the write path: binding into a query with no placeholders
+         * produced "The column index is out of range: 1, number of columns: 0", which
+         * names neither the query nor the count. Reads take the same guard so a SELECT
+         * tool fails with an instruction rather than a driver index.
+         */
+        val placeholders = SqlPlaceholders.analyse(rawQuery).questionMarks
+        if (params.size != placeholders) {
+            val hint = if (placeholders == 0) {
+                "The query has no bind placeholders, so it takes no parameters. " +
+                    "Use {{name}} templating to inline a value, or add ? placeholders to bind one."
+            } else {
+                "Supply exactly $placeholders value(s), in the order the ? placeholders appear."
+            }
+            return NodeResult.Failed(
+                "DB_QUERY node '${node.id}': the query has $placeholders bind placeholder(s) " +
+                    "but ${params.size} parameter(s) were supplied. $hint"
+            )
         }
 
         emitEvent(context, node.id, EventType.DB_QUERY_STARTED, "running",
@@ -111,23 +144,36 @@ class DbReadNodeExecutor(
 
         val startMs = System.currentTimeMillis()
 
+        // NOTE ON TIMEOUTS — read before changing this block.
+        //   `stmt.queryTimeout` below is NOT sufficient on its own. pgjdbc
+        //   implements it by opening a second connection and sending a cancel
+        //   request; against a firewalled or blackholed tenant host that second
+        //   connection hangs too, so the timeout never fires and this thread —
+        //   an execution slot — is parked for the life of the process.
+        //   The bound that actually works is the driver-level `socketTimeout`
+        //   forced onto the JDBC URL by JdbcTimeouts, applied in
+        //   ClientDbPoolManager. queryTimeout stays as the cooperative,
+        //   server-side bound for the healthy case.
         val rows = try {
-            dataSource.connection.use { conn ->
-                // Enforce read-only at connection level
-                conn.isReadOnly = true
-                conn.prepareStatement(rawQuery).use { stmt ->
-                    stmt.queryTimeout = timeoutSecs
-                    stmt.maxRows = maxRows
-                    params.forEachIndexed { i, param ->
-                        stmt.setObject(i + 1, param)
-                    }
-                    stmt.executeQuery().use { rs ->
-                        resultSetToList(rs, maxRows)
+            WorkerMetrics.timeBlocking {
+                dataSource.connection.use { conn ->
+                    // Enforce read-only at connection level
+                    conn.isReadOnly = true
+                    conn.prepareStatement(rawQuery).use { stmt ->
+                        stmt.queryTimeout = timeoutSecs
+                        stmt.maxRows = maxRows
+                        params.forEachIndexed { i, param ->
+                            stmt.setObject(i + 1, param)
+                        }
+                        stmt.executeQuery().use { rs ->
+                            resultSetToList(rs, maxRows)
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startMs
+            WorkerMetrics.tenantDbCallDurationSeconds.observeMs(durationMs, "read", classifyDbError(e))
             // Include the DB error message (postgres errors are safe to log — no PII)
             log.warn("[dbread] query failed [nodeId={}, durationMs={}]: {} — {}",
                 node.id, durationMs, e.javaClass.simpleName, e.message?.take(300))
@@ -135,6 +181,8 @@ class DbReadNodeExecutor(
                 "DB_QUERY node '${node.id}': query failed: ${e.message?.take(300) ?: e.javaClass.simpleName}"
             )
         }
+        WorkerMetrics.tenantDbCallDurationSeconds.observeMs(
+            System.currentTimeMillis() - startMs, "read", "ok")
 
         val durationMs = System.currentTimeMillis() - startMs
 
@@ -154,6 +202,26 @@ class DbReadNodeExecutor(
                 "maxRows"    to maxRows,
             )
         )
+    }
+
+    /**
+     * Bucket a tenant-DB failure so `tenant_db_call_duration_seconds` separates
+     * "the tenant's database is slow" from "the tenant's database is a black
+     * hole and we gave up". The second is the one that used to be unbounded.
+     */
+    private fun classifyDbError(e: Exception): String {
+        val msg = (e.message ?: "").lowercase()
+        return when {
+            msg.contains("socket timeout") || msg.contains("read timed out") ||
+                msg.contains("timeout expired") || e is java.sql.SQLTimeoutException -> "socket_timeout"
+            // pgjdbc's loginTimeout surfaces as "Connection attempt timed out";
+            // HikariCP wraps it in "Cannot create pool …".
+            msg.contains("connection attempt failed") || msg.contains("connect timed out") ||
+                msg.contains("connection timed out") || msg.contains("connection attempt timed out") ||
+                msg.contains("cannot create pool") -> "connect_timeout"
+            msg.contains("connection is not available") -> "pool_exhausted"
+            else -> "error"
+        }
     }
 
     // ── Query validation ──────────────────────────────────────────────────────

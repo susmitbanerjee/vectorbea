@@ -14,12 +14,12 @@ class CacheKeysTest {
 
     @Test
     fun `workflow key has correct format`() {
-        assertEquals("workflow:wf-abc", CacheKeys.workflow("wf-abc"))
+        assertEquals("workflow:ws-1:wf-abc", CacheKeys.workflow("ws-1", "wf-abc"))
     }
 
     @Test
     fun `workflowVersion key has correct format`() {
-        assertEquals("workflow-version:ver-123", CacheKeys.workflowVersion("ver-123"))
+        assertEquals("workflow-version:ws-1:ver-123", CacheKeys.workflowVersion("ws-1", "ver-123"))
     }
 
     @Test
@@ -39,12 +39,12 @@ class CacheKeysTest {
 
     @Test
     fun `connectionTest key has correct format`() {
-        assertEquals("connection-test:conn-xyz", CacheKeys.connectionTest("conn-xyz"))
+        assertEquals("connection-test:ws-1:conn-xyz", CacheKeys.connectionTest("ws-1", "conn-xyz"))
     }
 
     @Test
     fun `runSummary key has correct format`() {
-        assertEquals("run-summary:run-456", CacheKeys.runSummary("run-456"))
+        assertEquals("run-summary:ws-1:run-456", CacheKeys.runSummary("ws-1", "run-456"))
     }
 
     @Test
@@ -52,13 +52,13 @@ class CacheKeysTest {
         val ws = "ws-1"; val env = "env-1"; val id = "id-1"
         val keys = listOf(
             CacheKeys.workflowList(ws, env),
-            CacheKeys.workflow(id),
-            CacheKeys.workflowVersion(id),
+            CacheKeys.workflow(ws, id),
+            CacheKeys.workflowVersion(ws, id),
             CacheKeys.agentList(ws, env),
             CacheKeys.toolList(ws, env),
             CacheKeys.connectionList(ws, env),
-            CacheKeys.connectionTest(id),
-            CacheKeys.runSummary(id),
+            CacheKeys.connectionTest(ws, id),
+            CacheKeys.runSummary(ws, id),
         )
         assertEquals(keys.size, keys.toSet().size, "All cache keys must be unique")
     }
@@ -67,7 +67,7 @@ class CacheKeysTest {
     fun `no key contains secret-like words`() {
         val keys = listOf(
             CacheKeys.connectionList("ws", "env"),
-            CacheKeys.connectionTest("conn"),
+            CacheKeys.connectionTest("ws", "conn"),
         )
         val forbidden = listOf("secret", "password", "token", "key", "credential")
         keys.forEach { key ->

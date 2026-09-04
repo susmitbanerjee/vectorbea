@@ -7,7 +7,12 @@ object RecoverySanitizer {
         Regex("""(?i)(api[-_]?key['":\s=]+)[A-Za-z0-9+/\-_]{20,}""") to "$1[REDACTED]",
         Regex("""(?i)(password['":\s=]+)[^\s,'"]{4,}""") to "$1[REDACTED]",
         Regex("""(?i)(secret['":\s=]+)[^\s,'"]{8,}""") to "$1[REDACTED]",
-        Regex("""postgresql://[^@]+@""") to "postgresql://[REDACTED]@",
+        /* Both spellings. libpq, JDBC and every ORM accept `postgres://`, it is
+           what most connection strings in the wild actually look like, and the
+           pattern matched only the long form — so the commonest shape of the
+           commonest leak went straight through. Found by a blackboard test that
+           wrote a failed-connection message. */
+        Regex("""postgres(ql)?://[^@]+@""") to "postgresql://[REDACTED]@",
         Regex("""mysql://[^@]+@""") to "mysql://[REDACTED]@",
         Regex("""mongodb(\+srv)?://[^@]+@""") to "mongodb://[REDACTED]@",
         Regex("""(?i)(bearer\s+)[A-Za-z0-9\-_=]{20,}""") to "$1[REDACTED]",
@@ -43,6 +48,58 @@ object RecoverySanitizer {
             }
             sk to sv
         }
+
+    /**
+     * What one pattern masked, so a reader sees a marker rather than a gap.
+     */
+    data class Redaction(val label: String, val count: Int)
+
+    /** Redacted text plus the record of what was taken out of it. */
+    data class RedactedPayload(val text: String, val redactions: List<Redaction>)
+
+    /**
+     * Human labels for [SECRET_PATTERNS], positionally aligned.
+     *
+     * The patterns themselves are the wrong thing to show a user — a regex in a
+     * trace viewer explains nothing. These are what `redactions` records, and what
+     * the reader sees as "[redacted: connection secret]".
+     */
+    private val PATTERN_LABELS = listOf(
+        "bearer token", "basic auth", "api key", "password", "secret",
+        "connection secret", "connection secret", "connection secret",
+        "bearer token", "api key", "jwt", "cookie",
+    )
+
+    /**
+     * Redact a payload WITHOUT truncating it.
+     *
+     * [sanitizeMessage] caps at 2000 characters because it produces a one-line
+     * message for an incident record. A stored payload is a different thing: it is
+     * the artefact a debugger renders and a resumed loop reads back, and silently
+     * losing its tail would make both wrong. Length is the caller's decision — the
+     * payload store applies its own cap and flags it — so this only redacts.
+     *
+     * Returns what it masked, because a redaction the reader cannot see is
+     * indistinguishable from data that was never there.
+     */
+    fun redactForPayload(raw: String): RedactedPayload {
+        var s = raw
+        val found = mutableListOf<Redaction>()
+        SECRET_PATTERNS.forEachIndexed { i, (regex, replacement) ->
+            val hits = regex.findAll(s).count()
+            if (hits > 0) {
+                s = regex.replace(s, replacement)
+                val label = PATTERN_LABELS.getOrElse(i) { "secret" }
+                /* Patterns collapse onto shared labels - three connection-string
+                   forms are one idea to a reader - so merge rather than listing
+                   "connection secret" three times. */
+                val at = found.indexOfFirst { it.label == label }
+                if (at >= 0) found[at] = found[at].copy(count = found[at].count + hits)
+                else found.add(Redaction(label, hits))
+            }
+        }
+        return RedactedPayload(s, found)
+    }
 
     fun containsSecret(text: String): Boolean =
         SECRET_PATTERNS.any { (regex, _) -> regex.containsMatchIn(text) }

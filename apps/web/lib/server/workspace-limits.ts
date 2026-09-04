@@ -2,6 +2,8 @@ import "server-only";
 
 import type { PlanTier } from "@/lib/api";
 import { getPlanDefinition, normalizePlanTier } from "@/lib/server/plan-config";
+import { getWorkspaceSeatCount } from "@/lib/server/workspace-usage";
+
 import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
 
 type WorkspaceLimitRecord = {
@@ -77,6 +79,34 @@ export async function getWorkspacePromptCount(workspaceId: string) {
   }
 
   return count ?? 0;
+}
+
+/**
+ * Seats in use, counted where members ACTUALLY LIVE.
+ *
+ * `workspace_members` exists in two stores and they do not agree:
+ *
+ *   - Neon / `public` — written by every sign-up path (`neon-auth.createUser`,
+ *     `oauth-upsert`) and read by the authorisation gate
+ *     (`assertWorkspaceMember`) and the Members screen. This is the authority.
+ *   - Supabase / `vectorbea` — read in nine places, written in exactly one
+ *     (`invitations.ts`). For a workspace whose members all signed up normally
+ *     it is EMPTY.
+ *
+ * This function read the Supabase copy, so "Workspace seats" reported 0 of N on
+ * a workspace with real members — a number that looks like a working meter and
+ * is simply wrong. Reading the same store the Members screen reads makes the
+ * two agree, which is the minimum bar for a seat count that governs a plan
+ * limit. The wider split is not resolved here — see docs/audit for the
+ * remaining eight readers.
+ *
+ * It also no longer goes through `neon()`. That driver speaks HTTP to Neon's
+ * endpoint only, so this count threw against the local and containerised
+ * Postgres every developer runs — the seat meter was dead outside production
+ * for a reason that had nothing to do with seats.
+ */
+export async function getWorkspaceMemberCount(workspaceId: string) {
+  return getWorkspaceSeatCount(workspaceId);
 }
 
 export async function getWorkspaceMonthlyAuditCount(workspaceId: string) {

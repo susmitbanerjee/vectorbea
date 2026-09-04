@@ -120,11 +120,11 @@ export default function WorkersPage() {
           className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-all disabled:opacity-50"
           style={{
             background: "var(--surface-2)",
-            border: "1px solid var(--border-subtle)",
+            border: "1px solid var(--legacy-border-subtle)",
             color: "var(--text-secondary)",
           }}
-          onMouseOver={e => (e.currentTarget.style.borderColor = "var(--border-strong)")}
-          onMouseOut={e => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
+          onMouseOver={e => (e.currentTarget.style.borderColor = "var(--legacy-border-strong)")}
+          onMouseOut={e => (e.currentTarget.style.borderColor = "var(--legacy-border-subtle)")}
         >
           <RefreshCw className={cn("h-3.5 w-3.5", (refreshing || loading) && "animate-spin")} />
           Refresh
@@ -179,7 +179,7 @@ export default function WorkersPage() {
           <div className="overflow-hidden rounded-lg bg-white border border-border shadow-card">
             <div
               className="flex items-center justify-between px-5 py-3.5"
-              style={{ borderBottom: "1px solid var(--border-subtle)" }}
+              style={{ borderBottom: "1px solid var(--legacy-border-subtle)" }}
             >
               <p className="text-[13px] font-semibold" style={{ color: "var(--text-primary)" }}>
                 Worker Fleet
@@ -194,7 +194,7 @@ export default function WorkersPage() {
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border-subtle)" }}>
+                  <tr style={{ borderBottom: "1px solid var(--legacy-border-subtle)" }}>
                     {["Worker", "Status", "Queue", "Active / Cap.", "Heartbeat", "Version", "Region"].map(h => (
                       <th
                         key={h}
@@ -241,7 +241,7 @@ export default function WorkersPage() {
                           {w.queue ? (
                             <span
                               className="rounded border px-1.5 py-0.5 font-mono text-[11px]"
-                              style={{ background: "var(--surface-3)", border: "1px solid var(--border-subtle)", color: "var(--text-muted)" }}
+                              style={{ background: "var(--surface-3)", border: "1px solid var(--legacy-border-subtle)", color: "var(--text-muted)" }}
                             >
                               {w.queue}
                             </span>

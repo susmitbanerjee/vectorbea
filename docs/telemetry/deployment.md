@@ -1,9 +1,24 @@
-# Telemetry Service Deployment — telemetry.vectorbea.com
+# Telemetry Service Deployment — SUPERSEDED
 
-## Overview
+> **This document describes a service that no longer exists.**
+>
+> `apps/telemetry` was folded into `packages/observability-kotlin` and is served by
+> `api-kotlin` in-process. There is nothing to deploy to Railway, and
+> `telemetry.vectorbea.com` can be retired.
+>
+> **Current documentation: [`../architecture/OBSERVABILITY.md`](../architecture/OBSERVABILITY.md)**
+>
+> Kept rather than deleted for two reasons: the environment-variable reference below is
+> still accurate for the variables that survived, and the conditions under which the
+> service should be split back out are listed in OBSERVABILITY.md §6 — at which point
+> the Railway steps here become correct again.
 
-`apps/telemetry` is an independent Kotlin service deployable to Railway, Render, or Fly.io.
-It runs at `telemetry.vectorbea.com` and is accessed only by internal services and admins.
+---
+
+## Historical overview
+
+`apps/telemetry` was an independent Kotlin service deployable to Railway, Render, or Fly.io.
+It ran at `telemetry.vectorbea.com` and was accessed only by internal services and admins.
 
 ## Deploy to Railway
 

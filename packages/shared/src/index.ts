@@ -65,3 +65,10 @@ export type ApprovalRequest = {
   decision: "approved" | "rejected" | null;
   reason: string | null;
 };
+
+/**
+ * API contracts — Zod schemas plus inferred types for every endpoint the web
+ * app consumes. Re-exported so `@vectorbea/shared` is the single import, and
+ * also available as `@vectorbea/shared/contracts`.
+ */
+export * as contracts from "./contracts";

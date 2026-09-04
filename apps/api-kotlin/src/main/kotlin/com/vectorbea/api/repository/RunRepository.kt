@@ -17,6 +17,31 @@ data class CreateRunRequest(
     val idempotencyKey: String? = null,
     /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
     val debugMode: Boolean = false,
+    /**
+     * Which worker pool and typed stream this run belongs to, decided at trigger
+     * from the workflow version's graph. Materialising it here is what lets the
+     * worker consume a stream it knows it can serve, instead of reading first
+     * and discovering afterwards. Defaults to "short" — the smallest claim.
+     */
+    val executionClass: String = "short",
+    /**
+     * Virtual finish time from weighted fair queueing — the run's place in the
+     * claim order. 0.0 means "not placed", which the claim treats as the front of
+     * the queue, so callers that skip placement must pass a real value.
+     */
+    val fairVtime: Double = 0.0,
+    /** 0 = ordinary traffic, 100 = priority/demo lane. */
+    val priority: Short = 0,
+    /**
+     * Which of the three operations produced this run: live | replay | retry |
+     * rerun. The worker reads this from the row to decide whether to serve model
+     * calls from a recording or make them for real.
+     */
+    val executionModeKind: String = "live",
+    /** The run being replayed or re-run from. Null for a fresh trigger. */
+    val sourceRunId: UUID? = null,
+    /** Partial replay: replayed up to and including this node, live after it. */
+    val replayUntilNode: String? = null,
 )
 
 data class AgentRun(
@@ -41,6 +66,13 @@ data class AgentRun(
     val createdAt: Instant,
     val updatedAt: Instant,
     val debugMode: Boolean = false,
+    val nodeTotal: Int? = null,
+    val nodeCommitted: Int = 0,
+    val ribbonJson: String = "[]",
+    /** Populated by list(); null for point reads and newly-created rows. */
+    val workflowName: String? = null,
+    val environmentName: String? = null,
+    val incidentId: UUID? = null,
 )
 
 open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
@@ -51,8 +83,26 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         status, trigger_type, input_json, output_json, error_json,
         current_step_id, current_agent_id, idempotency_key,
         started_at, completed_at, duration_ms, token_count, estimated_cost,
-        created_at, updated_at, debug_mode
+        created_at, updated_at, debug_mode,
+        node_total, node_committed, ribbon_json
     """.trimIndent()
+
+    /**
+     * The run's stored execution class, for routing a RESUME_RUN / RETRY_NODE /
+     * REPLAY_RUN onto the right typed stream.
+     *
+     * Read rather than re-derived on purpose: the class was decided once, at
+     * trigger, from the version's graph. Re-deriving it on resume would risk a
+     * continuation landing on a different stream from the run it continues —
+     * and would reintroduce exactly the graph probe that typing the queue exists
+     * to delete.
+     *
+     * Null means the run does not exist. Callers treat that as "short".
+     */
+    open fun findExecutionClass(runId: UUID): String? = queryOne(
+        "SELECT execution_class FROM agent_runs WHERE id = ?",
+        { setUuid(1, runId) },
+    ) { rs -> rs.getString("execution_class") }
 
     open fun findById(id: UUID, workspaceId: UUID): AgentRun? = queryOne(
         "SELECT $cols FROM agent_runs WHERE id = ? AND workspace_id = ?",
@@ -68,8 +118,10 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         """
         INSERT INTO agent_runs
             (workspace_id, environment_id, workflow_id, workflow_version_id,
-             status, trigger_type, input_json, idempotency_key, debug_mode)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?)
+             status, trigger_type, input_json, idempotency_key, debug_mode,
+             execution_class, fair_vtime, priority,
+             execution_mode_kind, source_run_id, replay_until_node)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -81,6 +133,12 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setString(6, req.inputJson)
             setString(7, req.idempotencyKey)
             setBoolean(8, req.debugMode)
+            setString(9, req.executionClass)
+            setDouble(10, req.fairVtime)
+            setShort(11, req.priority)
+            setString(12, req.executionModeKind)
+            setUuidOrNull(13, req.sourceRunId)
+            setString(14, req.replayUntilNode)
         },
         ::mapRow,
     )
@@ -107,6 +165,18 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setUuid(3, workspaceId)
         } > 0
 
+    /** Cancel every queued run in a workspace without deleting its audit trail. */
+    open fun purgeQueued(workspaceId: UUID): Int = execute(
+        """
+        UPDATE agent_runs
+           SET status = 'cancelled',
+               completed_at = COALESCE(completed_at, now()),
+               duration_ms = COALESCE(duration_ms, 0),
+               updated_at = now()
+         WHERE workspace_id = ? AND status = 'queued'
+        """.trimIndent(),
+    ) { setUuid(1, workspaceId) }
+
     open fun list(
         workspaceId: UUID,
         environmentId: UUID? = null,
@@ -115,10 +185,10 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         params: PageParams = PageParams(),
     ): Page<AgentRun> {
         val filters = buildList {
-            add("workspace_id = ?")
-            if (environmentId != null) add("environment_id = ?")
-            if (workflowId != null) add("workflow_id = ?")
-            if (status != null) add("status = ?")
+            add("r.workspace_id = ?")
+            if (environmentId != null) add("r.environment_id = ?")
+            if (workflowId != null) add("r.workflow_id = ?")
+            if (status != null) add("r.status = ?")
         }
         val where = "WHERE ${filters.joinToString(" AND ")}"
         val bindBase: (java.sql.PreparedStatement) -> Unit = {
@@ -129,13 +199,47 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (status != null) it.setString(i++, status)
         }
         return queryPage(
-            sql = "SELECT $cols FROM agent_runs $where ORDER BY created_at DESC",
-            countSql = "SELECT COUNT(*) FROM agent_runs $where",
+            sql = """
+                SELECT r.*, w.name AS workflow_name,
+                       COALESCE(e.slug, e.type) AS environment_name,
+                       fi.id AS incident_id,
+                       COALESCE(usage.total_tokens, r.token_count::bigint) AS effective_token_count,
+                       COALESCE(usage.total_cost, r.estimated_cost) AS effective_estimated_cost
+                  FROM agent_runs r
+                  JOIN workflows w
+                    ON w.id = r.workflow_id AND w.workspace_id = r.workspace_id
+                  LEFT JOIN environments e
+                    ON e.id = r.environment_id AND e.workspace_id = r.workspace_id
+                  LEFT JOIN LATERAL (
+                      SELECT id
+                        FROM failure_incidents
+                       WHERE workspace_id = r.workspace_id AND run_id = r.id
+                       ORDER BY detected_at DESC
+                       LIMIT 1
+                  ) fi ON true
+                  LEFT JOIN LATERAL (
+                      SELECT SUM(token_count)::bigint AS total_tokens,
+                             SUM(estimated_cost)::numeric AS total_cost
+                        FROM run_events
+                       WHERE run_id = r.id
+                  ) usage ON true
+                  $where
+                 ORDER BY r.created_at DESC
+            """.trimIndent(),
+            countSql = "SELECT COUNT(*) FROM agent_runs r $where",
             params = params,
             bind = { bindBase(this) },
-            mapRow = ::mapRow,
+            mapRow = ::mapListRow,
         )
     }
+
+    private fun mapListRow(rs: java.sql.ResultSet): AgentRun = mapRow(rs).copy(
+        workflowName = rs.getString("workflow_name"),
+        environmentName = rs.getString("environment_name"),
+        incidentId = rs.uuidOrNull("incident_id"),
+        tokenCount = (rs.getObject("effective_token_count") as? Number)?.toInt(),
+        estimatedCost = (rs.getObject("effective_estimated_cost") as? Number)?.toDouble(),
+    )
 
     private fun mapRow(rs: java.sql.ResultSet) = AgentRun(
         id = rs.uuid("id"),
@@ -159,5 +263,8 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
         debugMode = rs.getBoolean("debug_mode"),
+        nodeTotal = (rs.getObject("node_total") as? Number)?.toInt(),
+        nodeCommitted = rs.getInt("node_committed"),
+        ribbonJson = rs.getJsonbString("ribbon_json"),
     )
 }

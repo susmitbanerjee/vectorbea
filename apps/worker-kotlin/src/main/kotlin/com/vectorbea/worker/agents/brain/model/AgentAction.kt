@@ -45,10 +45,88 @@ data class AgentAction(
     /** Reason used when type = FAIL */
     @JsonProperty("failReason")
     val failReason: String? = null,
+
+    /**
+     * The peer agent to DELEGATE or HANDOFF to.
+     *
+     * Deliberately a separate field from [toolId] rather than a reuse of it. They
+     * are validated against DIFFERENT grant lists, and one field checked against
+     * two lists is how a target ends up validated against the wrong one.
+     */
+    @JsonProperty("targetAgentId")
+    val targetAgentId: String? = null,
+
+    /**
+     * Several peers at once — a BROADCAST.
+     *
+     * ── WHY THIS IS NOT AN EIGHTH ACTION ────────────────────────────────────
+     * §5.1 lists BROADCAST as a handoff KIND, and §5.3 puts the action set at
+     * seven. A fan-out is a DELEGATE with more than one target: the same grant
+     * check on every target, the same contract, the same boundary. Adding an
+     * eighth action would give the model a second way to express one idea and
+     * give the runtime a second dispatch path to keep in step with the first.
+     *
+     * One target here is the same as [targetAgentId]; the two are merged by
+     * `AgentAction.delegationTargets`.
+     */
+    @JsonProperty("targetAgentIds")
+    val targetAgentIds: List<String>? = null,
+
+    /**
+     * The task contract for the delegation, as the model wrote it.
+     *
+     * A map rather than a parsed [com.vectorbea.worker.agents.orchestration.TaskContract]
+     * because this is the LLM's raw output: it is untrusted, frequently malformed,
+     * and parsing it here would make a bad contract an unparseable ACTION, which
+     * the repair path would turn into a THINK. It is parsed at the boundary
+     * instead, where a bad contract can be reported as a bad contract.
+     */
+    @JsonProperty("contract")
+    val contract: Map<String, Any?>? = null,
+
+    /**
+     * True when the runtime built this action because the model's response could
+     * not be parsed.
+     *
+     * ── WHY THIS IS NOT INFERRABLE ──────────────────────────────────────────
+     * An unparseable response is repaired into a THINK so the loop can continue.
+     * The stored iteration is then identical to one where the model genuinely
+     * chose to think — so the trace shows deliberation where there was a parse
+     * failure, and the reader goes looking at the prompt when the problem is the
+     * response format.
+     *
+     * `@JsonIgnore` because this is a runtime fact ABOUT the parse, never
+     * something the model may claim about itself: without it a model could emit
+     * `"repaired": true` and have the debugger blame the runtime.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    val repaired: Boolean = false,
 ) {
+    /**
+     * Seven actions. Resist an eighth.
+     *
+     * The set is call, tail-call, return, think, ask, give up — the smallest one
+     * that expresses delegation. Every addition multiplies the states the
+     * debugger, the resume path and the join logic each have to handle.
+     */
+    /**
+     * Every peer this action names, in order, de-duplicated.
+     *
+     * One place that answers "who is this delegation to", so the roster check,
+     * the fan-out and the handoff rows cannot disagree about the answer.
+     */
+    val delegationTargets: List<String>
+        get() = (listOfNotNull(targetAgentId) + (targetAgentIds ?: emptyList()))
+            .map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
+    /** True when this delegation fans out. */
+    val isBroadcast: Boolean get() = delegationTargets.size > 1
+
     enum class ActionType {
         THINK,        // internal reasoning step — no external call
         CALL_TOOL,    // call an allowed registered tool
+        DELEGATE,     // hand a subtask to a rostered peer and wait for its result
+        HANDOFF,      // transfer control to a rostered peer; a tail call, no return
         FINAL,        // produce final output and stop
         ASK_APPROVAL, // request human approval
         FAIL,         // agent decided it cannot complete the task

@@ -150,7 +150,7 @@ export function FlowTab({ agents, timelineEvents }: FlowTabProps) {
       {/* Legend */}
       <div
         className="mb-5 flex items-center gap-4 rounded-lg px-4 py-2.5 text-[11px]"
-        style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+        style={{ background: "var(--surface-2)", border: "1px solid var(--legacy-border-subtle)" }}
       >
         <span style={{ color: "var(--text-faint)" }} className="uppercase tracking-wider font-semibold text-[10px]">
           Agent Chain
@@ -230,7 +230,7 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
         {/* Header */}
         <div
           className="flex items-center justify-between gap-3 px-4 py-3"
-          style={{ borderBottom: "1px solid var(--border-subtle)" }}
+          style={{ borderBottom: "1px solid var(--legacy-border-subtle)" }}
         >
           <div className="flex items-center gap-3">
             {/* Index bubble */}
@@ -275,14 +275,14 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
           <div className="px-4 pb-1">
             <div
               className="h-0.5 w-full overflow-hidden rounded-full"
-              style={{ background: "var(--border-subtle)" }}
+              style={{ background: "var(--legacy-border-subtle)" }}
             >
               <div
                 className="h-full rounded-full transition-all"
                 style={{
                   width: `${durationPct}%`,
                   background: agent.status === "FAILED" ? "var(--status-failure)" :
-                    agent.status === "WAITING" ? "var(--status-waiting)" : "var(--status-running)",
+                    agent.status === "WAITING" ? "var(--legacy-status-waiting)" : "var(--status-running)",
                 }}
               />
             </div>
@@ -293,7 +293,7 @@ function AgentFlowNode({ node, index, total }: { node: FlowNode; index: number; 
         {agent.toolsUsed && agent.toolsUsed.length > 0 && (
           <div
             className="mx-4 mb-3 mt-2 rounded-lg px-3 py-2"
-            style={{ background: "var(--surface-3)", border: "1px solid var(--border-subtle)" }}
+            style={{ background: "var(--surface-3)", border: "1px solid var(--legacy-border-subtle)" }}
           >
             <div className="flex items-center gap-1.5 flex-wrap">
               <Wrench className="h-3 w-3 shrink-0" style={{ color: "var(--text-faint)" }} />

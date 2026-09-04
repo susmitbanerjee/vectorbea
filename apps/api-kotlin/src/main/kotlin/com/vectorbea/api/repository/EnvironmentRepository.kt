@@ -32,6 +32,19 @@ class EnvironmentRepository(dataSource: DataSource) : BaseRepository(dataSource)
         ::mapRow,
     )
 
+    /**
+     * The workspace's default environment — its oldest — or null when it has none.
+     *
+     * Separate from [list] because this is on the write path: every request that
+     * omits `X-Environment-Id` resolves through it, and `list` runs a COUNT
+     * alongside the page for pagination nobody reads here.
+     */
+    fun firstByWorkspace(workspaceId: UUID): Environment? = queryOne(
+        "SELECT $cols FROM environments WHERE workspace_id = ? ORDER BY created_at ASC LIMIT 1",
+        { setUuid(1, workspaceId) },
+        ::mapRow,
+    )
+
     fun list(workspaceId: UUID, params: PageParams = PageParams()): Page<Environment> = queryPage(
         sql = "SELECT $cols FROM environments WHERE workspace_id = ? ORDER BY created_at ASC",
         countSql = "SELECT COUNT(*) FROM environments WHERE workspace_id = ?",
@@ -55,6 +68,22 @@ class EnvironmentRepository(dataSource: DataSource) : BaseRepository(dataSource)
             },
             ::mapRow,
         )
+
+    fun findOrCreate(workspaceId: UUID, slug: String): Environment = executeReturning(
+        """
+        INSERT INTO environments (workspace_id, name, slug, type)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (workspace_id, slug) DO UPDATE SET slug = EXCLUDED.slug
+        RETURNING $cols
+        """.trimIndent(),
+        {
+            setUuid(1, workspaceId)
+            setString(2, slug.replaceFirstChar { it.uppercase() })
+            setString(3, slug)
+            setString(4, slug)
+        },
+        ::mapRow,
+    )
 
     fun update(id: UUID, workspaceId: UUID, name: String, type: String): Environment? = queryOne(
         """

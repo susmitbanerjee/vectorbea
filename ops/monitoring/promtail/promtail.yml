@@ -1,0 +1,69 @@
+# Ships container stdout into Loki, parsing the JSON envelope.
+#
+# THE LABEL DECISION IS THE WHOLE FILE
+# ------------------------------------
+# Loki indexes labels and only labels; everything else is scanned at query time. A
+# label with many distinct values creates a stream per value, and streams are the thing
+# Loki runs out of.
+#
+# So `run_id` and `workspace_id` are deliberately NOT labels, even though filtering by
+# run is the single most common query. One stream per run would be thousands of streams
+# a day and would fall over within a week. They stay inside the JSON line and are found
+# with `| json | run_id="…"`, which is a scan over a small time window and is fast
+# enough precisely because the label set is small.
+#
+# Labels are the low-cardinality things: which service, which container, which level.
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+  log_level: warn
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 15s
+
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'
+
+    pipeline_stages:
+      # Docker wraps each line in its own JSON envelope; unwrap that first.
+      - docker: {}
+
+      # Then parse OUR envelope. Only the fields promoted to labels are extracted
+      # here; the rest of the line stays intact for query-time filtering.
+      - json:
+          expressions:
+            level: level
+            service: service
+            worker_id: worker_id
+
+      - labels:
+          level:
+          service:
+          worker_id:
+
+      # Use the application's own timestamp, not the ingestion time. Otherwise a
+      # backlog being drained after an outage all lands at the same instant, and the
+      # logs from the incident appear to have happened after it ended.
+      - json:
+          expressions:
+            timestamp: timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+          # A malformed timestamp must not drop the line — fall back to ingestion time
+          # and keep the log, which is what you actually want during an incident.
+          action_on_failure: fudge

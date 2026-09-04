@@ -1,0 +1,16 @@
+apiVersion: 1
+
+providers:
+  - name: vectorbea
+    orgId: 1
+    folder: Vectorbea
+    type: file
+    # Editable in the UI for experimenting, but the file is the source of truth and
+    # overwrites on restart. A dashboard that exists only in Grafana's database is one
+    # box failure from gone, and cannot be reviewed in a diff.
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

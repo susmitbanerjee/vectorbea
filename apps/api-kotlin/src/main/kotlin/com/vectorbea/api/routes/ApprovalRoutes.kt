@@ -45,6 +45,21 @@ private fun Approval.toResponse(): Map<String, Any?> = mapOf(
     },
     "createdAt" to createdAt.toString(),
     "updatedAt" to updatedAt.toString(),
+    /*
+     * The gate's own terms, as the canvas configured them. Absent from this
+     * response until now, which is why the Approvals page hard-coded
+     * `slaMs: 1` and `approverGroup: "Not provided by API"` — it had nothing
+     * else to render. Null still means "this gate declares none", and the UI
+     * distinguishes that from "the API cannot tell you".
+     */
+    "slaDeadlineAt" to slaDeadlineAt?.toString(),
+    "escalationPolicy" to escalationPolicyJson?.let {
+        runCatching { mapper.readValue(it, Map::class.java) }.getOrNull()
+    },
+    "evidenceRefs" to evidenceRefsJson?.let {
+        runCatching { mapper.readValue(it, Map::class.java) }.getOrNull()
+    },
+    "confidenceScore" to confidenceScore,
 )
 
 private val log = LoggerFactory.getLogger(ApprovalRoutes::class.java)
@@ -56,6 +71,12 @@ class ApprovalRoutes(
     private val runRepo: RunRepository? = null,
     private val eventRepo: RunEventRepository? = null,
     private val queue: WorkflowQueue? = null,
+    /**
+     * Governance trail. An approval decision is the single most audit-relevant
+     * action in the product: a human took responsibility for something an agent
+     * proposed, and "who approved this" is the first question after any incident.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
 
     fun register(router: Router) {
@@ -144,6 +165,24 @@ class ApprovalRoutes(
         log.info("[approval] {} id={} runId={} stepId={} by={}",
             decision, id, approval.runId, approval.stepId, body.decidedBy)
 
+        // Recorded with both sides: the status it was in, and the decision made.
+        // The reason is included because "approved" without "why" answers half the
+        // question an auditor is asking.
+        //
+        // Note this is the searchable index over the decision, not its
+        // authoritative record — that is `run_approvals.resolved_by`, written
+        // transactionally above. The audit log is best-effort by design so a
+        // logging failure cannot block a decision a human is waiting on.
+        audit?.recordUserAction(
+            req, ctx.workspaceId,
+            com.vectorbea.api.audit.AuditLog.Action.APPROVAL_DECIDE,
+            targetType = "approval", targetId = id,
+            before = mapOf("status" to approval.status, "runId" to approval.runId.toString(),
+                           "nodeId" to approval.stepId),
+            after = mapOf("status" to decision, "decidedBy" to body.decidedBy,
+                          "reason" to body.reason),
+        )
+
         // Load the run to get environmentId (needed for event and job)
         val run = runRepo?.findById(approval.runId, ctx.workspaceId)
 
@@ -160,6 +199,11 @@ class ApprovalRoutes(
                     source        = "api:approval",
                     title         = "Approval ${decision}: ${approval.title}",
                     summary       = body.reason?.take(200),
+                    /* WHICH approval this decided. Two APPROVAL_APPROVED events on one
+                       run were indistinguishable on the timeline, so "was this approved
+                       twice, or were there two gates?" could not be answered from the
+                       event stream at all — and only one of those is a bug. */
+                    correlationId = id.toString(),
                 ))
             }.onFailure { e ->
                 log.warn("[approval] failed to append decision event: {}", e.message)
@@ -179,6 +223,10 @@ class ApprovalRoutes(
                     jobType           = JobType.RESUME_RUN,
                     resumeFromNodeId  = approval.stepId,
                     reason            = "approval",
+                    // A continuation belongs on the same stream as the run it
+                    // continues — read, never re-derived.
+                    executionClass    = com.vectorbea.api.queue.ExecutionClass.fromWire(
+                        runCatching { runRepo?.findExecutionClass(approval.runId) }.getOrNull()),
                     // inputJson intentionally omitted — RESUME_RUN loads it from the DB.
                 ))
             }.onFailure { e ->

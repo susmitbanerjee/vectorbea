@@ -1,6 +1,6 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
 import { getUserWorkspaces } from "@/lib/auth/neon-auth";
+import { appSql } from "@/lib/server/app-db";
 
 /**
  * Upsert an OAuth user into Neon app_users.
@@ -17,7 +17,9 @@ export async function upsertOAuthUser(
   name?: string,
   picture?: string,
 ): Promise<string> {
-  const sql = neon(process.env.DATABASE_URL!);
+  // Standard wire protocol, so this works against a local Postgres too.
+  // See lib/server/app-db.ts.
+  const sql = appSql;
 
   // 1. Check if this exact provider ID already exists
   const byId = await sql`

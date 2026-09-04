@@ -30,7 +30,7 @@ function SummaryCard({ label, value, sub, icon, accent = "default" }: CardProps)
   return (
     <div
       className="rounded-xl p-4 space-y-2"
-      style={{ background: "var(--surface-2)", border: "1px solid var(--border-subtle)" }}
+      style={{ background: "var(--surface-2)", border: "1px solid var(--legacy-border-subtle)" }}
     >
       <div className="flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>{label}</p>

@@ -39,18 +39,6 @@ class AuthMiddleware(
     )
 
     /**
-     * Paths that authenticated-but-unapproved users may access.
-     * All other product API paths require beta_status=approved.
-     */
-    private val betaAllowedPaths = setOf(
-        "/api/me",
-        "/api/beta/status",
-        "/api/beta/apply",
-        "/api/health",
-        "/api/version",
-    )
-
-    /**
      * Authenticate the request.
      *
      * @return The request with [Request.principal] set if auth succeeded, or the
@@ -99,21 +87,10 @@ class AuthMiddleware(
             appUserId              = profile.id,
             email                  = claims.email,
             authorizedWorkspaceIds = profile.authorizedWorkspaceIds,
+            workspaceRoles         = profile.workspaceRoles,
             betaStatus             = profile.betaStatus,
             isPlatformAdmin        = profile.isPlatformAdmin || config?.isAdmin(claims.email) == true,
         )
-
-        // ── Private beta gate ────────────────────────────────────────────────
-        // In private beta mode, unapproved users can only access beta/* and me routes.
-        if (config?.privateBetaMode == true && !principal.isApproved) {
-            val pathOk = betaAllowedPaths.any { request.path.startsWith(it) }
-            if (!pathOk) {
-                log.info("[beta-gate] blocked sub={} status={} path={}", claims.sub, profile.betaStatus, request.path)
-                throw ApiError.Forbidden(
-                    "PRIVATE_BETA_ACCESS_REQUIRED: Vectorbea is currently invite-only. Submit an application at /beta/apply."
-                )
-            }
-        }
 
         log.debug("[auth] authenticated sub={} betaStatus={} workspaces={}",
             claims.sub, profile.betaStatus, profile.authorizedWorkspaceIds.size)

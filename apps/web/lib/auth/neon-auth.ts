@@ -1,13 +1,22 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
 import bcrypt from "bcryptjs";
+
+import { appSql } from "@/lib/server/app-db";
 
 type Row = Record<string, any>;
 
+/**
+ * The application database, over the standard wire protocol.
+ *
+ * This was `neon(DATABASE_URL)` — an HTTP driver that only speaks to Neon's
+ * endpoint. Against the local and containerised Postgres the repo's own
+ * quickstart tells you to run (`docker compose up postgres`), it cannot connect
+ * at all, so sign-in, sign-up and every membership lookup were dead outside the
+ * deployed environments. `appSql` is the same tagged-template shape over `pg`,
+ * which speaks to both. See `lib/server/app-db.ts`.
+ */
 function db() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL not set");
-  return neon(url);
+  return appSql;
 }
 
 export interface NeonUser {

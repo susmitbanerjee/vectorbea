@@ -37,13 +37,18 @@ fun requirePositiveDouble(value: Double?, fieldName: String): Double? {
 }
 
 /** Connection type allowlist */
-val CONNECTION_TYPES = setOf("llm", "database", "http", "tool")
+val CONNECTION_TYPES = setOf("llm", "database", "http", "tool", "vector_store", "object_storage")
 
 /** Provider allowlist for LLM connections */
 val LLM_PROVIDERS = setOf("openai", "anthropic", "google", "mistral", "cohere", "azure_openai", "custom")
 
 /** Agent type allowlist */
-val AGENT_TYPES = setOf("native_llm_agent", "conversational", "task", "supervisor", "router", "custom")
+val AGENT_TYPES = setOf(
+    "native_llm_agent", "iterative_agent", "tool_agent", "router_agent", "approval_agent",
+    "imported_langgraph_node", "external_instrumented_agent",
+    // Retained for API clients created before the enterprise registry vocabulary.
+    "conversational", "task", "supervisor", "router", "custom",
+)
 
 /** Tool type allowlist */
 val TOOL_TYPES = setOf("http", "database", "code", "builtin", "llm_generate", "custom")

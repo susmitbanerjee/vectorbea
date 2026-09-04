@@ -2,13 +2,15 @@ package com.vectorbea.worker.telemetry
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.vectorbea.worker.net.OutboundHttp
 import org.slf4j.LoggerFactory
 import java.net.URI
-import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Instant
-import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 
 /**
  * Best-effort analytics client for worker-kotlin.
@@ -26,8 +28,19 @@ class TelemetryClient private constructor(
     private val environment: String,
 ) {
     private val log = LoggerFactory.getLogger(TelemetryClient::class.java)
-    private val executor = Executors.newCachedThreadPool()
-    private val http = HttpClient.newHttpClient()
+
+    /**
+     * Bounded, daemon, and drop-on-full. A cached pool with an untimed HTTP
+     * client meant a stalled telemetry endpoint grew one thread per tracked
+     * event without limit. Analytics must never be able to exhaust the process.
+     */
+    private val executor = ThreadPoolExecutor(
+        0, TELEMETRY_THREADS,
+        30L, TimeUnit.SECONDS,
+        LinkedBlockingQueue(TELEMETRY_QUEUE_DEPTH),
+        ThreadFactory { r -> Thread(r, "telemetry-dispatch").apply { isDaemon = true } },
+        ThreadPoolExecutor.DiscardPolicy(),
+    )
     private val mapper = ObjectMapper().registerKotlinModule()
 
     fun track(
@@ -66,11 +79,14 @@ class TelemetryClient private constructor(
                     .header("X-Telemetry-Token", internalToken)
                     .header("X-Source-Service", "vectorbea-worker")
                     .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build()
 
-                val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
-                if (resp.statusCode() !in 200..299) {
-                    log.warn("[telemetry] event rejected: status={}", resp.statusCode())
+                val resp = OutboundHttp.send(
+                    req,
+                    totalCallMs = OutboundHttp.policy().telemetryTotalCallMs,
+                    maxResponseBytes = 65_536L,
+                )
+                if (resp.statusCode !in 200..299) {
+                    log.warn("[telemetry] event rejected: status={}", resp.statusCode)
                 } else {
                     log.debug("[telemetry] tracked event={}", eventName)
                 }
@@ -83,6 +99,11 @@ class TelemetryClient private constructor(
 
     companion object {
         private val log = LoggerFactory.getLogger(TelemetryClient::class.java)
+
+        /** Hard cap on dispatch threads — analytics never competes for execution slots. */
+        private const val TELEMETRY_THREADS = 4
+        /** Beyond this backlog, events are dropped rather than queued. */
+        private const val TELEMETRY_QUEUE_DEPTH = 256
 
         fun fromEnv(): TelemetryClient? {
             val enabled = System.getenv("TELEMETRY_ENABLED")?.lowercase() == "true"

@@ -1,0 +1,55 @@
+# Scrape config.
+#
+# The API and the worker each expose `/metrics`. They are separate jobs rather than one
+# because they answer different questions and the alerts below target the worker's
+# series specifically — putting them in one job would make every query carry a
+# `job="…"` filter it would be easy to forget.
+
+global:
+  # 15s rather than the 1m default: the claim-latency alert evaluates over 5 minutes,
+  # and at a 1m interval that is five samples — too few for a p95 to mean anything.
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    # Stamped on every series so a future second box, or a staging stack, is
+    # distinguishable in a federated view rather than silently merged.
+    environment: '${VECTORBEA_ENV}'
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']
+
+scrape_configs:
+  - job_name: 'vectorbea-api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+        labels:
+          service: api
+
+  # The worker's metrics are on a separate port from its work, deliberately: the port
+  # can be firewalled independently and a scrape cannot contend with the queue.
+  #
+  # Every replica is listed. Prometheus needs to see them individually — the whole
+  # point of `worker_in_flight{worker_id}` is telling one worker from another, and a
+  # single load-balanced target would round-robin between them and produce nonsense.
+  - job_name: 'vectorbea-worker'
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - 'host.docker.internal:9090'
+          - 'host.docker.internal:9091'
+          - 'host.docker.internal:9092'
+        labels:
+          service: worker
+    # A worker that is down should show as absent rather than as a gap in an existing
+    # series, so the instance label is kept as-is.
+    honor_labels: true
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

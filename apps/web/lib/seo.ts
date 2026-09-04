@@ -20,9 +20,19 @@ const rawSiteUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim() || PROD_URL;
 export const SITE = {
   name: "Vectorbea",
   /** Used as the <title> on the homepage and as the OG/Twitter site name. */
-  defaultTitle: "Vectorbea — Durable Agentic AI Workflows",
-  /** Applied to every other page: "<Page> | Vectorbea". */
-  titleTemplate: "%s | Vectorbea",
+  // A hyphen, not an em dash, matching `titleTemplate` below. A tab strip
+  // renders the two at very different weights, so mixing them made the
+  // homepage tab look like it belonged to a different site.
+  defaultTitle: "Vectorbea - Durable Agentic AI Workflows",
+  /**
+   * Applied to every other page: "<Page> - Vectorbea".
+   *
+   * A hyphen, not a pipe. It is what Gmail, Google Docs and most of the tools
+   * this sits beside in a tab strip use, and at the ~15 characters a favicon-
+   * width tab actually shows, a pipe reads as part of the page name while a
+   * hyphen reads as a separator.
+   */
+  titleTemplate: "%s - Vectorbea",
   tagline: "Durable execution for AI agents",
   description:
     "Build and run durable, long-running AI agent workflows — with checkpoints, automatic retries, human approvals, live observability and resume-from-failure recovery.",
@@ -51,7 +61,7 @@ export interface CreateMetadataInput {
   description?: string;
   /** Site-relative canonical path, e.g. "/use-cases/durable-ai-workflows". */
   path: string;
-  /** When true, sets the exact <title> without the "| Vectorbea" template. */
+  /** When true, sets the exact <title> without the "- Vectorbea" template. */
   titleAbsolute?: boolean;
   /** Override the default OG image (site-relative or absolute). */
   image?: string;

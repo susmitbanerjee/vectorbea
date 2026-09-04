@@ -5,6 +5,7 @@ import com.vectorbea.api.api.pageParams
 import com.vectorbea.api.api.pathUUID
 import com.vectorbea.api.errors.ApiError
 import com.vectorbea.api.events.EventBus
+import com.vectorbea.api.http.mapper
 import com.vectorbea.api.http.toJson
 import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
@@ -36,6 +37,24 @@ private val log = LoggerFactory.getLogger(RunRoutes::class.java)
 // ── Run status sets ───────────────────────────────────────────────────────────
 
 private val TERMINAL_STATUSES    = setOf("succeeded", "failed", "cancelled", "timed_out", "enqueue_failed")
+
+/**
+ * Run-creation rate when a workspace has no policy row.
+ *
+ * 60/minute sustained with a burst of 120 — generous enough that no legitimate
+ * client notices, tight enough that a runaway loop is stopped in a second rather
+ * than after it has filled the queue.
+ */
+private val DEFAULT_RUN_RATE = 60 to 120
+
+/** Body of `POST /api/runs/:id/replay`. Every field optional. */
+data class ReplayRequest(
+    /**
+     * Partial replay boundary. Nodes up to and including this one are served from
+     * the recording; nodes after it execute live with real calls and real cost.
+     */
+    val untilNode: String? = null,
+)
 private val CANCELLABLE_STATUSES = setOf("queued", "running", "waiting_for_approval")
 private val RETRYABLE_STATUSES   = setOf("failed", "enqueue_failed", "timed_out")
 
@@ -62,12 +81,43 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "updatedAt" to updatedAt.toString(),
     "hasOutput" to (outputJson != null),
     "hasError" to (errorJson != null),
+    "workflowName" to workflowName,
+    "environment" to environmentName,
+    "nodeTotal" to nodeTotal,
+    "nodeCommitted" to nodeCommitted,
+    "ribbonJson" to ribbonJson,
+    "incidentId" to incidentId?.toString(),
 )
 
 private fun AgentRun.toDetailResponse(): Map<String, Any?> = toResponse() + mapOf(
-    "outputJson" to outputJson,
-    "errorJson" to errorJson,
+    "outputJson" to decodeJsonColumn(outputJson),
+    "errorJson" to decodeJsonColumn(errorJson),
 )
+
+/**
+ * Render a `jsonb` column as JSON, not as a string containing JSON.
+ *
+ * The repository reads `output_json` / `error_json` with `getJsonbStringOrNull`, so
+ * what reaches here is the column's raw TEXT. Passing that straight into the response
+ * map made Jackson escape it, and the run detail arrived as
+ * `"errorJson": "{\"code\":\"WORKER_ERROR\"}"` — a string where every consumer
+ * expects an object. The web client validates this endpoint against its contract and
+ * rejected the whole response with "Expected object, received string", so a failed run
+ * could not be opened at all: the one screen whose entire purpose is showing why a run
+ * failed was the screen the failure made unreadable.
+ *
+ * Every other route already does this (`AgentRoutes`, `ToolRoutes`, `WorkflowRoutes`
+ * all parse their jsonb columns before responding); this was the outlier.
+ *
+ * Returns null when the column is null, and falls back to the raw string when it does
+ * not parse. The fallback is deliberate: a row written by something that did not store
+ * valid JSON is still worth showing to whoever is debugging it, and dropping it would
+ * hide the very evidence the screen exists for.
+ */
+private fun decodeJsonColumn(raw: String?): Any? {
+    if (raw == null) return null
+    return runCatching { mapper.readValue(raw, Any::class.java) }.getOrDefault(raw)
+}
 
 private fun RunEvent.toResponse(): Map<String, Any?> = mapOf(
     "id" to id.toString(),
@@ -114,7 +164,59 @@ class RunRoutes(
     private val betaRepo: com.vectorbea.api.beta.BetaAccessRepository? = null,
     private val appConfig: com.vectorbea.api.config.AppConfig? = null,
     private val telemetry: TelemetryClient? = null,
+    /**
+     * Decides which typed stream a run goes to, before the message exists.
+     * Null keeps every enqueue on the SHORT stream, which is the safe default
+     * for a deployment mid-migration and for tests that do not exercise routing.
+     */
+    private val classResolver: com.vectorbea.api.queue.ExecutionClassResolver? = null,
+    /** For fair-queue placement. Null falls back to FIFO ordering. */
+    private val dataSource: javax.sql.DataSource? = null,
+    /**
+     * Decides whether a run is accepted at all, and what the caller is told when
+     * it is. Null admits everything — the behaviour before load shedding existed,
+     * kept for tests that do not exercise it.
+     */
+    private val admission: com.vectorbea.api.admission.AdmissionControl? = null,
+    /**
+     * Token bucket for run creation, per workspace. Null disables the check.
+     */
+    private val runRateLimiter: com.vectorbea.api.rate.TokenBucket? = null,
 ) {
+
+    /**
+     * Class for a fresh run: derived from the workflow version's graph, memoised
+     * per version. This is the one place a graph is inspected — everything
+     * downstream reads the stored answer.
+     */
+    private fun classifyVersion(versionId: UUID) =
+        classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
+
+    /**
+     * Place a run in the weighted fair queue and advance the workspace clock.
+     *
+     * Done at trigger, in one atomic statement, because the ordering decision has
+     * to happen exactly once per run — computing it later, or twice, would let
+     * concurrent submissions from one tenant share a vtime and bypass the
+     * weighting. Degrades to `now` (FIFO) if the DB is unavailable rather than
+     * failing the trigger.
+     */
+    private fun placeInFairQueue(workspaceId: UUID, cls: com.vectorbea.api.queue.ExecutionClass) =
+        dataSource?.let { com.vectorbea.api.queue.FairOrdering.placeAndAdvance(it, workspaceId, cls) }
+            ?: com.vectorbea.api.queue.FairOrdering.Placement(
+                System.currentTimeMillis() / 1000.0, 0)
+
+    /**
+     * Class for a continuation: read from the run row, never re-derived.
+     *
+     * A RESUME_RUN must land on the same stream as the run it continues. Re-
+     * deriving would risk a continuation drifting to a different pool if the
+     * classifier ever changed, and would reintroduce the graph probe that typing
+     * the queue exists to remove.
+     */
+    private fun classifyExistingRun(runId: UUID) =
+        com.vectorbea.api.queue.ExecutionClass.fromWire(
+            runCatching { runRepo.findExecutionClass(runId) }.getOrNull())
     fun register(router: Router) {
         // Workflow-scoped trigger
         router.post("/api/workflows/:workflowId/run", ::triggerRun)
@@ -128,10 +230,15 @@ class RunRoutes(
         router.sseGet("/api/runs/:id/stream", ::streamEvents)
 
         // Durable control operations
+        router.post("/api/runs/purge-queued",     ::purgeQueuedRuns)
         router.post("/api/runs/:id/cancel",     ::cancelRun)
         router.post("/api/runs/:id/retry",      ::retryRun)
         router.post("/api/runs/:id/retry-node", ::retryNode)
+        // Three operations, three costs, three guarantees. See section 2 of
+        // 07-AGENT-RELIABILITY.md and docs/architecture/REPLAY-AUDIT.md - until
+        // this change, /replay did what /rerun now does, which is the bug.
         router.post("/api/runs/:id/replay",     ::replayRun)
+        router.post("/api/runs/:id/rerun",      ::rerunRun)
     }
 
     // ── POST /api/workflows/:workflowId/run ────────────────────────────────────
@@ -199,10 +306,16 @@ class RunRoutes(
         val requestedMode = if (body.mode == "real") "real" else "simulation"
         if (requestedMode == "real" && beta != null) {
             val controls = beta.getWorkspaceBetaControls(ctx.workspaceId)
-            val realEnabled = controls?.realExecutionEnabled ?: false
+            // No controls row means nobody has made a decision about this
+            // workspace, so the deployment's default applies. This read
+            // `?: false` regardless of DEFAULT_EXECUTION_MODE, which made that
+            // setting inert: it existed, was documented, and changed nothing.
+            // An explicit row still wins in both directions.
+            val realEnabled = controls?.realExecutionEnabled
+                ?: (appConfig?.defaultExecutionMode == "real_execution_enabled")
             if (!realEnabled) {
-                throw ApiError.Forbidden("REAL_EXECUTION_NOT_ENABLED: Real execution requires admin approval. " +
-                    "Contact your Vectorbea admin or run in simulation mode.")
+                throw ApiError.Forbidden("REAL_EXECUTION_NOT_ENABLED: Real execution is switched off for this " +
+                    "workspace. Ask a Vectorbea admin to enable it, or run in simulation mode.")
             }
         }
 
@@ -234,6 +347,51 @@ class RunRoutes(
             throw ApiError.ValidationError("Invalid input JSON: ${e.message}")
         }
 
+        // ── 4b. Classify BEFORE the run row exists ────────────────────────────
+        // The API already holds workflow_version_id here, and therefore
+        // graph_json, so the class costs one memoised lookup. Doing it now means
+        // the class is committed atomically with the run and the message can be
+        // routed without any worker-side probe.
+        val executionClass = classifyVersion(versionId)
+
+        // ── 4c. Place in the weighted fair queue ──────────────────────────────
+        // A tenant submitting 500 runs pushes their own clock forward; a tenant
+        // submitting one lands near `now` and is served next. This is what stops
+        // a flood starving everyone else, and it replaces FIFO ordering entirely.
+        val placement = placeInFairQueue(ctx.workspaceId, executionClass)
+
+        // ── 4d. Rate limit ────────────────────────────────────────────────────
+        // Before admission, because "you are asking too fast" is a cheaper and
+        // more specific answer than "the queue is deep" — and a client hammering
+        // the endpoint should be told to slow down rather than shown a queue
+        // position that will be stale by the time they read it.
+        runRateLimiter?.let { bucket ->
+            val verdict = bucket.tryConsume(
+                key = "run-create:${ctx.workspaceId}",
+                refillPerMinute = workspaceRunRate(ctx.workspaceId).first,
+                burst = workspaceRunRate(ctx.workspaceId).second,
+            )
+            if (!verdict.allowed) {
+                throw ApiError.TooManyRequests(
+                    "Too many runs created. You may create ${verdict.refillPerMinute} runs per minute; " +
+                        "retry in ${verdict.retryAfterSeconds}s.",
+                    mapOf(
+                        "limitPerMinute" to verdict.refillPerMinute,
+                        "burst" to verdict.burst,
+                        "retryAfterSeconds" to verdict.retryAfterSeconds,
+                        "retryable" to true,
+                    ),
+                )
+            }
+        }
+
+        // ── 4e. Admission control ─────────────────────────────────────────────
+        // The decision to accept, and — under load — what accepting means. A run
+        // accepted silently into a deep queue is the failure this prevents: the
+        // caller gets a position and an ETA in the same response, not twenty
+        // minutes of nothing.
+        val admitted = admission?.admit(ctx.workspaceId, executionClass, placement.priority)
+
         // ── 5. Create run row with status=queued ──────────────────────────────
         val run = runRepo.create(CreateRunRequest(
             workspaceId = ctx.workspaceId,
@@ -243,6 +401,9 @@ class RunRoutes(
             triggerType = body.triggerType,
             inputJson = inputJson,
             idempotencyKey = body.idempotencyKey,
+            executionClass = executionClass.wire,
+            fairVtime = placement.fairVtime,
+            priority = placement.priority,
         ))
 
         // ── 6. Append lifecycle events ────────────────────────────────────────
@@ -261,6 +422,7 @@ class RunRoutes(
             inputJson = inputJson,
             // Audit trail: identity derived from verified JWT, never from user-supplied headers
             requestedByUserId = req.principal?.appUserId?.toString(),
+            executionClass = executionClass,
         )
 
         val messageId = try {
@@ -304,11 +466,39 @@ class RunRoutes(
                 appUserId = req.principal?.appUserId?.toString())
         }
 
-        return Response.accepted(mapOf(
-            "runId" to run.id.toString(),
-            "status" to "QUEUED",
-        ))
+        return Response.accepted(buildMap {
+            put("runId", run.id.toString())
+            put("status", "QUEUED")
+            // Queue position and ETA when there is a queue. Absent when the run is
+            // expected to start immediately — an ETA of zero seconds reads as a
+            // system under strain when it is not.
+            admitted?.toResponseFields()?.let { putAll(it) }
+        })
     }
+
+    /**
+     * Per-workspace run-creation rate, from plan policy.
+     *
+     * Read per call rather than cached: a plan upgrade must take effect
+     * immediately, and this is one indexed lookup on a table already in the
+     * connection's working set from the fair-queue placement two statements
+     * earlier. Falls back to the platform default if there is no policy row.
+     */
+    private fun workspaceRunRate(workspaceId: UUID): Pair<Int, Int> = dataSource?.let { ds ->
+        runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT max_runs_per_minute, runs_per_minute_burst
+                         FROM workspace_usage_policies WHERE workspace_id = ?"""
+                ).use { stmt ->
+                    stmt.setObject(1, workspaceId)
+                    stmt.executeQuery().use { rs ->
+                        if (rs.next()) rs.getInt(1) to rs.getInt(2) else DEFAULT_RUN_RATE
+                    }
+                }
+            }
+        }.getOrDefault(DEFAULT_RUN_RATE)
+    } ?: DEFAULT_RUN_RATE
 
     // ── GET /api/runs ─────────────────────────────────────────────────────────
 
@@ -482,6 +672,13 @@ class RunRoutes(
 
     // ── POST /api/runs/:id/cancel ─────────────────────────────────────────────
 
+    private fun purgeQueuedRuns(req: Request): Response {
+        val ctx = req.context()
+        val purged = runRepo.purgeQueued(ctx.workspaceId)
+        log.info("[run] queued runs purged workspaceId={} count={}", ctx.workspaceId, purged)
+        return Response.ok(mapOf("purged" to purged, "status" to "cancelled"))
+    }
+
     /**
      * Request cancellation of an in-progress run.
      *
@@ -548,6 +745,7 @@ class RunRoutes(
             workflowVersionId = run.workflowVersionId.toString(),
             jobType           = JobType.REPLAY_RUN,
             inputJson         = run.inputJson,
+            executionClass    = classifyExistingRun(runId),
         )
         try { q.enqueue(job) }
         catch (e: Exception) {
@@ -598,6 +796,7 @@ class RunRoutes(
             jobType           = JobType.RETRY_NODE,
             resumeFromNodeId  = body.nodeId,
             inputJson         = run.inputJson,
+            executionClass    = classifyExistingRun(runId),
         )
         try { q.enqueue(job) }
         catch (e: Exception) {
@@ -609,17 +808,113 @@ class RunRoutes(
         return Response.accepted(mapOf("runId" to runId.toString(), "nodeId" to body.nodeId, "status" to "QUEUED"))
     }
 
-    // ── POST /api/runs/:id/replay ─────────────────────────────────────────────
+    // ---- POST /api/runs/:id/replay -------------------------------------------
 
     /**
-     * Replay a completed or failed run from the beginning.
+     * REPLAY - a pure read from the recording.
      *
-     * Creates a new run row (new ID) with the same workflow version, workspace,
-     * and input JSON. Enqueues a START_RUN job for the new run.
+     * Never calls a provider. Never fires a side effect. Costs nothing. Produces
+     * byte-identical output to the original run, or fails loudly saying which node
+     * it could not reproduce.
      *
-     * Replay is available even on succeeded runs (to re-run with the same input).
+     * This is for debugging and audit: "show me exactly what happened, again".
+     *
+     * Before this change the endpoint of this name started a fresh execution that
+     * called every provider and re-sent every email. That behaviour still exists -
+     * it is a legitimate thing to want - and now lives at `/rerun`, where its cost
+     * is in its name.
+     *
+     * Body (optional): `{ "untilNode": "classify-1" }` for a partial replay -
+     * recorded up to and including that node, live after it.
      */
     private fun replayRun(req: Request): Response {
+        val ctx = req.context()
+        val environmentId = ctx.requireEnvironmentId()
+        val runId = req.pathUUID("id")
+        val original = runRepo.findById(runId, ctx.workspaceId) ?: throw ApiError.NotFound("Run")
+        val q = queue ?: throw ApiError.ServiceUnavailable("Queue not available")
+
+        // An absent or malformed body means "replay everything", which is the
+        // safe default: a partial replay the user did not ask for would make live
+        // calls they were told would not happen.
+        val untilNode = runCatching {
+            req.body.takeIf { it.isNotBlank() }?.let { req.bodyAs<ReplayRequest>().untilNode }
+        }.getOrNull()
+
+        // Refuse rather than silently degrade. A run recorded before complete
+        // model-call capture cannot be replayed, and the honest answer is to say so
+        // and name the alternative - not to quietly execute it live and hand back a
+        // bill for an operation advertised as free.
+        val recorded = countRecordedCalls(runId)
+        if (recorded == 0) {
+            throw ApiError.UnprocessableEntity(
+                "This run has no recorded model calls, so it cannot be replayed. Runs " +
+                    "executed before call recording was enabled are not replayable. Use " +
+                    "Re-run to execute it again with current data - that calls providers " +
+                    "and incurs cost."
+            )
+        }
+
+        val replayClass = classifyVersion(original.workflowVersionId)
+        val placement = placeInFairQueue(ctx.workspaceId, replayClass)
+
+        val newRun = runRepo.create(com.vectorbea.api.repository.CreateRunRequest(
+            workspaceId       = ctx.workspaceId,
+            environmentId     = environmentId,
+            workflowId        = original.workflowId,
+            workflowVersionId = original.workflowVersionId,
+            triggerType       = "replay",
+            inputJson         = original.inputJson,
+            executionClass    = replayClass.wire,
+            fairVtime         = placement.fairVtime,
+            priority          = placement.priority,
+            executionModeKind = "replay",
+            sourceRunId       = runId,
+            replayUntilNode   = untilNode,
+        ))
+
+        appendEvent(newRun, "REPLAY_CREATED", "queued", "api:replay",
+            "Replay started",
+            if (untilNode != null)
+                "Replaying run " + runId + " from the recording up to node '" + untilNode + "', live after"
+            else
+                "Replaying run " + runId + " from the recording - no provider calls, no cost")
+        appendEvent(newRun, "RUN_QUEUED", "queued", "api:replay",
+            "Run queued", "Replay placed on queue")
+
+        enqueueOrFail(q, newRun, original, replayClass, ctx, environmentId)
+
+        log.info("[run] replay enqueued sourceRunId={} replayRunId={} untilNode={}",
+            runId, newRun.id, untilNode)
+        return Response.accepted(mapOf(
+            "operation"     to "replay",
+            "sourceRunId"   to runId.toString(),
+            "runId"         to newRun.id.toString(),
+            "status"        to "QUEUED",
+            "untilNode"     to untilNode,
+            "recordedCalls" to recorded,
+            "callsProvider" to (untilNode != null),
+            "estimatedCost" to if (untilNode != null) "partial" else "none",
+            "message"       to if (untilNode != null)
+                "Replaying from the recording up to '" + untilNode + "', then executing live. " +
+                    "Nodes after the boundary call providers and incur cost."
+            else
+                "Replaying from the recording. No provider calls, no side effects, no cost.",
+        ))
+    }
+
+    // ---- POST /api/runs/:id/rerun --------------------------------------------
+
+    /**
+     * RE-RUN - a fresh execution from the trigger, with current data.
+     *
+     * New run id. Every provider called for real. Every side effect fires again.
+     * Full cost.
+     *
+     * This is exactly what the endpoint named `/replay` used to do. Same
+     * behaviour, honest name: "do it again with today's data".
+     */
+    private fun rerunRun(req: Request): Response {
         val ctx = req.context()
         val environmentId = ctx.requireEnvironmentId()
         val runId = req.pathUUID("id")
@@ -628,24 +923,75 @@ class RunRoutes(
         val wfRepo = workflowRepo ?: throw ApiError.InternalError("Workflow repository not available")
         val q = queue ?: throw ApiError.ServiceUnavailable("Queue not available")
 
-        // Validate the workflow still exists
         wfRepo.findById(original.workflowId, ctx.workspaceId)
             ?: throw ApiError.ValidationError("Original workflow no longer exists")
 
-        // Create a fresh run row
+        // Classified from the version rather than copied from the original run,
+        // whose class may predate a classifier change.
+        val rerunClass = classifyVersion(original.workflowVersionId)
+        val placement = placeInFairQueue(ctx.workspaceId, rerunClass)
+
         val newRun = runRepo.create(com.vectorbea.api.repository.CreateRunRequest(
             workspaceId       = ctx.workspaceId,
             environmentId     = environmentId,
             workflowId        = original.workflowId,
             workflowVersionId = original.workflowVersionId,
-            triggerType       = "replay",
+            triggerType       = "rerun",
             inputJson         = original.inputJson,
+            executionClass    = rerunClass.wire,
+            fairVtime         = placement.fairVtime,
+            priority          = placement.priority,
+            executionModeKind = "rerun",
+            sourceRunId       = runId,
         ))
 
-        appendEvent(newRun, "REPLAY_CREATED", "queued", "api:replay",
-            "Replay started", "Replaying run from scratch (original: $runId)")
-        appendEvent(newRun, "RUN_QUEUED", "queued", "api:replay", "Run queued", "Replay job placed on queue")
+        appendEvent(newRun, "RERUN_CREATED", "queued", "api:rerun",
+            "Re-run started",
+            "Fresh execution of run " + runId + " - providers called, side effects fire, cost incurred")
+        appendEvent(newRun, "RUN_QUEUED", "queued", "api:rerun", "Run queued", "Re-run placed on queue")
 
+        enqueueOrFail(q, newRun, original, rerunClass, ctx, environmentId)
+
+        log.info("[run] rerun enqueued sourceRunId={} newRunId={}", runId, newRun.id)
+        return Response.accepted(mapOf(
+            "operation"     to "rerun",
+            "sourceRunId"   to runId.toString(),
+            "runId"         to newRun.id.toString(),
+            "status"        to "QUEUED",
+            "callsProvider" to true,
+            "estimatedCost" to "full",
+            "message"       to "Executing fresh from the trigger with current data. " +
+                "Providers are called and side effects fire again.",
+        ))
+    }
+
+    /**
+     * How many provider calls the recording holds for this run.
+     *
+     * Zero means the run predates complete recording and is not replayable. The
+     * replay endpoint checks this up front so the refusal happens at the API with
+     * an explanation, rather than deep in a worker with a stack trace.
+     */
+    private fun countRecordedCalls(runId: UUID): Int = dataSource?.let { ds ->
+        runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement("SELECT count(*)::int FROM model_calls WHERE run_id = ?").use { stmt ->
+                    stmt.setObject(1, runId)
+                    stmt.executeQuery().use { rs -> if (rs.next()) rs.getInt(1) else 0 }
+                }
+            }
+        }.getOrDefault(0)
+    } ?: 0
+
+    /** Shared enqueue-and-mark-failed path for replay and re-run. */
+    private fun enqueueOrFail(
+        q: com.vectorbea.api.queue.WorkflowQueue,
+        newRun: AgentRun,
+        original: AgentRun,
+        cls: com.vectorbea.api.queue.ExecutionClass,
+        ctx: com.vectorbea.api.api.RequestContext,
+        environmentId: UUID,
+    ) {
         val job = WorkflowRunJob(
             runId             = newRun.id.toString(),
             workspaceId       = ctx.workspaceId.toString(),
@@ -654,19 +1000,13 @@ class RunRoutes(
             workflowVersionId = original.workflowVersionId.toString(),
             jobType           = JobType.START_RUN,
             inputJson         = original.inputJson,
+            executionClass    = cls,
         )
         try { q.enqueue(job) }
         catch (e: Exception) {
             runRepo.updateStatus(newRun.id, ctx.workspaceId, "enqueue_failed")
-            throw ApiError.ServiceUnavailable("Failed to enqueue replay job: ${e.message}")
+            throw ApiError.ServiceUnavailable("Failed to enqueue job: " + e.message)
         }
-
-        log.info("[run] replay enqueued originalRunId={} newRunId={}", runId, newRun.id)
-        return Response.accepted(mapOf(
-            "originalRunId" to runId.toString(),
-            "runId"         to newRun.id.toString(),
-            "status"        to "QUEUED",
-        ))
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

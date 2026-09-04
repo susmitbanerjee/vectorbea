@@ -10,7 +10,7 @@ import com.vectorbea.worker.events.RunEventStore.RunEvent
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.runtime.checkpoint.ApprovalStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowNode
 import java.util.UUID
 
 /**
@@ -56,9 +56,54 @@ class DbWriteNodeExecutor(
 
     companion object {
         const val DEFAULT_TIMEOUT_SECS = 30
+
+        /**
+         * Cap on RETURNING rows kept as node output.
+         *
+         * A write's result set is normally the handful of rows it touched, but
+         * `DELETE FROM t RETURNING *` can be the whole table, and step outputs are
+         * persisted. Bounded so one statement cannot put a table into the run record.
+         */
+        const val MAX_RETURNED_ROWS = 1_000
+
+        /**
+         * Everything Postgres said about the failure EXCEPT the row.
+         *
+         * THE BUG THIS FIXES: this executor reported `e.javaClass.simpleName` and
+         * nothing else, so every write failure - syntax error, missing column,
+         * type mismatch, constraint violation - arrived as the single word
+         * "PSQLException". The run's error_json said
+         * `statement execution failed: PSQLException`, which names a Java class and
+         * not one fact about what went wrong. An agent retrying that tool got the
+         * same uninformative observation each time and had nothing to correct.
+         *
+         * `DbReadNodeExecutor` has always included `e.message`; only the write path
+         * dropped it, and the asymmetry is the giveaway that this was caution rather
+         * than intent - a write's error is the one that can quote the data being
+         * written.
+         *
+         * So the diagnosis is kept and the data is not. Postgres puts values in the
+         * DETAIL field (`Key (email)=(a@b.com) already exists`); the primary message
+         * and HINT are about the STATEMENT. Everything from `Detail:` on is dropped,
+         * and the SQLSTATE is prefixed because it is the part that is stable enough
+         * to look up and search for.
+         */
+        internal fun describeDbError(e: Throwable): String {
+            val sqlState = (e as? java.sql.SQLException)?.sqlState?.takeIf { it.isNotBlank() }
+
+            val primary = e.message
+                // Case-insensitive: pgjdbc renders "Detail:", the server logs "DETAIL:".
+                ?.split(Regex("(?i)\\bdetail\\s*:"), limit = 2)
+                ?.first()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: e.javaClass.simpleName
+
+            return if (sqlState != null) "[$sqlState] ${primary.take(300)}" else primary.take(300)
+        }
     }
 
-    override fun execute(
+    override suspend fun execute(
         node: WorkflowNode,
         resolvedInputs: Map<String, Any>,
         context: RuntimeContext,
@@ -126,6 +171,29 @@ class DbWriteNodeExecutor(
             else       -> listOf(p)
         }
 
+        /*
+         * The statement and the parameters have to agree BEFORE the driver is asked.
+         *
+         * Binding into a statement with no placeholders produced
+         * "The column index is out of range: 1, number of columns: 0", which names
+         * neither the statement nor the count and sent three rounds of debugging at
+         * the connection, the tool and the SQL in turn. Checking here costs one scan
+         * and lets the failure say what is actually wrong and what to write instead.
+         */
+        val placeholders = SqlPlaceholders.analyse(rawStatement).questionMarks
+        if (params.size != placeholders) {
+            val hint = if (placeholders == 0) {
+                "The statement has no bind placeholders, so it takes no parameters. " +
+                    "Use {{name}} templating to inline a value, or add ? placeholders to bind one."
+            } else {
+                "Supply exactly $placeholders value(s), in the order the ? placeholders appear."
+            }
+            return NodeResult.Failed(
+                "DB_WRITE node '${node.id}': the statement has $placeholders bind placeholder(s) " +
+                    "but ${params.size} parameter(s) were supplied. $hint"
+            )
+        }
+
         val timeoutSecs = (cfg["timeoutSeconds"] as? Number)?.toInt() ?: DEFAULT_TIMEOUT_SECS
 
         // ── Get pool and execute ──────────────────────────────────────────────
@@ -141,14 +209,45 @@ class DbWriteNodeExecutor(
 
         val startMs = System.currentTimeMillis()
 
+        // See DbReadNodeExecutor: queryTimeout alone cannot unpark a thread whose
+        // socket read never returns. The effective bound is the driver-level
+        // socketTimeout forced by JdbcTimeouts in ClientDbPoolManager.
+        /*
+         * `execute()`, NOT `executeUpdate()`.
+         *
+         * THE BUG THIS FIXES: `executeUpdate` contracts to return a row COUNT, so the
+         * driver rejects any statement that produces rows -
+         *
+         *     [0100E] A result was returned when none was expected.
+         *
+         * `INSERT … RETURNING id` is idiomatic Postgres and the single most common way
+         * to write a row and learn its key, and it could not be run at all. The
+         * statement was valid, the table was right, and the error named neither.
+         *
+         * `execute()` reports which kind of result came back, so both shapes work and
+         * RETURNING rows become the node's output instead of being discarded.
+         */
+        var returnedRows: List<Map<String, Any?>> = emptyList()
+
         val affectedRows = try {
+            com.vectorbea.worker.metrics.WorkerMetrics.timeBlocking {
             dataSource.connection.use { conn ->
                 conn.autoCommit = false
                 try {
                     conn.prepareStatement(rawStatement).use { stmt ->
                         stmt.queryTimeout = timeoutSecs
                         params.forEachIndexed { i, param -> stmt.setObject(i + 1, param) }
-                        val affected = stmt.executeUpdate()
+
+                        val affected = if (stmt.execute()) {
+                            // RETURNING (or a write CTE that yields rows).
+                            stmt.resultSet.use { rs -> returnedRows = readRows(rs, MAX_RETURNED_ROWS) }
+                            // `updateCount` is -1 once a result set has been produced, so
+                            // the row count IS the number of rows the statement returned.
+                            returnedRows.size
+                        } else {
+                            stmt.updateCount
+                        }
+
                         conn.commit()
                         affected
                     }
@@ -159,20 +258,31 @@ class DbWriteNodeExecutor(
                     conn.autoCommit = true
                 }
             }
+            }
         } catch (e: Exception) {
             val durationMs = System.currentTimeMillis() - startMs
+            com.vectorbea.worker.metrics.WorkerMetrics.tenantDbCallDurationSeconds
+                .observeMs(durationMs, "write", "error")
+            val described = describeDbError(e)
             log.warn("[dbwrite] statement failed [nodeId={}, durationMs={}]: {}",
-                node.id, durationMs, e.javaClass.simpleName)
+                node.id, durationMs, described)
             return NodeResult.Failed(
-                "DB_WRITE node '${node.id}': statement execution failed: ${e.javaClass.simpleName}"
+                "DB_WRITE node '${node.id}': statement execution failed: $described"
             )
         }
 
         val durationMs = System.currentTimeMillis() - startMs
+        com.vectorbea.worker.metrics.WorkerMetrics.tenantDbCallDurationSeconds
+            .observeMs(durationMs, "write", "ok")
 
         val output = mapOf(
             "affectedRows" to affectedRows,
             "success"      to true,
+        ) + if (returnedRows.isEmpty()) emptyMap() else mapOf(
+            /* What RETURNING is FOR. Dropping these would make `INSERT … RETURNING id`
+               run and then throw away the id, which is the only reason to write it. */
+            "rows" to returnedRows,
+            "row"  to (returnedRows.firstOrNull() ?: emptyMap<String, Any?>()),
         )
 
         // Persist idempotency record
@@ -241,6 +351,39 @@ class DbWriteNodeExecutor(
 
     // ── Write statement validation ────────────────────────────────────────────
 
+    /** A result set as plain maps, bounded by [MAX_RETURNED_ROWS]. */
+    private fun readRows(rs: java.sql.ResultSet, limit: Int): List<Map<String, Any?>> {
+        val meta = rs.metaData
+        val columns = (1..meta.columnCount).map { meta.getColumnLabel(it) }
+        val rows = mutableListOf<Map<String, Any?>>()
+        while (rs.next() && rows.size < limit) {
+            rows += columns.withIndex().associate { (i, name) ->
+                name to normaliseColumn(rs.getObject(i + 1))
+            }
+        }
+        return rows
+    }
+
+    /**
+     * JDBC types the rest of the runtime can carry.
+     *
+     * Step outputs are serialised to JSON, and a `java.sql.Timestamp` or a pgjdbc
+     * `PGobject` serialises to something no downstream template can read. Strings are
+     * lossless here and every consumer already handles them.
+     */
+    private fun normaliseColumn(value: Any?): Any? = when (value) {
+        null                     -> null
+        is Number, is Boolean    -> value
+        is String                -> value
+        is java.sql.Timestamp    -> value.toInstant().toString()
+        is java.sql.Date         -> value.toLocalDate().toString()
+        is java.sql.Time         -> value.toString()
+        is java.util.UUID        -> value.toString()
+        is java.sql.Array        -> runCatching { (value.array as? Array<*>)?.map { normaliseColumn(it) } }
+            .getOrNull() ?: value.toString()
+        else                     -> value.toString()
+    }
+
     private fun validateWriteStatement(
         stmt: String,
         allowedTables: List<String>,
@@ -252,8 +395,18 @@ class DbWriteNodeExecutor(
             return "SELECT queries are not permitted in DB_WRITE nodes; use DB_QUERY instead"
         }
 
-        if (firstToken !in setOf("INSERT", "UPDATE", "DELETE", "UPSERT", "MERGE")) {
-            return "only INSERT/UPDATE/DELETE/UPSERT/MERGE are permitted in DB_WRITE nodes; got '$firstToken'"
+        /* A statement may lead with a CTE and still be a write:
+           `WITH moved AS (DELETE FROM a RETURNING *) INSERT INTO b SELECT * FROM moved`.
+           Judging it by its first token alone rejected a legitimate and fairly ordinary
+           form. The write verb still has to be present - a WITH that only ever SELECTs
+           belongs in a DB_QUERY node and is still refused below. */
+        val WRITE_VERBS = setOf("INSERT", "UPDATE", "DELETE", "UPSERT", "MERGE")
+        if (firstToken !in WRITE_VERBS) {
+            val isWriteCte = firstToken == "WITH" &&
+                WRITE_VERBS.any { verb -> Regex("(?i)\\b$verb\\b").containsMatchIn(trimmed) }
+            if (!isWriteCte) {
+                return "only INSERT/UPDATE/DELETE/UPSERT/MERGE are permitted in DB_WRITE nodes; got '$firstToken'"
+            }
         }
 
         // Block multi-statement

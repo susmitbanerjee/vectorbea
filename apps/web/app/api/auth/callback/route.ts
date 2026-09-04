@@ -28,6 +28,21 @@ export async function GET(request: NextRequest) {
   const cookieNext = cookieStore.get("oauth_next")?.value ?? null;
   const explicitNext = searchParams.get("next") ?? (cookieNext?.startsWith("/") ? cookieNext : null);
 
+  // ── 0. The provider refused before we ever got a code ─────────────────────
+  // GitHub/Google/Microsoft all redirect back with ?error= when the user hits
+  // "Cancel" on the consent screen, or when the OAuth app is misconfigured.
+  // These are distinct situations and neither is our failure, so neither should
+  // render as "sign-in did not complete".
+  const providerError = searchParams.get("error");
+  if (providerError) {
+    const known = providerError === "access_denied" ? "access_denied" : "provider_error";
+    console.warn("[auth/callback] provider returned an error:", {
+      error: providerError,
+      description: searchParams.get("error_description"),
+    });
+    return NextResponse.redirect(new URL(`/signin?error=${known}`, request.url));
+  }
+
   if (!code) {
     return NextResponse.redirect(new URL("/signin?error=oauth", request.url));
   }
@@ -58,7 +73,20 @@ export async function GET(request: NextRequest) {
       supabaseKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "set" : "MISSING",
       code: code?.slice(0, 8) + "...",
     });
-    return NextResponse.redirect(new URL("/signin?error=callback_failed", request.url));
+
+    // Separate the two exchange failures that mean different things to a user.
+    // An expired code means they took too long or left the tab open; a reused
+    // one usually means a refresh or a back-button on the callback URL. Both
+    // are fixed by starting again, but only one of them is worth explaining as
+    // "that link was already used".
+    const detail = (error?.message ?? "").toLowerCase();
+    const reason = detail.includes("expired")
+      ? "code_expired"
+      : detail.includes("already") || detail.includes("used") || detail.includes("invalid request")
+        ? "code_used"
+        : "callback_failed";
+
+    return NextResponse.redirect(new URL(`/signin?error=${reason}`, request.url));
   }
 
   const oauthUser = data.session.user;
@@ -84,7 +112,7 @@ export async function GET(request: NextRequest) {
   const ourToken = await signToken({ sub: jwtSub, email });
 
   // ── 4. Redirect with our JWT cookie ──────────────────────────────────────
-  const destination = explicitNext?.startsWith("/") ? explicitNext : "/dashboard";
+  const destination = explicitNext?.startsWith("/") ? explicitNext : "/control";
   const cookieOpts = {
     httpOnly: true, sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",

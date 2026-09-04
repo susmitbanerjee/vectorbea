@@ -29,7 +29,7 @@ export function NotificationsPopover() {
     setLoading(true);
     fetch("/api/audit")
       .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then((data: AuditLogView[]) => setLogs(data.slice(0, 5)))
+      .then((data: { items: AuditLogView[] }) => setLogs((data.items ?? []).slice(0, 5)))
       .catch(() => setLogs([]))
       .finally(() => setLoading(false));
   }, [open]);

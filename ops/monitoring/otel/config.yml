@@ -1,0 +1,82 @@
+# The OpenTelemetry Collector — the single endpoint both services export traces to.
+#
+# WHY A COLLECTOR AND NOT DIRECT EXPORT TO TEMPO
+# ----------------------------------------------
+# The services could export straight to Tempo and skip a hop. The collector earns its
+# place for two reasons:
+#
+#  1. Sampling and redaction happen HERE, in config, not in application code. Changing
+#     the sample rate is a collector restart rather than a service deploy — which is
+#     what you want at 3am when traces are the thing overwhelming the box.
+#  2. The services are configured with one endpoint that never changes. Swapping Tempo
+#     for something else later is a collector edit, not a change to two services and
+#     their environment variables in three deployments.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Bounded queue. Without this the collector will happily accept spans until it is
+  # OOM-killed, taking the traces it was holding with it.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 192
+    spike_limit_mib: 48
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  # Drop anything that could carry customer content.
+  #
+  # Span attributes are set in application code, and the rule there is that they carry
+  # identifiers only. This is the second line: if someone adds an attribute holding a
+  # prompt or an extracted value, it is removed here rather than persisted. Defence in
+  # depth, because the cost of being wrong is customer data in a trace store that was
+  # never designed to hold it.
+  attributes/redact:
+    actions:
+      - key: vectorbea.input
+        action: delete
+      - key: vectorbea.output
+        action: delete
+      - key: db.statement
+        action: delete
+      - key: http.request.body
+        action: delete
+
+  # Head sampling, keyed on the trace id so a decision is consistent across services —
+  # both ends of a trace make the same choice without coordinating.
+  #
+  # 100% is right at current volume: a few hundred runs a day is nothing, and a
+  # sampled-out trace is exactly the one you needed. Lower this when trace volume
+  # starts competing with the application for the box, and not before.
+  probabilistic_sampler:
+    sampling_percentage: 100
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      queue_size: 1000
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/redact, probabilistic_sampler, batch]
+      exporters: [otlp/tempo]

@@ -2,7 +2,7 @@ package com.vectorbea.worker.extraction
 
 import com.vectorbea.worker.mapping.InMemoryStepOutputView
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowGraph
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.UUID

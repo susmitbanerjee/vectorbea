@@ -37,6 +37,18 @@ class WorkerHeartbeat(
     val activeTasks = AtomicInteger(0)
     val status = AtomicReference(WorkerStatus.STARTING)
 
+    /**
+     * Total execution slots this worker actually has.
+     *
+     * `config.concurrency` is only the fallback formula's input and has not
+     * described real capacity since pool sizing was decoupled — reporting it
+     * would tell the Control page a 6-agent-slot worker had 4 slots in total.
+     * Headroom is only meaningful against the real number.
+     */
+    private val totalCapacity: Int =
+        config.shortConcurrency + config.longConcurrency +
+        config.agentConcurrency + config.systemConcurrency
+
     private val scheduler: ScheduledExecutorService =
         Executors.newSingleThreadScheduledExecutor { r ->
             Thread(r, "worker-heartbeat").also { it.isDaemon = true }
@@ -114,7 +126,7 @@ class WorkerHeartbeat(
             put("name", config.workerName)
             put("status", st.value)
             put("queue", config.queueStream)
-            put("capacity", config.concurrency.toString())
+            put("capacity", totalCapacity.toString())
             put("activeTasks", active.toString())
             put("version", config.version)
             put("lastHeartbeatAt", now.toString())
@@ -130,7 +142,7 @@ class WorkerHeartbeat(
                 stmt.setString(2, config.workerName)
                 stmt.setString(3, st.value)
                 stmt.setString(4, config.queueStream)
-                stmt.setInt(5, config.concurrency)
+                stmt.setInt(5, totalCapacity)
                 stmt.setInt(6, active)
                 stmt.setTimestamp(7, Timestamp.from(now))
                 stmt.setString(8, config.version)
@@ -141,9 +153,23 @@ class WorkerHeartbeat(
     }
 
     companion object {
+        /**
+         * Fleet registration. `workspace_id` / `environment_id` are explicitly
+         * NULL: a worker serves every tenant on the queue and has no workspace to
+         * name at boot.
+         *
+         * V006 made those columns NOT NULL as part of a workspace-scoping pass,
+         * and because this statement never supplied them, EVERY heartbeat write
+         * failed from that migration onward — silently, since the failure is
+         * caught and logged at WARN and the loop continues. That is why the
+         * `workers` table read as "unused telemetry" (§6.5): nothing could write
+         * to it. V021 restores them to nullable.
+         */
         private val UPSERT_SQL = """
-            INSERT INTO workers (id, name, status, queue, capacity, active_tasks, last_heartbeat_at, version)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO workers
+                (id, name, status, queue, capacity, active_tasks, last_heartbeat_at, version,
+                 workspace_id, environment_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
             ON CONFLICT (id) DO UPDATE SET
                 name              = EXCLUDED.name,
                 status            = EXCLUDED.status,

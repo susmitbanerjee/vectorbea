@@ -2,7 +2,7 @@ name: CI
 
 # CI runs CHECKS only — deployments are owned by the platform git integrations:
 #   PR / push to dev    → Vercel deploys apps/web to dev.vectorbea.com (staging)
-#                         + Railway `staging` env (api/worker/telemetry, branch=dev)
+#                         + Railway `staging` env (api/worker, branch=dev)
 #   merge dev → master  → Vercel production (vectorbea.com, blog, support domain)
 #                         + Railway `production` env
 # Per-path filters below keep a PR from building services it didn't touch.
@@ -22,7 +22,7 @@ jobs:
       web: ${{ steps.filter.outputs.web }}
       api: ${{ steps.filter.outputs.api }}
       worker: ${{ steps.filter.outputs.worker }}
-      telemetry: ${{ steps.filter.outputs.telemetry }}
+      observability: ${{ steps.filter.outputs.observability }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -32,12 +32,20 @@ jobs:
             web:
               - 'apps/web/**'
               - 'prisma/**'
+              # The API contracts live here and the web app typechecks against
+              # them, so a schema change can break the build without touching a
+              # file under apps/web.
+              - 'packages/shared/**'
             api:
               - 'apps/api-kotlin/**'
+              # observability-kotlin compiles INTO the api via includeBuild, so a change
+              # there can break this build without touching a file under apps/api-kotlin.
+              - 'packages/observability-kotlin/**'
             worker:
               - 'apps/worker-kotlin/**'
-            telemetry:
-              - 'apps/telemetry/**'
+              - 'packages/observability-kotlin/**'
+            observability:
+              - 'packages/observability-kotlin/**'
 
   # ── Closed-source boundary guards (cheap, always run) ───────────────────────
   guards:
@@ -78,16 +86,43 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-          cache-dependency-path: apps/web/package-lock.json
+          cache-dependency-path: package-lock.json
 
+      # Installed from the REPO ROOT, not apps/web. The web app depends on the
+      # workspace package @vectorbea/shared, which only resolves through the
+      # root workspaces config — `npm ci` inside apps/web cannot see it and
+      # would try (and fail) to fetch it from the registry.
       - name: Install dependencies
+        working-directory: .
         run: npm ci
 
+      # @vectorbea/shared publishes from dist/, so it must be compiled before
+      # anything typechecks against it. This is also the contract gate: if the
+      # Zod schemas in packages/shared stop compiling, the web build stops here
+      # rather than failing later with a confusing module-resolution error.
+      - name: Build shared contracts
+        working-directory: packages/shared
+        run: npm run build
+
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Lint
-        run: npx next lint || true   # warn-only, not blocking
+        run: npm run lint
+
+      # Design constitution — /CLAUDE.md. Fails on raw hex/rgb/hsl, default
+      # Tailwind palette classes, Lucide imports or emoji anywhere in
+      # apps/web/src. Also prints the legacy migration baseline.
+      - name: Design token guardrails
+        run: npm run check:tokens
+
+      # WCAG contrast for every semantic pairing in both themes, plus the
+      # brand/status disjointness rule. See src/styles/tokens/colour.css.
+      - name: Contrast and governing rule
+        run: npm run check:contrast
+
+      - name: Architecture boundaries
+        run: npm run check:boundaries
 
       - name: Build
         run: npm run build
@@ -115,15 +150,18 @@ jobs:
           cache: gradle
 
       - name: Build
-        run: gradle build --no-daemon --console=plain -x test
+        run: bash ./gradlew build --no-daemon --console=plain -x test
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
-      - name: Test
-        run: gradle test --no-daemon --console=plain
+      # `continue-on-error: true` was here, with the note "tests are advisory
+      # until full coverage added". It made a red suite indistinguishable from a
+      # green one, which is the same failure mode as a skipped test. The unit
+      # tier is 286/286 green, so this is safe to enforce now.
+      - name: Test (unit tier)
+        run: bash ./gradlew test --no-daemon --console=plain
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
-        continue-on-error: true   # tests are advisory until full coverage added
 
   # ── Worker (Kotlin) ─────────────────────────────────────────────────────────
   worker-kotlin:
@@ -143,19 +181,31 @@ jobs:
           cache: gradle
 
       - name: Build
-        run: gradle build --no-daemon --console=plain -x test
+        run: bash ./gradlew build --no-daemon --console=plain -x test
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
 
-  # ── Telemetry service (Kotlin) ───────────────────────────────────────────────
-  telemetry:
-    name: Telemetry (build + test)
+      # The unit tier: no containers, so it runs on every PR.
+      #
+      # This job used to build and stop. 542 worker tests existed and none of
+      # them had ever run in CI.
+      - name: Test (unit tier)
+        run: bash ./gradlew test --no-daemon --console=plain
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+
+  # ── Observability library (Kotlin) ──────────────────────────────────────────
+  # Was the `telemetry` service job. The service is gone; the library it became is
+  # built and tested on its own so a break is attributed here rather than surfacing
+  # as a confusing failure inside the api or worker build.
+  observability:
+    name: Observability library (build + test)
     needs: changes
-    if: needs.changes.outputs.telemetry == 'true'
+    if: needs.changes.outputs.observability == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/telemetry
+        working-directory: packages/observability-kotlin
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -173,4 +223,98 @@ jobs:
         run: gradle test --no-daemon --console=plain
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
-        continue-on-error: true
+
+  # ── Integration tier (containers required) ──────────────────────────────────
+  #
+  # Runs the WHOLE suite — unit plus the container-backed tests — against a real
+  # Postgres, Redis and OTLP collector.
+  #
+  # WHY ONLY ON MERGE. It costs ~2.5 minutes and three service containers, which
+  # is the wrong trade on every push to a branch. The unit tier gates PRs; this
+  # gates what lands.
+  #
+  # WHY `services:` RATHER THAN LETTING TESTCONTAINERS DO IT. Both work on a
+  # Linux runner. `services:` pulls the images once, in parallel with checkout,
+  # and its health checks are the runner's problem rather than the JVM's — and
+  # it exercises the same env-var path a developer uses with
+  # `docker compose --profile test up`. Testcontainers stays the fallback for
+  # anyone who has not started anything.
+  #
+  # There is deliberately NO `continue-on-error` here. The point of this job is
+  # to be able to fail.
+  integration:
+    name: Integration (Postgres + Redis + OTLP)
+    needs: changes
+    if: github.event_name == 'push' && (needs.changes.outputs.api == 'true' || needs.changes.outputs.worker == 'true')
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vectorbea
+          POSTGRES_PASSWORD: vectorbea
+          POSTGRES_DB: vectorbea_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vectorbea -d vectorbea_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+      jaeger:
+        image: jaegertracing/all-in-one:1.57
+        env:
+          COLLECTOR_OTLP_ENABLED: "true"
+        ports: ["4318:4318", "16686:16686"]
+
+    env:
+      # `Infra` prefers these over starting its own containers.
+      TEST_DATABASE_URL: "jdbc:postgresql://localhost:5432/vectorbea_test?user=vectorbea&password=vectorbea"
+      TEST_REDIS_URL: "redis://localhost:6379"
+      TEST_OTLP_ENDPOINT: "http://localhost:4318"
+      TEST_JAEGER_QUERY_URL: "http://localhost:16686"
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx1g -Dkotlin.compiler.execution.strategy=in-process"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      # Jaeger has no health check the runner understands, so wait for the query
+      # API rather than discovering it is not up from inside a test assertion.
+      - name: Wait for the collector
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:16686/ && exit 0
+            sleep 2
+          done
+          echo "Jaeger query API never came up"; exit 1
+
+      - name: Worker — integration tier
+        if: needs.changes.outputs.worker == 'true'
+        working-directory: apps/worker-kotlin
+        run: bash ./gradlew integrationTest --no-daemon --console=plain
+
+      - name: API — integration tier
+        if: needs.changes.outputs.api == 'true'
+        working-directory: apps/api-kotlin
+        run: bash ./gradlew integrationTest --no-daemon --console=plain
+
+      - name: Publish test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: |
+            apps/worker-kotlin/build/test-results/integrationTest/**/*.xml
+            apps/api-kotlin/build/test-results/integrationTest/**/*.xml
+          if-no-files-found: ignore

@@ -23,6 +23,31 @@ import java.net.URI
 object SsrfGuard {
 
     /**
+     * Hosts exempted from the private/loopback checks, for load testing against
+     * a local mock upstream. Comma-separated, from `SSRF_ALLOWED_TEST_HOSTS`.
+     *
+     * DELIBERATELY NARROW:
+     *  - Ignored entirely when `APP_ENV=production`, so a stray env var on a
+     *    production worker cannot open an egress path to the metadata service.
+     *  - Exact host matches only — no suffix or wildcard matching, unlike the
+     *    per-connection [allowedHosts] list.
+     *  - It exempts a host from the *address-range* checks only. The
+     *    `localhost` / `metadata.google.internal` name block and the
+     *    per-connection allow-list are still applied first.
+     *
+     * Without this, the load harness cannot exercise HTTP tool nodes at all:
+     * every mock upstream necessarily lives on a loopback or private address.
+     */
+    private val testHostExemptions: Set<String> by lazy {
+        if (System.getenv("APP_ENV")?.lowercase() == "production") return@lazy emptySet()
+        (System.getenv("SSRF_ALLOWED_TEST_HOSTS") ?: "")
+            .split(',')
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }
+
+    /**
      * Validate [url] against SSRF rules and optional [allowedHosts].
      * Throws [SsrfException] if the request should be blocked.
      */
@@ -61,6 +86,10 @@ object SsrfGuard {
                 throw SsrfException("SSRF blocked: host '$normalised' is not in the connection's allowed hosts list")
             }
         }
+
+        // Load-test exemption — checked AFTER the name block and the
+        // per-connection allow-list, and only ever populated outside production.
+        if (normalised in testHostExemptions) return
 
         // Resolve to IP and check
         val addr = try {

@@ -1,5 +1,6 @@
 package com.vectorbea.worker.connector
 
+import com.vectorbea.crypto.Encryption
 import com.vectorbea.worker.logging.logger
 import java.security.SecureRandom
 import java.util.Base64
@@ -36,6 +37,13 @@ open class SecretService(
     private val dataSource: DataSource,
 ) {
     private val log = logger()
+
+    /** The raw key, for the shared [Encryption] object. Never logged. */
+    private val keyBytes: ByteArray? by lazy {
+        keyBase64?.let { b64 ->
+            runCatching { Encryption.decodeKey(b64) }.getOrNull()
+        }
+    }
 
     private val aesKey: SecretKeySpec? by lazy {
         keyBase64?.let { b64 ->
@@ -74,7 +82,7 @@ open class SecretService(
         }
 
         // Mode 2: table lookup (workspace-scoped when workspaceId provided)
-        val encryptedValue = lookupInTable(secretRef, workspaceId)
+        val stored = lookupInTable(secretRef, workspaceId)
             ?: if (aesKey == null) {
                 // Dev mode: treat secretRef as cleartext (no key)
                 log.warn("[secrets] No encryption key — returning secretRef as plaintext (dev mode only)")
@@ -83,7 +91,34 @@ open class SecretService(
                 throw SecretException("Secret ref '${ secretRef.take(20)}...' not found in connection_secrets table")
             }
 
-        return decrypt(encryptedValue, "table ref")
+        return decryptToken(stored, "table ref")
+    }
+
+    /**
+     * Decrypt a stored token through the shared [Encryption] implementation.
+     *
+     * The workspace id is passed as associated data, from the row the ciphertext
+     * was read out of. Legacy tokens written before the binding existed carry no
+     * associated data and say so in their own format, so they keep working; the
+     * argument is simply ignored for those.
+     */
+    private fun decryptToken(stored: StoredSecret, context: String): SecretValue {
+        val key = keyBytes ?: run {
+            log.warn("[secrets] No AES key — returning stored value as-is (dev mode)")
+            return SecretValue(stored.token.toCharArray())
+        }
+        return try {
+            val plain = Encryption.decrypt(
+                stored.token, key, stored.workspaceId.toString().toByteArray(Charsets.UTF_8),
+            )
+            SecretValue(plain.toCharArray())
+        } catch (e: Exception) {
+            /* A bad tag means the master key changed, the row was tampered with,
+               or the ciphertext was written for a different workspace. The
+               message never says which. */
+            log.error("[secrets] Decryption failed for {}: {}", context, e.javaClass.simpleName)
+            throw SecretException("Secret decryption failed for $context")
+        }
     }
 
     // ── Encryption (for test helpers / provisioning) ──────────────────────────
@@ -147,26 +182,42 @@ open class SecretService(
      * This method strips the version prefix before returning, so the caller
      * receives the raw base64url blob that [decrypt] expects.
      */
-    private fun lookupInTable(ref: String, workspaceId: java.util.UUID? = null): String? =
+    /** A stored secret, with the workspace its ciphertext is bound to. */
+    private data class StoredSecret(val token: String, val workspaceId: java.util.UUID)
+
+    /**
+     * Read the row, keeping the token WHOLE and carrying its workspace id.
+     *
+     * THE BUG THIS FIXES. This used to strip the version prefix by hand —
+     * `raw.indexOf(':')`, take the remainder — and hand the rest to a local
+     * AES-GCM routine. That is a second, partial reimplementation of a wire
+     * format owned by another service, and it only ever understood one shape of
+     * it. The token is now passed intact to the SAME `Encryption` object the API
+     * writes with, which is compiled into both services precisely so this cannot
+     * drift again.
+     *
+     * `workspace_id` is selected because it is the associated data the ciphertext
+     * is bound to. Taking it from the ROW is what makes the binding mean
+     * anything: a blob moved into some other tenant's row no longer decrypts.
+     */
+    private fun lookupInTable(ref: String, workspaceId: java.util.UUID? = null): StoredSecret? =
         try {
             dataSource.connection.use { conn ->
                 // Workspace-scoped query when workspaceId is provided — prevents
                 // cross-tenant secret access even if secretRef UUID is guessed.
                 val sql = if (workspaceId != null)
-                    "SELECT secret_ciphertext FROM encrypted_secrets WHERE id = ?::uuid AND workspace_id = ?"
+                    "SELECT secret_ciphertext, workspace_id FROM encrypted_secrets WHERE id = ?::uuid AND workspace_id = ?"
                 else
-                    "SELECT secret_ciphertext FROM encrypted_secrets WHERE id = ?::uuid"
+                    "SELECT secret_ciphertext, workspace_id FROM encrypted_secrets WHERE id = ?::uuid"
                 conn.prepareStatement(sql).use { stmt ->
                     stmt.setString(1, ref)
                     if (workspaceId != null) stmt.setObject(2, workspaceId)
                     stmt.executeQuery().use { rs ->
                         if (!rs.next()) return@use null
                         val raw = rs.getString("secret_ciphertext") ?: return@use null
-                        // Strip the versioned prefix "v1:", "v2:", etc. produced by
-                        // the API's Encryption.encrypt() before passing to decrypt().
-                        val colonIdx = raw.indexOf(':')
-                        if (colonIdx > 0 && raw.startsWith("v")) raw.substring(colonIdx + 1)
-                        else raw
+                        val owner = rs.getString("workspace_id")?.let(java.util.UUID::fromString)
+                            ?: return@use null
+                        StoredSecret(raw, owner)
                     }
                 }
             }

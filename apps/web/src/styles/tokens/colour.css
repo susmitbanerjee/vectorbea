@@ -1,0 +1,621 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   INK & IRIS — Colour tokens
+   Design direction §3. Source of truth for every colour in the product.
+
+   ┌────────────────────────────────────────────────────────────────────────────┐
+   │  THE GOVERNING RULE — read before editing anything in this file.           │
+   │                                                                            │
+   │      Brand colour and status colour are DISJOINT SETS.                     │
+   │                                                                            │
+   │      --accent          must NEVER resolve to a status hue.                 │
+   │      --status-success  must NEVER resolve to the brand hue.                │
+   │                                                                            │
+   │  Iris is the brand. It means identity, primary action, selection and       │
+   │  focus — never "good", never "healthy", never a risk level.                │
+   │  Verdant is success. It means a run or step succeeded — never Vectorbea.   │
+   │                                                                            │
+   │  This is not a stylistic preference. The previous design collapsed brand,  │
+   │  success, focus ring and sidebar-active onto one green (#007F4E), which    │
+   │  made anomalies invisible: an operator could not scan a table for trouble  │
+   │  because every healthy pixel was already the brand colour. Re-merging them │
+   │  would silently destroy the product's core affordance.                     │
+   │                                                                            │
+   │  If you are about to point --accent at a verdant/signal/pulse/ember step,  │
+   │  or point --status-* at an iris step: stop. That is the bug this file      │
+   │  exists to prevent.                                                        │
+   └────────────────────────────────────────────────────────────────────────────┘
+
+   STRUCTURE
+     1. Primitive layer  — raw scales. The only hex values in the codebase.
+                           Deliberately NOT exposed as Tailwind utilities, so
+                           `bg-iris-500` does not exist and components cannot
+                           reach past the semantic layer.
+     2. Semantic layer   — dark (default, in :root) then light (.light).
+                           Light is a full peer: every value is chosen, never
+                           computed by inverting dark.
+     3. Tailwind bridge  — @theme inline, mapping semantics to utilities.
+
+   Contrast is verified mechanically: `npm run check:contrast`.
+══════════════════════════════════════════════════════════════════════════════ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ════════════════════════════════════════════════════════════════════════════
+   1. PRIMITIVE LAYER — exact values from design §3. Theme-independent.
+   ════════════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Graphite — cool, blue-undertone neutrals (§3.2). Not Tailwind slate. ── */
+  --graphite-1000: #07080c;
+  --graphite-950: #0a0c12;
+  --graphite-900: #0f1118;
+  --graphite-850: #141722;
+  --graphite-800: #1a1e2b;
+  --graphite-750: #212636;
+  --graphite-700: #2a3042;
+  --graphite-600: #39415a;
+  --graphite-500: #4e5773;
+  --graphite-400: #6c7593;
+  --graphite-300: #949cb6;
+  --graphite-200: #c3c9db;
+  --graphite-100: #e6e9f2;
+  --graphite-50: #f6f7fb;
+
+  /* ── Paper — light-theme neutrals (§3.2) ────────────────────────────────── */
+  --paper-0: #ffffff;
+  --paper-50: #fafbfd;
+  --paper-100: #f3f5f9;
+  --paper-200: #e9ecf3;
+  --paper-300: #d7dce7;
+  --paper-400: #b4bccd;
+  --paper-500: #7c8499;
+  /* paper-600 is NOT in §3.2. It is added because the published light scale
+     jumps from paper-500 (3.4:1 on the sunken surface — fails body text) to
+     paper-700, leaving no value that clears 4.5:1 while still reading as
+     "muted". Without it, --fg-muted and --fg-secondary would have to collapse
+     onto the same value and the light theme would lose a text level. */
+  --paper-600: #5e6880;
+  --paper-700: #4a5266;
+  --paper-900: #1b2030;
+  --paper-1000: #0a0c12;
+
+  /* ── Iris — BRAND ONLY (§3.3). Never a status. ──────────────────────────── */
+  --iris-50: #eff0fe;
+  --iris-100: #e0e2fd;
+  --iris-200: #c4c7fb;
+  --iris-300: #9fa3f7;
+  --iris-400: #7e82f2;
+  --iris-500: #5a5cf0;
+  --iris-600: #4644d6;
+  --iris-700: #3735ac;
+  --iris-800: #2b2a82;
+  --iris-900: #1f1e5c;
+  --iris-950: #111033;
+
+  /* ── Ember — human involvement (§3.4) ───────────────────────────────────── */
+  --ember-200: #ffe3bc;
+  --ember-300: #ffcf87;
+  --ember-400: #f7b15c;
+  --ember-500: #e89234;
+  --ember-600: #c4711f;
+  --ember-700: #94520f;
+  --ember-950: #2e1a05;
+
+  /* ── Status hues (§3.5). One job each. ──────────────────────────────────────
+     §3.5 specifies the 500 (dark) and 600 (light) steps. The -50 tint and -400
+     hover steps are derived here so that light-theme badge fills and dark-theme
+     hover states still resolve from the primitive layer rather than from a raw
+     hex buried in a component. */
+
+  /* Verdant — SUCCESS. Never brand. */
+  --verdant-50: #e6f7ef;
+  --verdant-400: #5ad9a6;
+  --verdant-500: #2fcb8b;
+  --verdant-600: #0e9c66;
+  --verdant-700: #0a7a4f;
+  --verdant-950: #052b1d;
+
+  /* Signal — FAILURE. */
+  --signal-50: #fdeaed;
+  --signal-400: #ff8593;
+  --signal-500: #ff5c6e;
+  --signal-600: #d62842;
+  --signal-700: #ac1c33;
+  --signal-950: #3a0a12;
+
+  /* Pulse — EXECUTING RIGHT NOW. */
+  --pulse-50: #e3f6fb;
+  --pulse-400: #63d8f0;
+  --pulse-500: #31c6e8;
+  --pulse-600: #0c93b4;
+  --pulse-700: #0a748f;
+  --pulse-950: #06283a;
+
+  /* ── Chart sequence — CATEGORICAL, and never a status. ──────────────────────
+     A stacked band is an AGENT, not an outcome. Borrowing the status ramp would
+     make the expensive member red and say it failed; borrowing iris would make
+     one band mean "this is ours". Neither is a claim a chart may make about a
+     category, so the sequence is its own thing.
+
+     Six, because a seventh band on one run is a chart nobody reads anyway — the
+     view cycles and the legend names them. Ordered by hue distance rather than
+     by wheel position, so ADJACENT bands are the easiest pairs to tell apart,
+     which is the comparison a stacked chart actually asks for.
+
+     Every hue here is at least 40° from verdant (success), signal (failure),
+     pulse (running), ember (waiting) and iris (brand), so no band can be
+     mistaken for a state. */
+  --chart-1: #7c8cf8;   /* periwinkle  */
+  --chart-2: #f0a35e;   /* apricot     */
+  --chart-3: #57c8b0;   /* teal        */
+  --chart-4: #c88ae0;   /* orchid      */
+  --chart-5: #8fb339;   /* moss        */
+  --chart-6: #e07a9a;   /* rose        */
+
+  /* Light-theme steps: the same hues, darkened for contrast against paper. */
+  --chart-1-light: #4d5fd6;
+  --chart-2-light: #b96f22;
+  --chart-3-light: #1f8f79;
+  --chart-4-light: #9550b8;
+  --chart-5-light: #5f7d1c;
+  --chart-6-light: #b64a6c;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   2a. SEMANTIC LAYER — DARK. The product default, authored first.
+
+   SCOPING: `:root, .dark` — not `:root` alone. Both themes are declarable on ANY
+   element, not just the document root, which is what lets a section opt out of
+   the page theme. The marketing page needs exactly that: light throughout with
+   two deliberate dark bands, where the contrast between bands is a structural
+   device rather than decoration.
+
+   A direct declaration always beats an inherited one, so a `.dark` section
+   inside a `.light` page resolves to dark on itself and everything under it,
+   regardless of source order.
+   ════════════════════════════════════════════════════════════════════════════ */
+:root,
+.dark {
+  color-scheme: dark;
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg-canvas: var(--graphite-1000); /* builder void */
+  --bg-app: var(--graphite-950); /* application background */
+  --bg-base: var(--graphite-900); /* base surface */
+  --bg-raised: var(--graphite-850); /* cards, panels */
+  --bg-overlay: var(--graphite-800); /* menus, popovers */
+  --bg-sunken: var(--graphite-1000); /* wells, table zebra */
+  --bg-hover: var(--graphite-750);
+  --bg-active: var(--graphite-700);
+  --bg-selected: var(--iris-950); /* brand tint — selection is a brand act */
+
+  /* ── Borders ────────────────────────────────────────────────────────────────
+     --border-subtle is decorative (card and row separators) and is intentionally
+     below 3:1 — a divider is not a control. --border-default is the CONTROL
+     boundary (inputs, selects, checkboxes), so WCAG 1.4.11 applies and it clears
+     3:1. That is why default sits three graphite steps above subtle rather than
+     one: cards use subtle, controls use default. */
+  --border-subtle: var(--graphite-700); /* decorative separator */
+  --border-default: var(--graphite-400); /* control boundary — 3.9:1 */
+  --border-strong: var(--graphite-300); /* emphasis, active outline */
+  --border-focus: var(--iris-500); /* focus ring — brand, never status */
+
+  /* ── Foreground ─────────────────────────────────────────────────────────────
+     Each level sits one graphite step above the §3.2 suggestion. graphite-400 as
+     --fg-muted measures 3.6:1 on --bg-overlay and fails body text, and moving
+     only that level would collide it with --fg-secondary, so the whole ramp
+     shifts up one and keeps four distinct, compliant levels. */
+  --fg-max: var(--graphite-50); /* headings */
+  --fg-primary: var(--graphite-100); /* body */
+  --fg-secondary: var(--graphite-200); /* supporting text */
+  --fg-muted: var(--graphite-300); /* metadata — 6.1:1 worst case */
+  --fg-disabled: var(--graphite-500); /* WCAG-exempt (disabled control) */
+  --fg-on-accent: var(--graphite-1000); /* ink on an iris-400 fill */
+  --fg-link: var(--iris-300);
+
+  /* ── Brand — iris. NEVER a status. ────────────────────────────────────── */
+  --accent: var(--iris-400);
+  --accent-hover: var(--iris-300);
+  --accent-active: var(--iris-500);
+  --accent-subtle: var(--iris-950);
+  --accent-border: var(--iris-500); /* iris-800 measured 1.5:1 on the tint */
+
+  /* ── Chart bands. Categorical, never a status. ────────────────────────── */
+  --chart-band-1: var(--chart-1);
+  --chart-band-2: var(--chart-2);
+  --chart-band-3: var(--chart-3);
+  --chart-band-4: var(--chart-4);
+  --chart-band-5: var(--chart-5);
+  --chart-band-6: var(--chart-6);
+
+  /* ── Status — NEVER the brand hue. ────────────────────────────────────────
+     Each -subtle is the badge fill; the base colour is both the glyph colour
+     and the badge label, so it is verified against the tint AND the surface. */
+  --status-success: var(--verdant-500);
+  --status-success-subtle: var(--verdant-950);
+  --status-success-border: var(--verdant-600);
+
+  --status-failed: var(--signal-500);
+  --status-failed-subtle: var(--signal-950);
+  --status-failed-border: var(--signal-600);
+
+  --status-live: var(--pulse-500);
+  --status-live-subtle: var(--pulse-950);
+  --status-live-border: var(--pulse-600);
+
+  --status-waiting: var(--ember-400);
+  --status-waiting-subtle: var(--ember-950);
+  --status-waiting-border: var(--ember-600);
+
+  /* Queued and cancelled are the two neutral states. §3.5 puts them at
+     graphite-400/500, but both are also badge LABELS, and at those steps they
+     measure 3.9:1 and 2.5:1 on the badge tint — under the 4.5:1 body minimum.
+     They move up to graphite-200/300, which keeps cancelled quieter than queued
+     and keeps both reading as grey (their quietness comes from desaturation, not
+     from dimness). They are additionally separated by glyph, per §14. */
+  --status-queued: var(--graphite-200);
+  --status-queued-subtle: var(--graphite-850);
+  --status-queued-border: var(--graphite-400);
+
+  --status-cancelled: var(--graphite-300);
+  --status-cancelled-subtle: var(--graphite-850);
+  --status-cancelled-border: var(--graphite-400);
+
+  /* ── Risk (§3.5). Always paired with a glyph, never colour alone. ─────── */
+  --risk-low: var(--graphite-300);
+  --risk-medium: var(--ember-400);
+  --risk-high: var(--ember-500);
+  --risk-critical: var(--signal-500);
+
+  /* ── Environment chrome (§3.6) ────────────────────────────────────────── */
+  --env-production: var(--iris-500);
+  --env-staging: var(--ember-500);
+  --env-development: var(--pulse-500);
+
+  /* ── Elevation (§3.7). Tinted with the surface hue, never pure black. ──── */
+  --elev-1:
+    0 1px 2px -1px rgb(11 13 20 / 0.4), 0 1px 1px rgb(11 13 20 / 0.24);
+  --elev-2:
+    0 4px 12px -3px rgb(11 13 20 / 0.42), 0 2px 4px -2px rgb(11 13 20 / 0.28);
+  --elev-3:
+    0 16px 36px -12px rgb(11 13 20 / 0.52), 0 4px 10px -4px rgb(11 13 20 / 0.32);
+  --elev-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--border-focus);
+  --elev-glow-live:
+    0 0 0 1px rgb(49 198 232 / 0.28), 0 0 16px -4px rgb(49 198 232 / 0.34);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   2b. SEMANTIC LAYER — LIGHT. A full peer, not an inversion.
+
+   Every value below is chosen independently. Note where light deliberately
+   diverges in structure rather than merely in lightness:
+     - --bg-base and --bg-raised are both paper-0; on light, elevation is
+       carried by border and shadow, not by a lighter fill (there is nothing
+       lighter than white). Dark separates them by two graphite steps.
+     - --fg-on-accent flips to white because the light accent (iris-600) is a
+       dark fill, whereas the dark accent (iris-400) is a light fill.
+     - Status colours step DOWN to the 600s for contrast on white, rather than
+       up, which is the opposite direction to the neutrals.
+   ════════════════════════════════════════════════════════════════════════════ */
+.light {
+  color-scheme: light;
+
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg-canvas: var(--paper-100);
+  --bg-app: var(--paper-50);
+  --bg-base: var(--paper-0);
+  --bg-raised: var(--paper-0);
+  --bg-overlay: var(--paper-0);
+  --bg-sunken: var(--paper-100);
+  --bg-hover: var(--paper-100);
+  --bg-active: var(--paper-200);
+  --bg-selected: var(--iris-50);
+
+  /* ── Borders ──────────────────────────────────────────────────────────── */
+  /* Same split as dark: subtle is the decorative divider, default is the control
+     boundary and clears 3:1 on white (paper-300 measured 1.4:1). */
+  --border-subtle: var(--paper-200);
+  --border-default: var(--paper-500); /* control boundary — 3.7:1 */
+  --border-strong: var(--paper-700);
+  --border-focus: var(--iris-600);
+
+  /* ── Foreground ───────────────────────────────────────────────────────── */
+  --fg-max: var(--paper-1000);
+  --fg-primary: var(--paper-900);
+  --fg-secondary: var(--paper-700);
+  --fg-muted: var(--paper-600); /* paper-500 measured 3.4:1 — see primitives */
+  --fg-disabled: var(--paper-400);
+  --fg-on-accent: var(--paper-0);
+  --fg-link: var(--iris-600);
+
+  /* ── Chart bands — the darker steps, for contrast against paper. ──────── */
+  --chart-band-1: var(--chart-1-light);
+  --chart-band-2: var(--chart-2-light);
+  --chart-band-3: var(--chart-3-light);
+  --chart-band-4: var(--chart-4-light);
+  --chart-band-5: var(--chart-5-light);
+  --chart-band-6: var(--chart-6-light);
+
+  /* ── Brand ────────────────────────────────────────────────────────────── */
+  --accent: var(--iris-600);
+  --accent-hover: var(--iris-700);
+  --accent-active: var(--iris-800);
+  --accent-subtle: var(--iris-50);
+  --accent-border: var(--iris-500); /* iris-200 measured 1.4:1 on the tint */
+
+  /* ── Status ─────────────────────────────────────────────────────────────────
+     Every label steps down to the 700 — §3.5's 600 steps are tuned for a glyph
+     on white and measure 3.0–4.3:1 on their own badge tint, under the body
+     minimum. The 600 then becomes the badge outline, which gives the two-tone
+     badge its structure while clearing 3:1. Waiting is the exception: ember-600
+     lands at 2.97:1 on ember-200, so its outline uses the 700 as well. */
+  --status-success: var(--verdant-700);
+  --status-success-subtle: var(--verdant-50);
+  --status-success-border: var(--verdant-600);
+
+  --status-failed: var(--signal-700);
+  --status-failed-subtle: var(--signal-50);
+  --status-failed-border: var(--signal-600);
+
+  --status-live: var(--pulse-700);
+  --status-live-subtle: var(--pulse-50);
+  --status-live-border: var(--pulse-600);
+
+  --status-waiting: var(--ember-700);
+  --status-waiting-subtle: var(--ember-200);
+  --status-waiting-border: var(--ember-700);
+
+  --status-queued: var(--paper-700);
+  --status-queued-subtle: var(--paper-100);
+  --status-queued-border: var(--paper-500);
+
+  --status-cancelled: var(--paper-600);
+  --status-cancelled-subtle: var(--paper-100);
+  --status-cancelled-border: var(--paper-500);
+
+  /* ── Risk ─────────────────────────────────────────────────────────────── */
+  --risk-low: var(--paper-500);
+  --risk-medium: var(--ember-600);
+  --risk-high: var(--ember-700);
+  --risk-critical: var(--signal-600);
+
+  /* ── Environment chrome ───────────────────────────────────────────────── */
+  --env-production: var(--iris-600);
+  --env-staging: var(--ember-600);
+  --env-development: var(--pulse-600);
+
+  /* ── Elevation — tinted with the paper hue, never pure black. ─────────── */
+  --elev-1:
+    0 1px 2px -1px rgb(27 32 48 / 0.1), 0 1px 1px rgb(27 32 48 / 0.06);
+  --elev-2:
+    0 4px 12px -3px rgb(27 32 48 / 0.1), 0 2px 4px -2px rgb(27 32 48 / 0.06);
+  --elev-3:
+    0 16px 36px -12px rgb(27 32 48 / 0.14), 0 4px 10px -4px rgb(27 32 48 / 0.08);
+  --elev-focus: 0 0 0 2px var(--bg-base), 0 0 0 4px var(--border-focus);
+  --elev-glow-live:
+    0 0 0 1px rgb(12 147 180 / 0.28), 0 0 16px -4px rgb(12 147 180 / 0.34);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   3. TAILWIND BRIDGE
+
+   `@theme inline` emits utilities that reference the semantic custom property at
+   runtime, so every one responds to the theme class without a `dark:` variant.
+   Only the SEMANTIC layer is bridged — the primitive scales are intentionally
+   absent, which is what makes `bg-iris-500` a non-existent class.
+   ════════════════════════════════════════════════════════════════════════════ */
+@theme inline {
+  /* Surfaces → bg-surface-* */
+  --color-surface-canvas: var(--bg-canvas);
+  --color-surface-app: var(--bg-app);
+  --color-surface-base: var(--bg-base);
+  --color-surface-raised: var(--bg-raised);
+  --color-surface-overlay: var(--bg-overlay);
+  --color-surface-sunken: var(--bg-sunken);
+  --color-surface-hover: var(--bg-hover);
+  --color-surface-active: var(--bg-active);
+  --color-surface-selected: var(--bg-selected);
+
+  /* Foreground → text-fg-* */
+  --color-fg-max: var(--fg-max);
+  --color-fg-primary: var(--fg-primary);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-disabled: var(--fg-disabled);
+  --color-fg-on-accent: var(--fg-on-accent);
+  --color-fg-link: var(--fg-link);
+
+  /* Brand → bg-accent / text-accent / border-accent */
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-border: var(--accent-border);
+
+  /* Status → text-status-failed, bg-status-success-subtle, … */
+  --color-status-success: var(--status-success);
+  --color-status-success-subtle: var(--status-success-subtle);
+  --color-status-success-border: var(--status-success-border);
+  --color-status-failed: var(--status-failed);
+  --color-status-failed-subtle: var(--status-failed-subtle);
+  --color-status-failed-border: var(--status-failed-border);
+  --color-status-live: var(--status-live);
+  --color-status-live-subtle: var(--status-live-subtle);
+  --color-status-live-border: var(--status-live-border);
+  /* Chart bands → bg-chart-N / fill-chart-N. Categorical, never a status. */
+  --color-chart-1: var(--chart-band-1);
+  --color-chart-2: var(--chart-band-2);
+  --color-chart-3: var(--chart-band-3);
+  --color-chart-4: var(--chart-band-4);
+  --color-chart-5: var(--chart-band-5);
+  --color-chart-6: var(--chart-band-6);
+
+  --color-status-waiting: var(--status-waiting);
+  --color-status-waiting-subtle: var(--status-waiting-subtle);
+  --color-status-waiting-border: var(--status-waiting-border);
+  --color-status-queued: var(--status-queued);
+  --color-status-queued-subtle: var(--status-queued-subtle);
+  --color-status-queued-border: var(--status-queued-border);
+  --color-status-cancelled: var(--status-cancelled);
+  --color-status-cancelled-subtle: var(--status-cancelled-subtle);
+  --color-status-cancelled-border: var(--status-cancelled-border);
+
+  /* Risk → text-risk-critical, border-risk-high, … */
+  --color-risk-low: var(--risk-low);
+  --color-risk-medium: var(--risk-medium);
+  --color-risk-high: var(--risk-high);
+  --color-risk-critical: var(--risk-critical);
+
+  /* Environment → bg-env-production, … */
+  --color-env-production: var(--env-production);
+  --color-env-staging: var(--env-staging);
+  --color-env-development: var(--env-development);
+
+  /* Edge colours, so `border-edge-default` and friends exist alongside the
+     ergonomic `border-subtle` utilities defined below. */
+  --color-edge-subtle: var(--border-subtle);
+  --color-edge-default: var(--border-default);
+  --color-edge-strong: var(--border-strong);
+  --color-edge-focus: var(--border-focus);
+}
+
+/* ── Ergonomic border utilities ───────────────────────────────────────────────
+   CLAUDE.md names these `border-subtle` / `border-default` / `border-strong`.
+   A colour key literally named `border-subtle` would generate the class
+   `border-border-subtle`, so they are declared as utilities instead. Each sets
+   colour only — compose with Tailwind's `border` for width. */
+@utility border-subtle {
+  border-color: var(--border-subtle);
+}
+@utility border-default {
+  border-color: var(--border-default);
+}
+@utility border-strong {
+  border-color: var(--border-strong);
+}
+@utility border-focus {
+  border-color: var(--border-focus);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   PRINT
+
+   Enterprise buyers print the security and durability pages to circulate them,
+   so paper is a real output, not an afterthought.
+
+   Print is always the light theme, declared rather than inferred. Relying on
+   `print-color-adjust: economy` to drop the dark surfaces is not safe: the user
+   may have "print backgrounds" enabled, and headless PDF generation paints them
+   unconditionally. Either way the result is the dark theme's near-white ink on
+   its near-black surfaces — an unreadable page. So the whole semantic layer is
+   re-pointed here to the light theme's sources. Same right-hand sides as
+   `.light` above, which is why this lives with them rather than in a separate
+   stylesheet.
+
+   Only tokens are set here. Layout for print is expressed as `print:` variants
+   on the components themselves, so a component's paper behaviour is readable in
+   the component.
+══════════════════════════════════════════════════════════════════════════════ */
+
+@media print {
+  :root,
+  :root.dark,
+  :root.light {
+    --bg-canvas: var(--paper-0);
+    --bg-app: var(--paper-0);
+    --bg-base: var(--paper-0);
+    --bg-raised: var(--paper-0);
+    --bg-overlay: var(--paper-0);
+    /* Sunken is the code-block and table-header ground. On paper it stays a
+       faint tint rather than white, because it is the only thing separating a
+       code sample from the prose once shadows are gone. */
+    --bg-sunken: var(--paper-50);
+    --bg-hover: var(--paper-0);
+    --bg-active: var(--paper-100);
+    --bg-selected: var(--paper-50);
+
+    --border-subtle: var(--paper-300);
+    --border-default: var(--paper-500);
+    --border-strong: var(--paper-700);
+    --border-focus: var(--iris-600);
+
+    --fg-max: var(--paper-1000);
+    --fg-primary: var(--paper-1000);
+    /* Secondary is body copy on paper. It goes to the primary ramp rather than
+       paper-700 — screen contrast assumptions do not survive 300dpi toner. */
+    --fg-secondary: var(--paper-900);
+    --fg-muted: var(--paper-700);
+    --fg-disabled: var(--paper-600);
+    --fg-on-accent: var(--paper-0);
+    --fg-link: var(--iris-700);
+
+    --accent: var(--iris-700);
+    --accent-hover: var(--iris-700);
+    --accent-active: var(--iris-800);
+    --accent-border: var(--iris-600);
+
+    --status-success: var(--verdant-700);
+    --status-success-border: var(--verdant-600);
+    --status-failed: var(--signal-700);
+    --status-failed-border: var(--signal-600);
+    --status-live: var(--pulse-700);
+    --status-live-border: var(--pulse-600);
+    --status-waiting: var(--ember-700);
+    --status-waiting-border: var(--ember-700);
+    --status-success-subtle: var(--verdant-50);
+    --status-failed-subtle: var(--signal-50);
+    --status-live-subtle: var(--pulse-50);
+    --status-waiting-subtle: var(--ember-200);
+    --accent-subtle: var(--iris-50);
+    --status-queued: var(--paper-700);
+    --status-queued-subtle: var(--paper-100);
+    --status-queued-border: var(--paper-500);
+    --status-cancelled: var(--paper-600);
+    --status-cancelled-subtle: var(--paper-100);
+    --status-cancelled-border: var(--paper-500);
+
+    /* Shadows are meaningless on paper and cost toner. */
+    --elev-1: none;
+    --elev-2: none;
+    --elev-3: none;
+    --elev-focus: none;
+    --elev-glow-live: none;
+  }
+
+  /* Print exactly what the tokens above say, rather than letting the browser's
+     economy heuristic decide. The surfaces are already white, so the only
+     painted areas left are the ones that carry meaning — callout tints, ribbon
+     cell states, step numbers, code-block ground. Those are the page. */
+  *,
+  *::before,
+  *::after {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* A link that reads "the tutorial" is useless on paper. Internal anchors stay
+     bare — a URL fragment beside every heading link is noise. */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: var(--fg-muted);
+    word-break: break-all;
+  }
+
+  /* Never break a figure, table row or callout across a page. */
+  figure,
+  aside,
+  tr,
+  h2,
+  h3 {
+    break-inside: avoid;
+  }
+
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+
+  @page {
+    margin: 18mm 16mm;
+  }
+}

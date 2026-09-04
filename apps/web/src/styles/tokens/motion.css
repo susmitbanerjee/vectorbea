@@ -1,0 +1,317 @@
+/* ══════════════════════════════════════════════════════════════════════════════
+   INK & IRIS — Motion tokens
+   Design direction §7.
+
+   THE LAW
+     Motion explains state change. Motion that decorates is deleted.
+     Every animation must answer "what just changed, and where did it come from?"
+
+   Animate transform and opacity ONLY. Never width, height, top or left
+   (CLAUDE.md rule 9). Every animation is interruptible and respects
+   prefers-reduced-motion (rule 10).
+══════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Duration (§7.1) ──────────────────────────────────────────────────── */
+  --duration-instant: 90ms; /* state flips, toggles */
+  --duration-fast: 140ms; /* hover, press, tooltip */
+  --duration-base: 200ms; /* dropdowns, tabs, chips */
+  --duration-slow: 320ms; /* drawers, sheets, route change */
+  --duration-deliberate: 480ms; /* first-paint orchestration only */
+
+  /* ── Spring configs (§7.1) ────────────────────────────────────────────────
+     Consumed by Motion in TypeScript, not by CSS. Mirrored here so the numbers
+     have exactly one source of truth; read them via ~/lib/motion.ts. */
+  --spring-canvas-stiffness: 260;
+  --spring-canvas-damping: 30;
+  --spring-canvas-mass: 0.9;
+
+  --spring-cell-stiffness: 420;
+  --spring-cell-damping: 26;
+  --spring-cell-mass: 0.7;
+
+  /* ── Signature motion timings (§7.2) ──────────────────────────────────────
+     1 checkpoint bloom · 2 edge flow · 5 gate breathing · 6 failure jolt
+     3 log stream and 4 metric roll are driven in TS from ~/lib/motion.ts. */
+  --bloom-ring: 480ms; /* hex ring expand-and-dissolve, fires once */
+  --edge-flow-cycle: 1400ms; /* linear loop; stops instantly, never eased */
+  --gate-breath-cycle: 2600ms; /* ember halo 8% → 14%, barely perceptible */
+  --jolt-shake: 120ms; /* 2px, once, never repeats */
+  --log-line-stagger: 18ms;
+}
+
+/* ── Easing (§7.1) ────────────────────────────────────────────────────────────
+   `--ease-*` is a real Tailwind v4 theme namespace, so these generate
+   `ease-standard`, `ease-entrance` and `ease-exit` utilities directly. */
+@theme {
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* ── Duration utilities ───────────────────────────────────────────────────────
+   Tailwind v4 has no `--duration-*` theme namespace (duration-* takes bare
+   numbers), so the named steps are declared as explicit utilities. They read the
+   custom property, which is what lets the reduced-motion block below collapse
+   every one of them at a stroke. */
+@utility duration-instant {
+  transition-duration: var(--duration-instant);
+}
+@utility duration-fast {
+  transition-duration: var(--duration-fast);
+}
+@utility duration-base {
+  transition-duration: var(--duration-base);
+}
+@utility duration-slow {
+  transition-duration: var(--duration-slow);
+}
+@utility duration-deliberate {
+  transition-duration: var(--duration-deliberate);
+}
+
+/* ── Overlay entrance and exit ────────────────────────────────────────────────
+   Every floating surface — menu, popover, tooltip, dialog, sheet — animates
+   through these two keyframes and nothing else. Written here rather than pulled
+   from tailwindcss-animate so the durations and easings are OUR tokens: entrance
+   on --ease-entrance so it decelerates into place, exit faster and on
+   --ease-exit because a surface being dismissed should not linger.
+
+   Transform and opacity only (rule 9). The 2px rise is deliberately small: an
+   overlay that flies in from 8px reads as decoration, and design §7 deletes
+   motion that decorates. */
+@keyframes ink-overlay-in {
+  from {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ink-overlay-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-2px) scale(0.98);
+  }
+}
+
+/* Content entrance for the shell's stagger (§7.3). A 4px rise, not 12 — the
+   orchestration should read as "settled", not as things flying in. */
+@keyframes ink-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Drawer entrance — transform only, so nothing reflows while it slides. */
+@keyframes ink-drawer-in {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes ink-drawer-out {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+
+@utility motion-drawer {
+  &[data-state="open"] {
+    animation: ink-drawer-in var(--duration-slow) var(--ease-entrance);
+  }
+  &[data-state="closed"] {
+    animation: ink-drawer-out var(--duration-base) var(--ease-exit);
+  }
+}
+
+/* ── Checkpoint Ribbon (§7.2 #1, #2, #5) ──────────────────────────────────────
+   THE BRAND MOTION. A node commits: its cell fills with a spring from scale .82
+   and a single hex ring expands outward and dissolves over 480ms. Fires exactly
+   once per commit and never loops — a looping bloom would turn the one moment
+   that carries meaning into wallpaper.
+
+   The keyframes approximate --spring-cell (stiffness 420, damping 26, mass .7):
+   a fast rise with a small overshoot at ~70% and a short settle. A CSS
+   approximation is deliberate — driving 200 cells through a JS spring costs far
+   more than the fidelity is worth at this scale. */
+@keyframes ink-bloom {
+  0% {
+    transform: scale(0.82);
+    opacity: 0.65;
+  }
+  70% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* The ring: starts on the cell, expands past it, dissolves. */
+@keyframes ink-bloom-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+/* Executing — "in flight right now". A shallow opacity breath, never a pulse
+   that changes size: a cell that grows would shift its neighbours' apparent
+   positions and make a row of them shimmer. */
+@keyframes ink-cell-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.62;
+  }
+}
+
+/* Gate halo — ember at 8%→14% on a 2.6s sine. §7.2 #5: "Must be barely
+   perceptible; if it draws the eye in a screenshot, halve it." */
+@keyframes ink-gate-breathe {
+  0%,
+  100% {
+    opacity: 0.08;
+  }
+  50% {
+    opacity: 0.14;
+  }
+}
+
+/* Running halo — pulse (live) at 12%→26% on a 1.8s sine.
+   Faster and slightly stronger than the gate halo because it answers a different
+   question: the gate is a state you are waiting on, this is work happening NOW,
+   and the eye should be able to find it while scanning a graph.
+   Opacity only, per §9 — a ring that scaled would shift its neighbours' apparent
+   positions and make a row of running nodes shimmer. */
+@keyframes ink-run-pulse {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.26;
+  }
+}
+
+/* Log stream (§7.2 #3) — new lines enter at translateY(3px) → 0 over 140ms. */
+@keyframes ink-log-line {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Marketing section entrance. ENTRANCE ONLY, fires once, never on scroll back —
+   design forbids parallax and scroll-jacking, and a section that re-animates
+   every time it re-enters the viewport is the same disrespect in slower form. */
+@keyframes ink-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes ink-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes ink-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@utility motion-overlay {
+  &[data-state="open"] {
+    animation: ink-overlay-in var(--duration-base) var(--ease-entrance);
+  }
+  &[data-state="closed"] {
+    animation: ink-overlay-out var(--duration-fast) var(--ease-exit);
+  }
+}
+
+/* Scrims and other surfaces that should fade without moving. */
+@utility motion-fade {
+  &[data-state="open"] {
+    animation: ink-fade-in var(--duration-base) var(--ease-entrance);
+  }
+  &[data-state="closed"] {
+    animation: ink-fade-out var(--duration-fast) var(--ease-exit);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   REDUCED MOTION
+
+   Every duration token collapses to 90ms, and motion is reduced to opacity.
+
+   Note on "disable transforms": this block stops transforms from being
+   ANIMATED — `transition-property: opacity` means a transform change snaps
+   rather than tweens, and animations are cut to a single 90ms pass. It
+   deliberately does NOT apply a blanket `transform: none`, because static
+   transforms are load-bearing for positioning: Radix and Floating UI place
+   every popover, dropdown, tooltip and select menu with translate(), and
+   nulling them would drop those surfaces into the top-left corner. That is a
+   functional break, not a motion preference. Components with decorative
+   transforms opt in explicitly via [data-motion="decorative"].
+══════════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-instant: 90ms;
+    --duration-fast: 90ms;
+    --duration-base: 90ms;
+    --duration-slow: 90ms;
+    --duration-deliberate: 90ms;
+
+    --bloom-ring: 90ms;
+    --edge-flow-cycle: 90ms;
+    --gate-breath-cycle: 90ms;
+    --jolt-shake: 90ms;
+    --log-line-stagger: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 90ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 90ms !important;
+    transition-delay: 0ms !important;
+    transition-property: opacity !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Decorative transforms — safe to null because nothing is positioned by them. */
+  [data-motion="decorative"] {
+    transform: none !important;
+  }
+}

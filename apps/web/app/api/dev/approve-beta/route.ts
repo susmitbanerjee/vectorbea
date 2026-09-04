@@ -9,14 +9,12 @@
  *     -d '{"email": "you@example.com"}'
  */
 import { NextRequest, NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
+import { appSql } from "@/lib/server/app-db";
 
 export const dynamic = "force-dynamic";
 
 function db() {
-  const url = process.env.DATABASE_URL ?? process.env.DIRECT_URL;
-  if (!url) throw new Error("DATABASE_URL not set");
-  return neon(url);
+  return appSql;
 }
 
 export async function POST(request: NextRequest) {

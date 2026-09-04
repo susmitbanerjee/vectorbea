@@ -16,8 +16,14 @@ class FailureIncidentRoutes(private val repo: FailureIncidentRepository) {
     fun register(router: Router) {
         router.get("/api/runs/:runId/failure-incident",    ::getByRun)
         router.get("/api/failure-incidents",               ::list)
+        router.post("/api/failure-incidents/mark-all-resolved", ::markAllResolved)
+        // Registered BEFORE the :id route: the router matches in registration
+        // order and "delete-resolved" would otherwise be read as an id and fail
+        // as a malformed UUID.
+        router.post("/api/failure-incidents/delete-resolved", ::deleteResolved)
         router.get("/api/failure-incidents/:id",           ::getById)
         router.post("/api/failure-incidents/:id/mark-resolved", ::markResolved)
+        router.delete("/api/failure-incidents/:id",        ::delete)
     }
 
     private fun getByRun(req: Request): Response {
@@ -49,6 +55,43 @@ class FailureIncidentRoutes(private val repo: FailureIncidentRepository) {
         val updated = repo.markResolved(id, ctx.workspaceId)
         if (!updated) throw ApiError.NotFound("FailureIncident")
         return Response.ok(mapOf("resolved" to true))
+    }
+
+    private fun markAllResolved(req: Request): Response {
+        val ctx = req.context()
+        val resolved = repo.markAllResolved(ctx.workspaceId)
+        log.info("[recovery] incidents resolved workspaceId={} count={}", ctx.workspaceId, resolved)
+        return Response.ok(mapOf("resolved" to resolved))
+    }
+
+    /**
+     * DELETE /api/failure-incidents/:id
+     *
+     * Purging resolved every open incident and deleted nothing, so a workspace
+     * accumulated signature rows it could never clear — the resolved filter was
+     * the only place they went, and they stayed there. This removes the record.
+     * 404 rather than 204 on a miss, so deleting an id from another workspace is
+     * indistinguishable from deleting one that never existed.
+     */
+    private fun delete(req: Request): Response {
+        val ctx = req.context()
+        val id = req.pathUUID("id")
+        if (!repo.delete(id, ctx.workspaceId)) throw ApiError.NotFound("FailureIncident")
+        return Response.ok(mapOf("deleted" to true))
+    }
+
+    /**
+     * POST /api/failure-incidents/delete-resolved
+     *
+     * The second half of a purge: resolve everything open, then clear what is
+     * resolved. Open incidents are never touched here — deleting a live problem
+     * is not tidying, it is losing the evidence during the incident.
+     */
+    private fun deleteResolved(req: Request): Response {
+        val ctx = req.context()
+        val deleted = repo.deleteResolved(ctx.workspaceId)
+        log.info("[recovery] resolved incidents purged workspaceId={} count={}", ctx.workspaceId, deleted)
+        return Response.ok(mapOf("deleted" to deleted))
     }
 
     private fun FailureIncidentRow.toResponse() = mapOf(

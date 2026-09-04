@@ -1,0 +1,98 @@
+# THREE ALERTS. NOT FOUR.
+#
+# §5.4: "Three alerts only (more and you'll ignore them)." That is the whole design
+# constraint and it is the correct one. An alert you have learned to dismiss is worse
+# than no alert, because it trains you to dismiss the next one too — and it occupies
+# the budget of attention that the real page needs.
+#
+# Each of these means "a human should look now". Everything else worth knowing is on a
+# dashboard, where it is looked at deliberately rather than at 3am.
+#
+# THE TEST FOR ADDING A FOURTH
+# ----------------------------
+# Would you get out of bed for it? If the honest answer is "I'd look in the morning",
+# it is a dashboard panel. If it is "I'd want to know but there's nothing I could do",
+# it is a dashboard panel with a note. Only "I would act immediately, and the action is
+# obvious" earns an alert.
+#
+# Each alert carries the action in its annotation, because the person reading it at 3am
+# is not going to reconstruct the reasoning.
+
+groups:
+  - name: vectorbea-fleet
+    rules:
+
+      # ── 1. The system is saturated ────────────────────────────────────────
+      #
+      # Claim latency is the time between a run being ready and a worker taking it.
+      # It is the right saturation signal because it rises before anything fails:
+      # throughput stays flat, error rates stay at zero, and runs simply take longer
+      # to start. By the time a user complains it has been high for an hour.
+      #
+      # 30s at p95 over 5 minutes. Not p99 — p99 on a low-volume queue is one unlucky
+      # run and would fire constantly. Not the mean — the mean hides exactly the tail
+      # that users notice.
+      - alert: SystemSaturated
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(job_claim_latency_seconds_bucket[5m]))
+          ) > 30
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Runs are waiting over 30s to start (p95, 5m)"
+          description: >-
+            Claim latency p95 is {{ $value | humanizeDuration }}. Runs are queued and
+            no worker is free to take them.
+          action: >-
+            Check worker_slots_available across the fleet. If it is at zero, the fleet
+            is full — scale replicas. If slots are free while latency is high, the
+            claim query itself is slow: check db_pool_wait_seconds.
+
+      # ── 2. Workers are dying or overloaded ────────────────────────────────
+      #
+      # A lease expires when a worker stops heartbeating while holding a run. That is
+      # never normal. It means the process died, or it was so overloaded that it could
+      # not renew a lease every 10 seconds — and either way another worker has now
+      # picked up the run, so the work is duplicated in effect if not in result.
+      #
+      # Rate over 5 minutes rather than a raw count, and >1/min, because a single
+      # expiry during a deploy is expected and should not page.
+      - alert: WorkersDyingOrOverloaded
+        expr: sum(rate(lease_expiry_total[5m])) * 60 > 1
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Run leases are expiring at {{ $value | printf \"%.1f\" }}/min"
+          description: >-
+            A lease expires when a worker holding a run stops heartbeating. Workers are
+            crashing, being OOM-killed, or are too loaded to renew every 10s.
+          action: >-
+            Check jvm_heap_used_bytes against jvm_heap_max_bytes for OOM, and
+            thread_blocked_seconds for a worker stuck on outbound I/O. Container restart
+            counts will confirm crashes.
+
+      # ── 3. A poison job needs a person ────────────────────────────────────
+      #
+      # Dead letters should be zero. A job lands here only after exhausting its
+      # attempts, which means retrying did not help and never will — the fix is a
+      # human reading the payload.
+      #
+      # `> 0` on an increase over 15m rather than on the raw total, because the total
+      # never decreases and would keep the alert firing forever after one bad job.
+      - alert: DeadLetterNeedsAttention
+        expr: increase(dead_letter_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: page
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} job(s) dead-lettered in the last 15m"
+          description: >-
+            A job exhausted its retries and was parked. Retrying did not help and will
+            not; something about this specific job is broken.
+          action: >-
+            Open GET /api/dead-letters, read the payload and the failure reason. Fix or
+            discard. This does not resolve itself.

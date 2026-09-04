@@ -33,7 +33,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const { origin, searchParams } = request.nextUrl;
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = searchParams.get("next") ?? "/control";
 
   const cookieStore = await cookies();
 
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
 
   if (error || !data.url) {
     console.error("[auth/github] failed to get OAuth URL:", error?.message);
-    return NextResponse.redirect(new URL("/login?error=oauth", request.url));
+    return NextResponse.redirect(new URL("/signin?error=oauth", request.url));
   }
 
   // httpOnly + lax is correct for the PKCE round-trip:

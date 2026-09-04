@@ -23,6 +23,7 @@ export type LlmProvider =
   | "anthropic"
   | "azure_openai"
   | "google_gemini"
+  | "mistral"
   | "aws_bedrock"
   | "openai_compatible";
 
@@ -107,6 +108,7 @@ export interface DatabaseConnectionConfig {
   host?: string;
   port?: number;
   database?: string;
+  username?: string;
   sslRequired: boolean;
   readOnly: boolean;
   allowedSchemas: string[];
@@ -118,6 +120,7 @@ export interface DatabaseConnectionConfig {
 export interface HttpApiConnectionConfig {
   baseUrl: string;
   authType: AuthType;
+  authHeaderName?: string;
   defaultHeaders: Record<string, string>;
   allowedPaths: string[];
   blockedPaths: string[];
@@ -145,6 +148,7 @@ export interface VectorStoreConnectionConfig {
   embeddingModel?: string;
   /** Index host / API endpoint used to reach (and test) the store. */
   endpoint?: string;
+  healthPath?: string;
 }
 
 export interface ObjectStorageConnectionConfig {
@@ -244,6 +248,7 @@ export const LLM_PROVIDER_MODELS: Record<LlmProvider, string[]> = {
   anthropic:         ["claude-opus-4", "claude-sonnet-4-5", "claude-haiku-3-5"],
   azure_openai:      ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
   google_gemini:     ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-1.5-pro"],
+  mistral:           ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest"],
   aws_bedrock:       ["anthropic.claude-3-5-sonnet", "amazon.titan-text-express-v1"],
   openai_compatible: ["custom"],
 };

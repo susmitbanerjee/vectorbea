@@ -18,6 +18,19 @@ data class Schedule(
     val enabled: Boolean,
     val nextFireAt: Instant?,
     val lastFireAt: Instant?,
+    /**
+     * Deterministic 0-59s offset, derived from `workflow_id`.
+     *
+     * Ten schedules set to 09:00 fire at 09:00 and stampede. Jitter spreads them,
+     * but it has to be *stable*: a fresh random offset each tick would make the
+     * same report arrive at 09:00:43 today and 09:00:12 tomorrow, and "my 9am
+     * report is late" is a worse complaint than the stampede was a problem.
+     */
+    val jitterSeconds: Int = 0,
+    /** `skip` · `queue` · `allow_concurrent`. */
+    val overlapPolicy: String = "skip",
+    /** The run this schedule last fired, while it is still in flight. */
+    val activeRunId: UUID? = null,
 )
 
 /** A schedule joined with its workflow name — for the schedules list UI. */
@@ -42,6 +55,13 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
         environmentId = rs.uuid("environment_id"),
         workflowId = rs.uuid("workflow_id"),
         cronExpression = rs.getString("cron_expression"),
+        // runCatching, not because the columns are optional, but because several
+        // queries in this repository project a narrower column list and share this
+        // mapper. A missing column there means "not selected", not "not present",
+        // and defaulting is the right read.
+        jitterSeconds = runCatching { rs.getInt("jitter_seconds") }.getOrDefault(0),
+        overlapPolicy = runCatching { rs.getString("overlap_policy") }.getOrNull() ?: "skip",
+        activeRunId = runCatching { rs.uuidOrNull("active_run_id") }.getOrNull(),
         timezone = rs.getString("timezone"),
         enabled = rs.getBoolean("enabled"),
         nextFireAt = rs.instantOrNull("next_fire_at"),
@@ -75,8 +95,14 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
             execute(
                 """
                 INSERT INTO schedules
-                    (workspace_id, environment_id, workflow_id, cron_expression, timezone, enabled, next_fire_at)
-                VALUES (?, ?, ?, ?, ?, true, ?)
+                    (workspace_id, environment_id, workflow_id, cron_expression, timezone,
+                     enabled, next_fire_at, jitter_seconds)
+                -- Jitter derived in SQL from workflow_id, using the same expression
+                -- V025 backfilled with. Computing it here rather than in Kotlin keeps
+                -- one definition: a schedule recreated after a delete gets the offset
+                -- it had before, and no client can accidentally pick its own.
+                VALUES (?, ?, ?, ?, ?, true, ?,
+                        ('x' || substr(md5(?::text), 1, 8))::bit(32)::bigint % 60)
                 """.trimIndent(),
             ) {
                 setUuid(1, workspaceId)
@@ -85,6 +111,7 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
                 setString(4, cronExpression)
                 setString(5, timezone)
                 setInstantOrNull(6, nextFireAt)
+                setUuid(7, workflowId)
             }
         }
     }
@@ -96,7 +123,8 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
     open fun findById(id: UUID, workspaceId: UUID): Schedule? = queryOne(
         """
         SELECT id, workspace_id, environment_id, workflow_id, cron_expression,
-               timezone, enabled, next_fire_at, last_fire_at
+               timezone, enabled, next_fire_at, last_fire_at,
+               jitter_seconds, overlap_policy, active_run_id
           FROM schedules WHERE id = ? AND workspace_id = ?
         """.trimIndent(),
         { setUuid(1, id); setUuid(2, workspaceId) },
@@ -131,15 +159,44 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
     open fun listDue(now: Instant, limit: Int = 100): List<Schedule> = query(
         """
         SELECT id, workspace_id, environment_id, workflow_id, cron_expression,
-               timezone, enabled, next_fire_at, last_fire_at
+               timezone, enabled, next_fire_at, last_fire_at,
+               jitter_seconds, overlap_policy, active_run_id
           FROM schedules
-         WHERE enabled = true AND next_fire_at IS NOT NULL AND next_fire_at <= ?
+         WHERE enabled = true AND next_fire_at IS NOT NULL
+           -- The jitter is applied here, in the due predicate, rather than by
+           -- delaying the fire. Baking it into next_fire_at would compound: each
+           -- advance would add the offset again and the schedule would drift a
+           -- minute per day off the cron the user wrote.
+           AND next_fire_at + make_interval(secs => jitter_seconds) <= ?
          ORDER BY next_fire_at ASC
          LIMIT $limit
         """.trimIndent(),
         { setInstant(1, now) },
         ::mapRow,
     )
+
+    /**
+     * Whether a schedule's previous run is still in flight.
+     *
+     * Read at fire time rather than tracked in memory: several API instances run
+     * the scheduler loop, and only the database knows what all of them started.
+     */
+    open fun previousRunActive(scheduleId: UUID): Boolean = queryOne(
+        """SELECT EXISTS (
+               SELECT 1 FROM schedules s
+                 JOIN agent_runs r ON r.id = s.active_run_id
+                WHERE s.id = ?
+                  AND r.status IN ('queued','claimed','running','yielded')
+           ) AS active""",
+        { setUuid(1, scheduleId) },
+    ) { rs -> rs.getBoolean("active") } ?: false
+
+    /** Record which run this schedule most recently started. */
+    open fun setActiveRun(scheduleId: UUID, runId: UUID) {
+        execute("UPDATE schedules SET active_run_id = ?, updated_at = now() WHERE id = ?") {
+            setUuid(1, runId); setUuid(2, scheduleId)
+        }
+    }
 
     /**
      * Atomically claim a due schedule by advancing its next_fire_at past [threshold].

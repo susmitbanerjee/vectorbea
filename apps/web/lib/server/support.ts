@@ -1,5 +1,5 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
+import { appSql } from "@/lib/server/app-db";
 
 /**
  * Support tickets — the customer support widget writes here, and the admin
@@ -138,12 +138,11 @@ export function supportLog(operation: string, ctx: LogCtx = {}): void {
   }
 }
 
-// ─── Data access (raw parameterized Neon SQL, like the rest of this subsystem) ─
+// ─── Data access (raw parameterized SQL, like the rest of this subsystem) ─────
 
+/** The application database over the standard wire protocol. See lib/server/app-db.ts. */
 function db() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error("DATABASE_URL not set");
-  return neon(url);
+  return appSql;
 }
 
 // Safety net for environments where the migration has not been applied (dev),

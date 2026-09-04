@@ -1,13 +1,15 @@
 package com.vectorbea.worker.runtime.executor
 
+import kotlinx.coroutines.runBlocking
+
 import com.vectorbea.worker.connector.ConnectionRecord
 import com.vectorbea.worker.connector.ConnectionResolver
 import com.vectorbea.worker.connector.ResolvedConnection
 import com.vectorbea.worker.connector.SecretValue
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.runtime.graph.RuntimeContext
-import com.vectorbea.worker.runtime.graph.WorkflowGraph
-import com.vectorbea.worker.runtime.graph.WorkflowNode
+import com.vectorbea.graph.WorkflowGraph
+import com.vectorbea.graph.WorkflowNode
 import org.junit.jupiter.api.Test
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -74,7 +76,7 @@ class HttpNodeExecutorTest {
     // ── No URL provided ───────────────────────────────────────────────────────
 
     @Test
-    fun `returns Failed when no URL and no connection`() {
+    fun `returns Failed when no URL and no connection`(): Unit = runBlocking {
         val executor = HttpNodeExecutor(noConnectionResolver(), stubEventStore())
         val node     = WorkflowNode(id = "n1", type = "http", config = emptyMap())
         val result   = executor.execute(node, emptyMap(), context())
@@ -84,7 +86,7 @@ class HttpNodeExecutorTest {
     // ── SSRF protection ───────────────────────────────────────────────────────
 
     @Test
-    fun `SSRF blocked for loopback URL`() {
+    fun `SSRF blocked for loopback URL`(): Unit = runBlocking {
         val executor = HttpNodeExecutor(noConnectionResolver(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "http",
             config = mapOf("url" to "http://127.0.0.1:8080/secret"))
@@ -94,7 +96,7 @@ class HttpNodeExecutorTest {
     }
 
     @Test
-    fun `SSRF blocked for metadata endpoint`() {
+    fun `SSRF blocked for metadata endpoint`(): Unit = runBlocking {
         val executor = HttpNodeExecutor(noConnectionResolver(), stubEventStore())
         val node = WorkflowNode(id = "n1", type = "http",
             config = mapOf("url" to "http://169.254.169.254/latest/meta-data/"))
@@ -106,7 +108,7 @@ class HttpNodeExecutorTest {
     // ── Successful GET ────────────────────────────────────────────────────────
 
     @Test
-    fun `successful GET returns statusCode and parsed JSON body`() {
+    fun `successful GET returns statusCode and parsed JSON body`(): Unit = runBlocking {
         val responseJson = """{"hello":"world"}"""
         val executor = HttpNodeExecutor(
             connectionResolver = noConnectionResolver(),
@@ -126,7 +128,7 @@ class HttpNodeExecutorTest {
     // ── HTTP 4xx failure ──────────────────────────────────────────────────────
 
     @Test
-    fun `HTTP 404 returns Failed`() {
+    fun `HTTP 404 returns Failed`(): Unit = runBlocking {
         val executor = HttpNodeExecutor(
             connectionResolver = noConnectionResolver(),
             eventStore         = stubEventStore(),
@@ -142,7 +144,7 @@ class HttpNodeExecutorTest {
     // ── allowedPaths enforcement ──────────────────────────────────────────────
 
     @Test
-    fun `path outside allowedPaths returns Failed`() {
+    fun `path outside allowedPaths returns Failed`(): Unit = runBlocking {
         val record = connectionRecord(allowedPaths = listOf("/api/v1"))
         val executor = HttpNodeExecutor(
             connectionResolver = stubResolver(record),
@@ -160,7 +162,7 @@ class HttpNodeExecutorTest {
     }
 
     @Test
-    fun `path within allowedPaths passes`() {
+    fun `path within allowedPaths passes`(): Unit = runBlocking {
         val record = connectionRecord(allowedPaths = listOf("/api/v1"))
         val executor = HttpNodeExecutor(
             connectionResolver = stubResolver(record),
@@ -179,7 +181,7 @@ class HttpNodeExecutorTest {
     // ── allowedHosts enforcement via SSRF guard ───────────────────────────────
 
     @Test
-    fun `host outside allowedHosts returns Failed`() {
+    fun `host outside allowedHosts returns Failed`(): Unit = runBlocking {
         val record = connectionRecord(allowedHosts = listOf("api.allowed.com"))
         val executor = HttpNodeExecutor(
             connectionResolver = stubResolver(record),
@@ -198,7 +200,7 @@ class HttpNodeExecutorTest {
     // ── String body returned when not JSON ────────────────────────────────────
 
     @Test
-    fun `non-JSON response body returned as string`() {
+    fun `non-JSON response body returned as string`(): Unit = runBlocking {
         val executor = HttpNodeExecutor(
             connectionResolver = noConnectionResolver(),
             eventStore         = stubEventStore(),
@@ -241,7 +243,24 @@ private fun stubHttp(statusCode: Int, body: String): HttpClient {
         override fun authenticator()    = java.util.Optional.empty<java.net.Authenticator>()
         override fun executor()         = java.util.Optional.empty<java.util.concurrent.Executor>()
         override fun cookieHandler()    = java.util.Optional.empty<java.net.CookieHandler>()
-        override fun <T : Any?> sendAsync(req: HttpRequest, h: HttpResponse.BodyHandler<T>) = throw UnsupportedOperationException()
+        // OutboundHttp.send drives sendAsync; the body arrives as a decoded String
+        // rather than an InputStream because BoundedBodySubscriber does the reading.
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : Any?> sendAsync(
+            req: HttpRequest,
+            h: HttpResponse.BodyHandler<T>,
+        ): java.util.concurrent.CompletableFuture<HttpResponse<T>> =
+            java.util.concurrent.CompletableFuture.completedFuture(
+                object : HttpResponse<T> {
+                    override fun statusCode() = statusCode
+                    override fun body(): T = body as T
+                    override fun headers() = java.net.http.HttpHeaders.of(emptyMap()) { _, _ -> true }
+                    override fun request() = req
+                    override fun previousResponse() = java.util.Optional.empty<HttpResponse<T>>()
+                    override fun sslSession() = java.util.Optional.empty<javax.net.ssl.SSLSession>()
+                    override fun uri() = req.uri()
+                    override fun version() = Version.HTTP_1_1
+                })
         override fun <T : Any?> sendAsync(req: HttpRequest, h: HttpResponse.BodyHandler<T>, p: HttpResponse.PushPromiseHandler<T>?) = throw UnsupportedOperationException()
         override fun newWebSocketBuilder(): java.net.http.WebSocket.Builder = throw UnsupportedOperationException()
     }

@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     const jwtSub = await upsertOAuthUser("microsoft:" + sub, email, name);
     const token = await signToken({ sub: jwtSub, email });
     const opts = { httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 7 };
-    const res = NextResponse.redirect(new URL("/dashboard", request.url));
+    const res = NextResponse.redirect(new URL("/control", request.url));
     res.cookies.set(AUTH_COOKIE_NAME, token, opts);
     res.cookies.set("vb-token-transfer", token, { ...opts, httpOnly: false, maxAge: 60 });
     ["oauth_code_verifier","oauth_nonce","oauth_state","oauth_next"].forEach(n => res.cookies.set(n, "", { ...opts, maxAge: 0 }));

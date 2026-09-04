@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams, origin } = request.nextUrl;
-  const next = searchParams.get("next") ?? "/dashboard";
+  const next = searchParams.get("next") ?? "/control";
 
   // ── PKCE ──────────────────────────────────────────────────────────────────
   const verifierBytes  = crypto.getRandomValues(new Uint8Array(32));

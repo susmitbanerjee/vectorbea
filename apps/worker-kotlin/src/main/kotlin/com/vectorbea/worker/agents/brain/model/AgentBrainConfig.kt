@@ -32,6 +32,29 @@ data class AgentBrainConfig(
     val memoryPolicy: String = "run_scoped",    // none | run_scoped
     // Tool permissions — only these tool IDs may be called
     val allowedToolIds: Set<UUID> = emptySet(),
+    /**
+     * The team roster: agent ids this agent may DELEGATE or HANDOFF to.
+     *
+     * EMPTY MEANS NO DELEGATION, unlike [allowedToolIds] where empty means "any".
+     * See AgentSafetyGuard.validateAgentAllowed for why the two differ.
+     */
+    val canDelegateTo: Set<UUID> = emptySet(),
+    /**
+     * This activation, when the run is routed through one.
+     *
+     * Null for a single-agent run with activations off. Carried on the config
+     * because it is what scopes an activation's approval keys and what a
+     * delegation records as its parent.
+     */
+    val activationId: UUID? = null,
+    /**
+     * How deep this activation sits. 0 for a root.
+     *
+     * Load-bearing for two things: the depth guard, and the depth-scoped approval
+     * keys — a root keeps the step-scoped key that shipped, everything below it
+     * gets an activation-scoped one. See AgentBrainRunner.toolApprovalNodeId.
+     */
+    val depth: Int = 0,
     // Expected output schema (JSON Schema)
     val outputSchemaJson: String = "{}",
     // Task instruction (set by the workflow node, overrides agent-level instruction)

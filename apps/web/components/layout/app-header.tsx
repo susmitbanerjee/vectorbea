@@ -86,7 +86,7 @@ export function AppHeader({
       className="sticky top-0 z-20"
       style={{
         background: "var(--bg-main)",
-        borderBottom: "1px solid var(--border-subtle)",
+        borderBottom: "1px solid var(--legacy-border-subtle)",
       }}
     >
       {/* ── Main header row ────────────────────────────────────────────── */}

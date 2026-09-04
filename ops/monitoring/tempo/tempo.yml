@@ -1,0 +1,31 @@
+# Tempo, single binary, local storage. Traces only; metrics stay in Prometheus.
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+
+ingester:
+  max_block_duration: 5m
+
+compactor:
+  compaction:
+    # Shorter than Prometheus's 15d, deliberately. Traces are large and are used
+    # within hours of the thing they describe — "why was this run slow yesterday" is a
+    # real question, "why was this run slow two weeks ago" is not, and the metric and
+    # log records of it survive either way.
+    block_retention: 72h
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
