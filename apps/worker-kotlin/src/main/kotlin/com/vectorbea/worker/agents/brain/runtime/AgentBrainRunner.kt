@@ -187,6 +187,25 @@ class AgentBrainRunner(
             System.getenv("TRACE_PAYLOAD_CAPTURE")?.lowercase() != "false"
 
         /**
+         * Summarise a tool result from its RESULT CONTRACT rather than its shape.
+         *
+         * "Tool returned 3 field(s): items, count, nextPage" describes the
+         * envelope. "Returned 47 results, showing 5" describes the answer, and it
+         * is the sentence the Activity view puts in front of somebody who has
+         * never heard of an iteration.
+         *
+         * Default OFF because this string is not only a display: it goes into the
+         * observation history the next prompt is built from, and into the
+         * transcript a resumed run reads back. Better prose should be an
+         * improvement to how the model reasons, but "should" is not how prompt
+         * changes are shipped here.
+         *
+         * Off, [buildToolObservationSummary] is byte-for-byte what it was.
+         */
+        internal val RESULT_SUMMARY_ENABLED: Boolean =
+            System.getenv("AGENT_RESULT_SUMMARY_ENABLED")?.lowercase() == "true"
+
+        /**
          * The `:tool-<n>` counter that synthetic tool node ids used to carry.
          *
          * Kept, though ids are now keyed on the tool and carry no counter, because a
@@ -2555,7 +2574,10 @@ class AgentBrainRunner(
 
                     ToolOutcome(
                         AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
-                            buildToolObservationSummary(toolId, execResult.output), true,
+                            buildToolObservationSummary(
+                                toolId, execResult.output,
+                                projected = projection.takeIf { it.applied }?.json),
+                            true,
                             payload = payload),
                         resultRef = fullRef)
                 }
@@ -2679,6 +2701,10 @@ class AgentBrainRunner(
 
         return ToolOutcome(AgentObservation(
             state.iteration, "CALL_TOOL", toolId.toString(),
+            /* No projected form here on purpose: this is the stored raw result
+               being replayed, and re-projecting it would mean loading the contract
+               on a path whose whole point is not to do work again. The shape
+               summary is what the first execution's row already recorded. */
             buildToolObservationSummary(toolId, cached), true,
             payload = renderToolPayload(cached)))
     }
@@ -2690,21 +2716,20 @@ class AgentBrainRunner(
      * front of the model does not also write a copy of every tool result into
      * `run_events` and inflate the run's history budget.
      */
-    private fun buildToolObservationSummary(toolId: UUID, result: Map<String, Any?>): String {
+    private fun buildToolObservationSummary(
+        toolId: UUID,
+        result: Map<String, Any?>,
+        projected: String? = null,
+    ): String {
+        if (RESULT_SUMMARY_ENABLED && projected != null) {
+            com.vectorbea.worker.agents.tools.ResultProjection.summaryOf(projected)
+                ?.let { return it }
+        }
         val size = result.size
         val keys = result.keys.take(5).joinToString()
         return "Tool returned $size field(s): $keys"
     }
 
-    /**
-     * The tool's result as JSON, sanitized and capped, for the next prompt.
-     *
-     * Serializing the whole output map rather than picking fields out of it is
-     * deliberate: tools here are HTTP calls, SQL queries and SaaS actions with no
-     * common result shape, and any guess about which field "the data" lives in would
-     * be wrong for some tool and would fail silently — which is the failure this
-     * whole function exists to end.
-     */
     /**
      * Cap an already-projected observation.
      *
@@ -2750,6 +2775,15 @@ class AgentBrainRunner(
         pendingObservationShape = ObservationShape(projected, truncated, chars)
     }
 
+    /**
+     * The tool's result as JSON, sanitized and capped, for the next prompt.
+     *
+     * Serializing the whole output map rather than picking fields out of it is
+     * deliberate: tools here are HTTP calls, SQL queries and SaaS actions with no
+     * common result shape, and any guess about which field "the data" lives in would
+     * be wrong for some tool and would fail silently — which is the failure this
+     * whole function exists to end.
+     */
     private fun renderToolPayload(result: Map<String, Any?>): String? {
         if (result.isEmpty()) return null
         val json = try { mapper.writeValueAsString(result) } catch (_: Exception) { result.toString() }

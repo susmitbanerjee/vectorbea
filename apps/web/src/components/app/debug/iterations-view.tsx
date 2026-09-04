@@ -43,11 +43,21 @@ import { StatusPill } from "./primitives";
 export function IterationsView({
   api,
   runId,
+  focus,
   selectedSpanId,
   onSelectSpan,
 }: {
   api: TraceApi;
   runId: string;
+  /**
+   * Open on this step, rather than on the first one.
+   *
+   * The Activity view's rows each offer "Step N details", and landing on
+   * iteration 1 of activation 1 after clicking one would make that control a lie.
+   * Only the INITIAL selection: once the reader picks something here, their
+   * choice wins, which is why this is read as a fallback and not as state.
+   */
+  focus?: { stepId: string; iteration: number } | null;
   selectedSpanId: string | null;
   onSelectSpan: (spanId: string) => void;
 }) {
@@ -66,9 +76,15 @@ export function IterationsView({
   }, [api, runId]);
 
   const activation =
-    data?.find((a) => a.stepId === activeStep) ?? data?.[0] ?? null;
+    data?.find((a) => a.stepId === activeStep)
+    ?? data?.find((a) => a.stepId === focus?.stepId)
+    ?? data?.[0]
+    ?? null;
   const iteration =
     activation?.iterations.find((i) => i.number === activeIteration)
+    ?? (focus && activation?.stepId === focus.stepId
+      ? activation.iterations.find((i) => i.number === focus.iteration)
+      : undefined)
     ?? activation?.iterations[0]
     ?? null;
 

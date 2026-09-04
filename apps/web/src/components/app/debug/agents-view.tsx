@@ -120,23 +120,46 @@ export function AgentsView({
     e.from != null && onPath.has(e.from) && onPath.has(e.to);
 
   /*
-   * ── ONE NODE IS A VALID CONSTELLATION ───────────────────────────────────
-   * P6 routed the EXISTING single-agent path through the activation, so a
-   * single-agent run has exactly one activation and draws as one node. That is
-   * the model being uniform, not an empty state — and the previous copy here
-   * ("a single-agent run without activations enabled looks like this") said the
-   * opposite, which would send somebody looking for a setting that does not
-   * exist.
+   * ── WHY THIS IS EMPTY, ANSWERED FROM THE DATA ───────────────────────────
    *
-   * This branch is now only reached by a run that predates activations.
+   * This branch claimed "every run since the harness shipped has at least one
+   * activation", and that is false. `AGENT_ACTIVATIONS_ENABLED` is off by
+   * default and set in no environment file, so `AgentNodeExecutor` takes the
+   * pre-activation branch and writes no `agent_activations` row at all — while
+   * `agent_iterations` is written either way. The result is the exact report
+   * that led here: a successful run, Iterations populated, Agents blank, and a
+   * message telling the reader their run was old when it ran this morning.
+   *
+   * The cause now comes from the API, which knows whether the run produced
+   * iterations. Three states, because two of them are not problems and one is.
    */
   if (l.nodes.length === 0) {
+    const cause = constellation.emptyCause;
     return (
       <div className={cn("rounded-lg border border-subtle p-6", className)}>
-        <Text variant="body-sm" tone="secondary">
-          No activations were recorded for this run. Runs from before the agent
-          harness shipped have none; every run since has at least one.
-        </Text>
+        {cause === "activations_disabled" ? (
+          <>
+            <Text variant="body-sm" tone="max" className="block font-medium">
+              This run used an agent, but activations were not being recorded
+            </Text>
+            <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[70ch]">
+              The agent ran and its steps are in Iterations. The activation tree
+              this view draws is written only when{" "}
+              <code className="font-code text-mono-sm">AGENT_ACTIVATIONS_ENABLED</code>{" "}
+              is set on the worker, and it is off by default. Nothing was lost from
+              this run — there was never an activation to show.
+            </Text>
+          </>
+        ) : cause === "no_agent_steps" ? (
+          <Text variant="body-sm" tone="secondary">
+            This run had no agent steps, so there is no activation tree. Its work
+            is in the Flow and Timeline views.
+          </Text>
+        ) : (
+          <Text variant="body-sm" tone="secondary">
+            No activations were recorded for this run.
+          </Text>
+        )}
       </div>
     );
   }

@@ -23,16 +23,29 @@ import { ReplayView } from "./replay-view";
 import { CostView } from "./cost-view";
 import { CompletenessBanner, FlowSkeleton, TraceUnavailable } from "./states";
 import { useDebugSelection } from "./use-debug-selection";
-import { IterationsView } from "./iterations-view";
+import { ActivityView } from "./activity-view";
 import { RootCauseBanner } from "./root-cause-banner";
 import { TimelineView } from "./timeline-view";
 
 type View =
-  | "overview" | "timeline" | "iterations" | "agents" | "cost" | "compare" | "replay";
+  | "overview" | "timeline" | "activity" | "agents" | "cost" | "compare" | "replay";
 
 const IS_VIEW = (v: string | null): v is View =>
-  v === "overview" || v === "timeline" || v === "iterations" ||
+  v === "overview" || v === "timeline" || v === "activity" ||
   v === "agents" || v === "cost" || v === "compare" || v === "replay";
+
+/**
+ * `?view=iterations` still opens the iteration list — now inside Activity.
+ *
+ * Links to a specific view are pasted into tickets and chat threads and stay
+ * there for years. Dropping the tab without this would turn every one of them
+ * into a silent redirect to Overview, which reads as "the thing I sent you is
+ * gone" rather than "it moved".
+ */
+function normaliseView(v: string | null): View | null {
+  if (v === "iterations") return "activity";
+  return IS_VIEW(v) ? v : null;
+}
 
 /** True when a rejection is this component cancelling its own in-flight request. */
 function isAborted(e: unknown): boolean {
@@ -47,7 +60,7 @@ function messageOf(e: unknown): string {
 const VIEWS: Array<{ id: View; label: string; hint: string }> = [
   { id: "overview",   label: "Overview",   hint: "Did it fail, and where?" },
   { id: "timeline",   label: "Timeline",   hint: "Why did it take that long?" },
-  { id: "iterations", label: "Iterations", hint: "What did it call, and what came back?" },
+  { id: "activity",   label: "Activity",   hint: "What did the agent actually do?" },
   { id: "agents",     label: "Agents",     hint: "Who asked whom to do what, and why?" },
   { id: "cost",       label: "Cost",       hint: "Where did the money go?" },
   { id: "compare",    label: "Compare",    hint: "It worked yesterday — what changed?" },
@@ -99,7 +112,7 @@ export function DebugTab({
    * description — which is where most of the time in a support thread goes.
    */
   const selection = useDebugSelection();
-  const view: View = IS_VIEW(selection.view) ? selection.view : "overview";
+  const view: View = normaliseView(selection.view) ?? "overview";
   const selectedSpanId = selection.spanId;
   const selectedNodeId = selection.nodeId;
 
@@ -430,9 +443,10 @@ export function DebugTab({
                  aria-busy="true" aria-label="Loading the agent constellation" />
           )
         ) : (
-          <IterationsView
+          <ActivityView
             api={api}
             runId={runId}
+            selectedNodeId={selectedNodeId}
             selectedSpanId={selectedSpanId}
             onSelectSpan={selectSpan}
           />

@@ -107,6 +107,20 @@ export interface Constellation {
   edges: ConstellationEdge[];
   cycles: ConstellationCycle[];
   loopGuard?: LoopGuard;
+  /**
+   * Why there are no nodes, when there are none. Null when there are.
+   *
+   * `activations_disabled` — the run produced agent ITERATIONS but no activation
+   * rows, which means `AGENT_ACTIVATIONS_ENABLED` was off when it executed. That
+   * flag is off by default and set in no environment file, so this is the common
+   * case, and the view previously reported it as "this run predates the agent
+   * harness" — false, and it sends the reader to look for data that was never
+   * written.
+   *
+   * `no_agent_steps` — the run had no agent step at all. An empty view is then
+   * the correct answer rather than a symptom.
+   */
+  emptyCause?: "activations_disabled" | "no_agent_steps" | null;
 }
 
 export interface PlacedNode extends ConstellationNode {

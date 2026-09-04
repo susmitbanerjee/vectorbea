@@ -242,6 +242,31 @@ class ConstellationRoutes(
             "edges" to edges,
             "cycles" to cycles,
             /*
+             * ── WHY THERE ARE NO NODES, WHEN THERE ARE NONE ─────────────────
+             *
+             * An empty constellation had one explanation in the UI — "this run
+             * predates the agent harness" — and it is usually false. The common
+             * cause is that `AGENT_ACTIVATIONS_ENABLED` is off, which is its
+             * default and is set in no environment file in this repository: the
+             * single-agent path then takes the pre-activation branch and writes no
+             * `agent_activations` row at all, while `agent_iterations` is written
+             * either way. That is exactly the reported symptom — Iterations
+             * populated, Agents empty, on a run that succeeded.
+             *
+             * Guessing wrongly here is worse than saying nothing, because it sends
+             * somebody to look for data that was never written and tells them
+             * their run is old when it ran this morning. So the cause is
+             * DETERMINED from what the run actually left behind:
+             *
+             *   `no_agent_steps`      no iterations either — this run had no agent
+             *                         step, and an empty constellation is correct.
+             *   `activations_disabled` iterations exist and activations do not, so
+             *                         the flag was off when it ran.
+             *   null                  there are nodes; nothing to explain.
+             */
+            "emptyCause" to if (nodesWithCause.isNotEmpty()) null
+                            else emptyCause(runId, wsId),
+            /*
              * ── WHAT THE GUARD ACTUALLY DOES TODAY ──────────────────────────
              * `HANDOFF_LOOP` is a defined stop reason with NO construction site
              * in the runtime: joins, fan-out and the loop guard land in a later
@@ -932,4 +957,27 @@ class ConstellationRoutes(
                 }
             }
         }
+    /**
+     * Why this run has no activations.
+     *
+     * One query, and it answers the only two questions worth distinguishing: did
+     * this run have an agent step at all, and if it did, was the activation path
+     * running when it executed.
+     */
+    private fun emptyCause(runId: java.util.UUID, workspaceId: java.util.UUID): String =
+        runCatching {
+            dataSource.connection.use { c ->
+                c.prepareStatement(
+                    """SELECT EXISTS (SELECT 1 FROM agent_iterations
+                                       WHERE run_id = ? AND workspace_id = ?)"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, workspaceId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next() && rs.getBoolean(1)) "activations_disabled"
+                        else "no_agent_steps"
+                    }
+                }
+            }
+        }.getOrDefault("no_agent_steps")
+
 }

@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -387,5 +388,82 @@ class ResultContractTest {
         assertNotNull(legend)
         assertTrue(legend.contains("email — Primary email"))
         assertTrue(legend.contains("lastSeen — Date of last activity"))
+    }
+
+    // ── The summary the Activity view reads ──────────────────────────────────
+
+    /**
+     * The observation summary used to describe the ENVELOPE: "Tool returned 3
+     * field(s): items, count, nextPage". The projection already computed the
+     * counts that describe the ANSWER, and it writes them first so they survive
+     * the cap — so the sentence is free.
+     *
+     * Behind AGENT_RESULT_SUMMARY_ENABLED in the runner; the function itself is
+     * unconditional and tested here.
+     */
+    @Test
+    fun `a collection summary reads as a sentence, not as a field list`() {
+        val projected = ResultProjection.project(search(5), crmContract)
+        assertEquals("Returned 47 results, showing 5.", ResultProjection.summaryOf(projected.json))
+    }
+
+    /** Everything that matched is shown — there is no "showing" to report. */
+    @Test
+    fun `a complete collection does not claim there is more`() {
+        val projected = ResultProjection.project(search(5, total = 5), crmContract)
+        assertEquals("Returned 5 results.", ResultProjection.summaryOf(projected.json))
+    }
+
+    /** Nothing matched. The most consequential result, and the shortest sentence. */
+    @Test
+    fun `an empty collection says so plainly`() {
+        val projected = ResultProjection.project(search(0, total = 0), crmContract)
+        assertEquals("Returned no results.", ResultProjection.summaryOf(projected.json))
+    }
+
+    /**
+     * A contract with no `totalPath` cannot know the total, and the projection
+     * says so with `countIs`. Repeating a page size as a total would be the
+     * confident-and-wrong failure the whole layer exists to avoid, so the
+     * sentence carries the uncertainty rather than dropping it.
+     */
+    @Test
+    fun `an unreported total is summarised as at least, never as exact`() {
+        val noTotal = ToolResultContract.parse("""
+            {
+              "version": 1,
+              "collection": {"path": "body.records", "sample": 5},
+              "fields": [{"path": "body.Name", "as": "name"}]
+            }
+        """.trimIndent())
+        val projected = ResultProjection.project(search(5), noTotal)
+        assertEquals("Returned at least 5 results, showing 5.", ResultProjection.summaryOf(projected.json))
+    }
+
+    /**
+     * A single record has no count. "Returned 1 result" is a worse sentence than
+     * naming the fields it came back with, so the shape summary stands.
+     */
+    @Test
+    fun `a single-record projection has no collection summary`() {
+        val oneRecord = ToolResultContract.parse("""
+            {
+              "version": 1,
+              "fields": [
+                {"path": "body.Id",   "as": "id"},
+                {"path": "body.Name", "as": "name"}
+              ]
+            }
+        """.trimIndent())
+        val projected = ResultProjection.project(httpResult(crmContact()), oneRecord)
+        assertNull(ResultProjection.summaryOf(projected.json))
+    }
+
+    /** A summary is a nicety. It must never take down a tool call that succeeded. */
+    @Test
+    fun `malformed or countless json summarises to nothing rather than throwing`() {
+        assertNull(ResultProjection.summaryOf("not json at all"))
+        assertNull(ResultProjection.summaryOf("[1,2,3]"))
+        assertNull(ResultProjection.summaryOf("""{"items":[]}"""))
     }
 }

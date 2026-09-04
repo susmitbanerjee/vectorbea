@@ -286,6 +286,7 @@ class TraceRoutes(
             mapOf(
                 "id" to a.id,
                 "stepId" to a.stepId,
+                "agentId" to a.agentId,
                 "agentName" to a.agentName,
                 "status" to a.status,
                 "stopReason" to a.stopReason,
@@ -294,6 +295,11 @@ class TraceRoutes(
                 },
                 "replayedFrom" to a.replayedFrom?.let {
                     mapOf("reason" to it.reason, "detail" to it.detail)
+                },
+                /* Null when this agent has no successful history to compare against
+                   — the Activity view says nothing rather than inventing a normal. */
+                "baseline" to a.baseline?.let {
+                    mapOf("typicalSteps" to it.typicalSteps, "sampleRuns" to it.sampleRuns)
                 },
                 "iterations" to a.iterations.map { i ->
                     mapOf(
@@ -310,6 +316,7 @@ class TraceRoutes(
                         "actionJson" to i.actionJson,
                         "actionRepaired" to i.actionRepaired,
                         "selectedToolId" to i.selectedToolId,
+                        "toolName" to i.toolName,
                         "toolResultCached" to i.toolResultCached,
                         "recalled" to i.recalled,
                         "context" to i.context?.let {

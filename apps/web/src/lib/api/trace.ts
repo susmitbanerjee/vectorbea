@@ -259,6 +259,14 @@ export interface Iteration {
    */
   actionRepaired: boolean | null;
   selectedToolId: string | null;
+  /**
+   * The tool's human name, resolved by the API.
+   *
+   * Null when the iteration called no tool, or when the tool has since been
+   * deleted — history keeps its iterations either way, and the Activity view
+   * says "a tool" rather than printing a uuid at somebody.
+   */
+  toolName: string | null;
   /** The guard replayed a previous identical call instead of executing it. */
   toolResultCached: boolean | null;
   /** Restored from the transcript on resume rather than executed this time. */
@@ -281,14 +289,29 @@ export interface IterationBudget {
   limit: number | null;
 }
 
+/**
+ * What this agent usually takes, over recent runs that SUCCEEDED.
+ *
+ * Null is the common answer and renders as silence: an agent with no successful
+ * history has no typical, and a flag that fires on new agents is a flag people
+ * learn to ignore.
+ */
+export interface StepBaseline {
+  typicalSteps: number;
+  /** How many activations the median was drawn from. Shown, not hidden. */
+  sampleRuns: number;
+}
+
 export interface ActivationDetail {
   id: string | null;
   stepId: string;
+  agentId: string | null;
   agentName: string | null;
   status: string | null;
   stopReason: string | null;
   budgets: IterationBudget[];
   replayedFrom: ReplayNote | null;
+  baseline: StepBaseline | null;
   iterations: Iteration[];
 }
 

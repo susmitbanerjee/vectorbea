@@ -49,6 +49,42 @@ object ResultProjection {
     )
 
     /**
+     * The one-line summary a projected result already contains.
+     *
+     * ── WHY THIS LIVES HERE AND NOT IN THE RUNNER ────────────────────────────
+     * [project] writes `count`, `showing` and `more` FIRST precisely so they
+     * survive the cap. Reading them back is therefore free, and it belongs beside
+     * the code that decided their names — a second copy of those key names in the
+     * brain runner is a copy that drifts on the first rename.
+     *
+     * Returns null for a projection with no collection: a single record has no
+     * count to report, and "returned 1 result" is a worse sentence than naming
+     * the fields it came back with. Null is also what a malformed or
+     * non-object projection gets — a summary is a nicety, and it must never take
+     * down a tool call that succeeded.
+     */
+    fun summaryOf(projectedJson: String): String? = runCatching {
+        val node = mapper.readTree(projectedJson)
+        if (!node.isObject) return@runCatching null
+        val count = node.get("count")?.takeIf { it.isNumber }?.asInt() ?: return@runCatching null
+        val showing = node.get("showing")?.takeIf { it.isNumber }?.asInt() ?: count
+        /*
+         * `countIs` is the projection saying the API never reported a total, so
+         * `count` is this page only. Repeating a page size as a total is exactly
+         * the confident-and-wrong failure the projection exists to avoid, so the
+         * uncertainty is carried into the sentence.
+         */
+        val approximate = node.hasNonNull("countIs")
+        val plural = if (count == 1) "" else "s"
+        when {
+            count == 0 -> "Returned no results."
+            approximate -> "Returned at least $count result$plural, showing $showing."
+            showing >= count -> "Returned $count result$plural."
+            else -> "Returned $count results, showing $showing."
+        }
+    }.getOrNull()
+
+    /**
      * Project [result] through [contract].
      *
      * Returns the original serialisation when there is no contract, so the caller

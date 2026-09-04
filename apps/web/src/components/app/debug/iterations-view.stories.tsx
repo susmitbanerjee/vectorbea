@@ -32,6 +32,7 @@ function iter(p: Partial<Iteration> & { number: number }): Iteration {
     actionJson: p.actionJson ?? null,
     actionRepaired: p.actionRepaired ?? false,
     selectedToolId: p.selectedToolId ?? null,
+    toolName: p.toolName ?? null,
     toolResultCached: p.toolResultCached ?? null,
     recalled: p.recalled ?? false,
     context: p.context ?? null,
@@ -106,6 +107,7 @@ export default meta;
 const RESEARCHER: ActivationDetail = {
   id: "a1",
   stepId: "n-agent-1",
+  agentId: "ag-1",
   agentName: "researcher",
   status: "failed",
   stopReason: "MAX_ITERATIONS",
@@ -116,6 +118,7 @@ const RESEARCHER: ActivationDetail = {
     { dimension: "toolCalls", used: 3, limit: null },
   ],
   replayedFrom: null,
+  baseline: null,
   iterations: [
     iter({ number: 1, actionType: "THINK", thought: "I should look up the account first",
            observation: "Thought recorded",

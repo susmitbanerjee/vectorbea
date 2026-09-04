@@ -444,4 +444,265 @@ class IterationReaderTest {
             }
         }
     }
+
+    // ── The Activity view's two additions ───────────────────────────────────
+
+    private fun addTool(w: World, id: UUID, name: String) {
+        ds.connection.use { c ->
+            c.prepareStatement(
+                "INSERT INTO tools (id,workspace_id,environment_id,name,slug,type) " +
+                "VALUES (?,?,?,?,?,'http')"
+            ).use { st ->
+                st.setObject(1, id); st.setObject(2, w.ws); st.setObject(3, w.env)
+                st.setString(4, name); st.setString(5, "t-$id")
+                st.executeUpdate()
+            }
+        }
+    }
+
+    private fun setSelectedTool(w: World, n: Int, toolId: UUID?) {
+        ds.connection.use { c ->
+            c.prepareStatement(
+                "UPDATE agent_iterations SET selected_tool_id=? WHERE run_id=? AND iteration_number=?"
+            ).use { st ->
+                if (toolId == null) st.setNull(1, java.sql.Types.OTHER) else st.setObject(1, toolId)
+                st.setObject(2, w.run); st.setInt(3, n); st.executeUpdate()
+            }
+        }
+    }
+
+    /**
+     * A narrative row says "Called Salesforce account lookup", never a uuid.
+     *
+     * Resolved here rather than in the browser because the browser would need a
+     * request per distinct tool and would render "loading" inside a sentence.
+     */
+    @Test
+    fun `an iteration carries the tool human name, not only its id`() {
+        val w = World()
+        val tool = UUID.randomUUID()
+        try {
+            seed(w)
+            addTool(w, tool, "Salesforce account lookup")
+            addIteration(w, 1)
+            setSelectedTool(w, 1, tool)
+
+            val it = reader.activations(w.run, w.ws).single().iterations.single()
+            assertEquals(tool.toString(), it.selectedToolId)
+            assertEquals("Salesforce account lookup", it.toolName)
+        } finally { cleanup(w) }
+    }
+
+    /**
+     * A deleted tool does not delete the history of the runs that used it.
+     *
+     * The join is LEFT for exactly this: the iteration keeps its row and the view
+     * says "a tool" instead of printing an id nobody can resolve.
+     */
+    @Test
+    fun `an iteration whose tool has been deleted still renders`() {
+        val w = World()
+        try {
+            seed(w)
+            addIteration(w, 1)
+            setSelectedTool(w, 1, UUID.randomUUID())   // no such tool row
+
+            val it = reader.activations(w.run, w.ws).single().iterations.single()
+            assertNull(it.toolName)
+            assertNotNull(it.selectedToolId)
+        } finally { cleanup(w) }
+    }
+
+    /** A tool belonging to another workspace is not this workspace tool. */
+    @Test
+    fun `the tool name join is workspace-scoped`() {
+        val w = World()
+        val other = World()
+        val tool = UUID.randomUUID()
+        try {
+            seed(w); seed(other)
+            addTool(other, tool, "Another workspace tool")
+            addIteration(w, 1)
+            setSelectedTool(w, 1, tool)
+
+            assertNull(reader.activations(w.run, w.ws).single().iterations.single().toolName,
+                "a tool in another workspace must not resolve here")
+        } finally { cleanup(w); cleanup(other) }
+    }
+
+    // ── The baseline ────────────────────────────────────────────────────────
+
+    /**
+     * Another run of the same agent, in the same workspace, that succeeded.
+     *
+     * Written straight into `agent_iterations` because that is where the baseline
+     * reads from — `agent_activations` is only written when
+     * AGENT_ACTIVATIONS_ENABLED is on, which it is not by default, and a baseline
+     * that needed activations would be permanently empty.
+     */
+    private fun addHistoricalRun(
+        w: World, steps: Int, index: Int,
+        status: String = "succeeded",
+        /* Overridable so one test can write the SAME agent id into a different
+           workspace — the only thing that keeps those apart is the predicate. */
+        agentId: UUID = w.agent,
+    ): UUID {
+        val run = UUID.randomUUID()
+        ds.connection.use { c ->
+            c.prepareStatement(
+                "INSERT INTO agent_runs (id,workspace_id,environment_id,workflow_id,workflow_version_id,status) " +
+                "VALUES (?,?,?,?,?,?)"
+            ).use {
+                it.setObject(1, run); it.setObject(2, w.ws); it.setObject(3, w.env)
+                it.setObject(4, w.wf); it.setObject(5, w.ver); it.setString(6, status)
+                it.executeUpdate()
+            }
+            repeat(steps) { n ->
+                c.prepareStatement(
+                    """INSERT INTO agent_iterations
+                         (id, workspace_id, environment_id, run_id, step_id, agent_id,
+                          iteration_number, status, action_type, started_at)
+                       VALUES (?,?,?,?,?,?,?,'completed','CALL_TOOL',?)"""
+                ).use { st ->
+                    st.setObject(1, UUID.randomUUID())
+                    st.setObject(2, w.ws); st.setObject(3, w.env); st.setObject(4, run)
+                    st.setString(5, w.step); st.setObject(6, agentId)
+                    st.setInt(7, n + 1)
+                    st.setTimestamp(8, java.sql.Timestamp.from(
+                        Instant.parse("2026-08-01T10:00:00Z").plusSeconds(index * 3_600L)))
+                    st.executeUpdate()
+                }
+            }
+        }
+        return run
+    }
+
+    private fun dropRun(run: UUID) = runCatching {
+        ds.connection.use { c ->
+            c.prepareStatement("DELETE FROM agent_iterations WHERE run_id=?")
+                .use { it.setObject(1, run); it.executeUpdate() }
+            c.prepareStatement("DELETE FROM agent_runs WHERE id=?")
+                .use { it.setObject(1, run); it.executeUpdate() }
+        }
+    }
+
+    /**
+     * ACCEPTANCE: an agent that took 14 steps against a typical 3 is flagged on a
+     * SUCCESSFUL run.
+     *
+     * The reader half of that: the baseline is 3, computed from this agent own
+     * successful history, and it is returned for a run that itself succeeded.
+     */
+    @Test
+    fun `the baseline is the median steps of recent successful runs of the same agent`() {
+        val w = World()
+        val history = mutableListOf<UUID>()
+        try {
+            seed(w)
+            /* 3, 3, 4 — median 3. */
+            history += addHistoricalRun(w, 3, 0)
+            history += addHistoricalRun(w, 3, 1)
+            history += addHistoricalRun(w, 4, 2)
+            repeat(14) { addIteration(w, it + 1, atMs = it * 1_000L) }
+
+            val a = reader.activations(w.run, w.ws).single()
+            val b = assertNotNull(a.baseline, "three successful runs is enough to have a typical")
+            assertEquals(3, b.typicalSteps)
+            assertEquals(3, b.sampleRuns)
+            assertEquals(14, a.iterations.size)
+        } finally { history.forEach { dropRun(it) }; cleanup(w) }
+    }
+
+    /**
+     * Failed runs are full of retry loops. Averaging them in raises the bar until
+     * nothing looks abnormal, which is the same as having no signal at all.
+     *
+     * FOUR failed runs against three successful ones, deliberately. With two of
+     * each the median of [3,3,3,40,40] is still 3, so dropping the status filter
+     * changed nothing and this test passed against code that had no filter at
+     * all — verified by removing it and watching the suite stay green. The
+     * failures have to OUTNUMBER the successes for the median to move, and
+     * `sampleRuns` is asserted as well because it moves either way.
+     */
+    @Test
+    fun `failed runs do not contribute to the baseline`() {
+        val w = World()
+        val history = mutableListOf<UUID>()
+        try {
+            seed(w)
+            history += addHistoricalRun(w, 3, 0)
+            history += addHistoricalRun(w, 3, 1)
+            history += addHistoricalRun(w, 3, 2)
+            repeat(4) { history += addHistoricalRun(w, 40, 3 + it, status = "failed") }
+            addIteration(w, 1)
+
+            val b = assertNotNull(reader.activations(w.run, w.ws).single().baseline)
+            assertEquals(3, b.typicalSteps, "the four 40-step failures must not count")
+            assertEquals(3, b.sampleRuns, "only the successful runs are the sample")
+        } finally { history.forEach { dropRun(it) }; cleanup(w) }
+    }
+
+    /**
+     * Below the sample floor there is no typical, only a previous value — and a
+     * signal that fires on the second run an agent ever makes is one people learn
+     * to ignore.
+     */
+    @Test
+    fun `two successful runs are not enough for a baseline`() {
+        val w = World()
+        val history = mutableListOf<UUID>()
+        try {
+            seed(w)
+            history += addHistoricalRun(w, 3, 0)
+            history += addHistoricalRun(w, 3, 1)
+            addIteration(w, 1)
+
+            assertNull(reader.activations(w.run, w.ws).single().baseline)
+        } finally { history.forEach { dropRun(it) }; cleanup(w) }
+    }
+
+    /**
+     * The run being read is never part of its own normal.
+     *
+     * Asserted on `sampleRuns`, not on the median: with three 3-step runs in the
+     * history, adding this run's 20 steps leaves the median at 3 anyway, so a
+     * median assertion here would pass whether or not the exclusion existed. The
+     * sample size is the fact that actually moves.
+     */
+    @Test
+    fun `the current run is excluded from its own baseline`() {
+        val w = World()
+        val history = mutableListOf<UUID>()
+        try {
+            seed(w)
+            history += addHistoricalRun(w, 3, 0)
+            history += addHistoricalRun(w, 3, 1)
+            history += addHistoricalRun(w, 3, 2)
+            /* This run is itself 'succeeded' — seed() writes it that way. */
+            repeat(20) { addIteration(w, it + 1, atMs = it * 1_000L) }
+
+            val b = assertNotNull(reader.activations(w.run, w.ws).single().baseline)
+            assertEquals(3, b.sampleRuns, "four samples would mean this run counted itself")
+            assertEquals(3, b.typicalSteps)
+        } finally { history.forEach { dropRun(it) }; cleanup(w) }
+    }
+
+    /** Another workspace runs are not this workspace history (invariant 8). */
+    @Test
+    fun `the baseline is workspace-scoped`() {
+        val w = World()
+        val other = World()
+        val history = mutableListOf<UUID>()
+        try {
+            seed(w); seed(other)
+            /* The SAME agent id, in a different workspace: the only thing keeping
+               these apart is the workspace predicate. */
+            history += addHistoricalRun(other, 3, 0, agentId = w.agent)
+            history += addHistoricalRun(other, 3, 1, agentId = w.agent)
+            history += addHistoricalRun(other, 3, 2, agentId = w.agent)
+            addIteration(w, 1)
+
+            assertNull(reader.activations(w.run, w.ws).single().baseline)
+        } finally { history.forEach { dropRun(it) }; cleanup(w); cleanup(other) }
+    }
 }

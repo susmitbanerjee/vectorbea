@@ -415,7 +415,7 @@ New tab beside the existing run views. Six views over the same trace.
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │  Run  #4f21a  ·  Ticket triage v7  ·  FAILED  ·  4m 12s  ·  $0.31        │
-│  [Overview] [Agents] [Timeline] [Iterations] [Cost] [Compare]   ⟳ Replay │
+│  [Overview] [Timeline] [Activity] [Agents] [Cost] [Compare]     ⟳ Replay │
 ├──────────────────────────────────────────────────────────────────────────┤
 │ ▼ Root cause                                                             │
 │   AUTH · researcher → crm.search · HTTP 403 token expired                │
@@ -547,9 +547,35 @@ Served by `GET /api/runs/{id}/constellation` (`ConstellationRoutes`) — nodes f
   worth looking at; the server walks up through `activation_id` to the owning
   activation and then to its ancestors, because the client has neither the span
   tree nor the parent links together.
-- **A single-agent run is one node.** P6 routed the existing single-agent path
-  through the activation, so every run since has at least one. Not an error, not
-  an empty state — the model is uniform.
+- **A single-agent run is one node — WHEN THE ACTIVATION PATH IS ON.** P6 routed
+  the single-agent path through the activation, but behind
+  `AGENT_ACTIVATIONS_ENABLED`, which defaults to off (`AgentNodeExecutor`) and is
+  set in no environment file in this repository. With it off, `AgentNodeExecutor`
+  takes the pre-activation branch and writes no `agent_activations` row, while
+  `agent_iterations` is written either way. The team path
+  (`AgentTeamNodeExecutor`) writes activations unconditionally.
+
+  That is the reported symptom, exactly: a run that succeeded, with iterations
+  visible and the Agents tab empty.
+
+- **So the empty state says WHY, and does not guess.** The copy used to read "no
+  activations were recorded for this run — runs from before the agent harness
+  shipped have none; every run since has at least one", which is usually false
+  and sends somebody to look for data that was never written while telling them
+  their run is old when it ran this morning.
+
+  `ConstellationRoutes` now returns `emptyCause`, determined from what the run
+  actually left behind rather than assumed:
+
+  | `emptyCause` | Determined by | What the tab says |
+  |---|---|---|
+  | `no_agent_steps` | no `agent_iterations` rows either | this run had no agent step, and an empty constellation is correct |
+  | `activations_disabled` | iterations exist, activations do not | the flag was off when it ran, and names it |
+  | `null` | there are nodes | nothing to explain |
+
+  The `activations_disabled` branch also says that nothing was lost from the run
+  — there was never an activation to show — because the reader's next question is
+  whether their data is gone.
 
 ### 5.4 Timeline — waterfall
 
@@ -628,7 +654,107 @@ The `WHERE` clause is the whole fix — without it a redelivered job's
 `openRunSpan` would flip a finished run back to `running`. With it, open→close
 completes, close→close is a no-op, and nothing can reopen a closed span.
 
-### 5.5 Iterations — the inspector
+### 5.5 Activity — what the agent did
+
+The default view for an agent or team step, and the answer to the question people
+actually arrive with. The inspector below it is unchanged and one click away.
+
+#### Why this replaced the inspector as the default
+
+The inspector's rows read `Iteration 4 · CALL_TOOL · 2.4s`. That is the ReAct
+loop's internal counter, and nobody outside the runtime team has a reason to care
+about it — an operations lead reading a failed run could not tell what the agent
+had been doing.
+
+The data to say it was already being collected and thrown away. `AgentAction`
+carries `reasoningSummary`, the agent's own statement of why it is taking a step;
+it was sanitized, written to `agent_iterations.thought_summary_sanitized`, read
+back by `IterationReader`, and then not rendered. The UI showed the mechanical
+action type instead.
+
+```
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Support triage                              [ ] Show iteration detail    │
+├──────────────────────────────────────────────────────────────────────────┤
+│ ↗ 14 steps — typical for this agent is 3.                                │
+│   More steps than usual. Measured over 18 recent successful runs.        │
+├──────────────────────────────────────────────────────────────────────────┤
+│ ✓ Read the ticket and worked out which account it belongs to.            │
+│ ✓ Looked up account A-8891 in Salesforce.                                │
+│   Returned 1 result.            [Salesforce account lookup] 0.8s  Step 2 │
+│ ▸ 6 steps, all successful.  Used Ticket search and Order lookup.         │
+│ ✗ Could not reach Salesforce — the token has expired.                    │
+│   Retrying will NOT help. To fix: reconnect the account in Connections.  │
+│                                 [Salesforce account lookup] 2.4s  Step 9 │
+│ ✓ Replied to the customer with the renewal date.                         │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+The model lives in `src/components/app/debug/activity.ts`, separate from the
+component, because deciding what is consequential is the part worth testing.
+`__tests__/activity-view.test.ts` holds the acceptance criteria as assertions.
+
+**Rows are composed, never parsed.** `reasoningSummary` when the agent left one;
+otherwise a generated sentence that names the tool and does not invent intent
+("Called Salesforce account lookup" — not "Looked up the account", which is what
+the agent would have said). The outcome half is the `observation` verbatim: on a
+failure that is the error contract's sentence, which already says what happened
+and how to fix it. No JSON is parsed in the browser; a structure the runtime
+already summarised is summarised once, at the runtime.
+
+**Collapsing is a claim, so it is a careful one.** A folded group says "nothing
+here needed you". Only `routine` steps fold; a step is NOT routine when it
+failed, when its observation was unsuccessful, when the action was repaired, when
+the context was truncated, or when it was a `FINAL`, `DELEGATE`, `ASK_APPROVAL`
+or `FAIL`. Two consecutive `THINK`s fold; three or more consecutive routine steps
+fold. Recalled steps never fold in with executed ones — "the agent did this" and
+"the runtime replayed this from the transcript" are different claims and one
+group header cannot make both.
+
+A cached tool result is deliberately NOT a failure. It is unusual, not wrong, and
+it is marked on its row; treating unusual as failure refills the view with the
+noise this removes.
+
+**The step count is a signal only against this agent's own history.**
+`IterationReader.readBaselines` takes the MEDIAN steps per activation over the
+last 20 recent SUCCESSFUL runs of the same agent in the same workspace, excluding
+this one, and returns nothing below three samples.
+
+- Successful runs only: failed runs are full of retry loops, and averaging them
+  in raises the bar until nothing looks abnormal.
+- Median, not mean: one runaway 60-step activation would drag a mean far enough
+  that the next runaway looks ordinary.
+- Grouped by `(run_id, step_id)`, so each sample is one activation. Counting per
+  run would add repeated activations together and compare one against a sum.
+- Below three samples there is no typical, only a previous value.
+- Flagged when the count is at least twice the baseline AND at least three
+  higher. A ratio alone flags 1 → 2; a margin alone flags 20 → 24. Both together
+  flag 3 → 14.
+- It fires on SUCCESSFUL runs, which is the whole point: a run that succeeded in
+  14 steps against a typical 3 is green on every other screen in the product.
+
+It reads `agent_iterations`, not `agent_activations`, because
+`AGENT_ACTIVATIONS_ENABLED` defaults to off and is set in no environment file in
+this repository — a baseline that needed activations would be permanently empty
+in exactly the deployment we have. `V059` adds the
+`(workspace_id, agent_id, started_at DESC)` index it needs; without it the
+lookup, which starts from an agent rather than a run, scans the table on every
+open of the tab.
+
+**The tool's human name is resolved server-side**, by a LEFT JOIN to `tools`
+scoped on workspace at the join itself (invariant 8). LEFT because a deleted tool
+must not delete the history of the runs that used it; the view says "a tool"
+rather than printing a uuid.
+
+**The expert toggle** renders the inspector unchanged, from the same request, and
+is remembered per person in `localStorage` under `vectorbea-debug-expert` — not
+in the URL, so a shared debug link opens in the view its recipient reads runs in.
+
+`?view=iterations` still resolves, to Activity. Links to a specific view are
+pasted into tickets and live there for years; dropping the tab without the alias
+would turn every one of them into a silent redirect to Overview.
+
+#### 5.5.1 The inspector, behind the toggle
 
 The deep view. One activation, its iterations down the left, detail on the right.
 

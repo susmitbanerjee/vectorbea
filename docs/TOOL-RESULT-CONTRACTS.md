@@ -197,7 +197,47 @@ calls to find out, and spends another iteration deciding which of forty opaque
 fields it wanted. Sent once with the description rather than repeated in every
 observation.
 
-### 2.5 A tool without a contract is unchanged
+### 2.5 The contract's summary can also be the observation SUMMARY
+
+Behind `AGENT_RESULT_SUMMARY_ENABLED`, default **off**.
+
+The projection already writes `count`, `showing` and `more` before anything else,
+so that they survive the cap (§2.2). The observation *summary* — the one-line
+description stored on the iteration and shown in the timeline — did not use them:
+it read `Tool returned 3 field(s): items, count, nextPage`, which describes the
+envelope rather than the answer.
+
+With the flag on, `buildToolObservationSummary` reads the projection's own
+counts instead:
+
+| Projection | Summary |
+|---|---|
+| `count: 47, showing: 5` | `Returned 47 results, showing 5.` |
+| `count: 5, showing: 5` | `Returned 5 results.` |
+| `count: 0` | `Returned no results.` |
+| `count: 5` with `countIs` (no total reported) | `Returned at least 5 results, showing 5.` |
+| no collection in the contract | unchanged — a single record has no count, and "returned 1 result" is a worse sentence than naming its fields |
+
+This is what the Debug tab's Activity view puts in front of somebody who has
+never heard of an iteration
+([AGENT-TRACE-AND-DEBUGGER.md §5.5](./AGENT-TRACE-AND-DEBUGGER.md)).
+
+**Default off because this string is not only a display.** It goes into the
+observation history the next prompt is built from, and into the transcript a
+resumed run reads back. Better prose ought to be an improvement to how the model
+reasons, but "ought to" is not how a prompt change ships here. Off, the summary
+is byte-for-byte what it was.
+
+The cached-result path deliberately does not re-project: it replays a stored raw
+result, and loading the contract on the one path whose purpose is not to do work
+again would be the wrong trade. The first execution's row already recorded the
+summary.
+
+The Activity view reads the summary either way — it drops the
+`Tool returned N field(s)` shape sentence rather than rendering it, so with the
+flag off a row simply has one honest line instead of two.
+
+### 2.6 A tool without a contract is unchanged
 
 `null` is not a degraded contract. The tool behaves exactly as before, whole
 result and all, and `ResultContractTest` asserts the serialisation is

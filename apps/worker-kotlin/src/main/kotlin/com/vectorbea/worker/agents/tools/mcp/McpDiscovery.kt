@@ -186,6 +186,107 @@ class McpDiscovery(
         )
     }
 
+    // ── Materialising the catalogue ──────────────────────────────────────────
+
+    /**
+     * Turn a manifest into grantable `tools` rows.
+     *
+     * ── THIS IS WHERE THE GRANT MODEL IS ACTUALLY IMPLEMENTED ───────────────
+     * Everything else about MCP is plumbing; this function is why a server-level
+     * grant is impossible. Each remote tool becomes its own row with its own uuid,
+     * so `allowed_tool_ids` — which holds tool ids — is the only thing that can
+     * express access, and it can only express it one tool at a time.
+     *
+     * Returns the number of rows written, for the log and for the caller that
+     * wants to say "found 12 tools".
+     *
+     * ── A WITHDRAWN TOOL IS NOT DELETED ─────────────────────────────────────
+     * A tool the server has stopped advertising keeps its row, its uuid and its
+     * grants, and fails at call time with a legible cause (`-32601` → "the server
+     * no longer advertises this tool"). Deleting it would silently change what an
+     * agent may do — an agent's tool list would shrink because somebody else's
+     * server was redeployed — and a grant that disappears without a decision is
+     * the kind of change nobody can audit afterwards. `mcp_last_seen_at` records
+     * the withdrawal instead, and `mcp_tools_available` surfaces it.
+     */
+    fun syncTools(
+        server: McpClient.Server,
+        workspaceId: UUID,
+        environmentId: UUID,
+    ): Int {
+        val manifest = manifestFor(server, workspaceId)
+        if (manifest.tools.isEmpty()) {
+            log.info("[mcp] no tools to sync for connection {} ({})",
+                server.connectionId, manifest.lastError ?: "server advertises none")
+            return 0
+        }
+
+        var written = 0
+        runCatching {
+            dataSource.connection.use { c ->
+                manifest.tools.forEach { t ->
+                    c.prepareStatement(
+                        """INSERT INTO tools
+                             (workspace_id, environment_id, name, slug, type, description,
+                              input_schema_json, result_contract_json, config_json,
+                              mcp_server_connection_id, mcp_tool_name, mcp_last_seen_at,
+                              status)
+                           VALUES (?,?,?,?, 'mcp', ?, ?::jsonb, ?::jsonb, '{}'::jsonb,
+                                   ?,?, now(), 'active')
+                           ON CONFLICT (mcp_server_connection_id, mcp_tool_name)
+                             WHERE mcp_server_connection_id IS NOT NULL
+                           DO UPDATE SET
+                             description       = EXCLUDED.description,
+                             input_schema_json = EXCLUDED.input_schema_json,
+                             mcp_last_seen_at  = now(),
+                             updated_at        = now(),
+                             /*
+                              * The contract is NOT overwritten when one is already
+                              * stored. A server's annotations are a DEFAULT; a
+                              * locally-authored contract is the customer saying
+                              * what their agent needs, and a re-discovery must not
+                              * quietly replace it with the server author's opinion.
+                              */
+                             result_contract_json =
+                               COALESCE(tools.result_contract_json, EXCLUDED.result_contract_json)"""
+                    ).use { st ->
+                        st.setObject(1, workspaceId)
+                        st.setObject(2, environmentId)
+                        /* Namespaced, so two servers offering `search` are two
+                           distinct, distinguishable tools in the granting UI. */
+                        st.setString(3, "${serverSlug(server)}.${t.name}")
+                        st.setString(4, "mcp-${server.connectionId}-${t.name}".take(200))
+                        st.setString(5, t.description)
+                        st.setString(6, mapper.writeValueAsString(t.inputSchema))
+                        st.setString(7, t.resultContract?.let {
+                            mapper.writeValueAsString(mapOf(
+                                "version" to 1,
+                                "fields" to it.fields.map { f ->
+                                    mapOf("path" to f.path, "as" to f.name, "desc" to f.desc)
+                                }))
+                        })
+                        st.setObject(8, server.connectionId)
+                        st.setString(9, t.name)
+                        written += st.executeUpdate()
+                    }
+                }
+            }
+        }.onFailure {
+            log.warn("[mcp] tool sync failed for connection {}: {}",
+                server.connectionId, it.message)
+        }
+
+        val flagged = manifest.tools.count { it.descriptionWasAltered }
+        log.info("[mcp] synced {} tool(s) from connection {}{}",
+            written, server.connectionId,
+            if (flagged > 0) " ($flagged description(s) defanged)" else "")
+        return written
+    }
+
+    /** A short, stable prefix so two servers' `search` tools are distinguishable. */
+    private fun serverSlug(server: McpClient.Server): String =
+        "mcp-" + server.connectionId.toString().take(8)
+
     // ── The cache ────────────────────────────────────────────────────────────
 
     private fun readCache(connectionId: UUID): Manifest? = runCatching {

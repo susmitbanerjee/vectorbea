@@ -1565,6 +1565,43 @@ distinction that makes the default safe is whose SQL it is: a tool running its o
 stored `sqlTemplate` needs no flag, because that statement is the author's. Only a
 CALLER-supplied statement is gated.
 
+#### 12.4.5 MCP as a tool type (P18)
+
+Full write-up: [MCP.md](./MCP.md).
+
+MCP is a discovery and invocation protocol. A server calling Salesforce makes the
+same REST call a direct integration would and returns the same forty fields — so
+it does **not** improve result quality; the result-contract layer does, and MCP
+results go through it. What MCP buys is the product story: a customer connects
+their own tools without us writing an integration for each.
+
+**Additive, not a replacement.** `http` and `database` are untouched. MCP-only
+would leave us unable to call a customer's plain REST endpoint without them
+wrapping it first.
+
+It is one arm of `ToolNodeExecutor`'s type dispatch, which is the point of that
+dispatch: the approval gate, the `TOOL_CALL_*` events, the `tool_call` span, the
+idempotency key and the payload store all apply unchanged, because it is the same
+code path.
+
+**Granting is per tool and a server-level grant is inexpressible.** Discovery
+materialises one `tools` row per remote tool (V058), each with its own uuid.
+`allowed_tool_ids` holds tool ids; an MCP server is a connection; no column can
+say "every tool from this server". A withdrawn tool keeps its row and its grants
+and fails legibly at call time — deleting it would shrink an agent's tool list
+because somebody else's server was redeployed.
+
+**A customer server is untrusted, and the boundary is the grant check, not the
+sanitizer.** `validateToolAllowed` reads uuids from our own database and takes no
+description as input, so no prompt string can widen a tool list — invariant 1.
+`McpSanitizer` is defence in depth against budget waste and frame impersonation,
+applied at the write boundary (invariant 4), and never used to reject a tool.
+
+The breaker sees transport failures, not refusals — a server answering "no such
+tool" is healthy. An unreachable server yields a tool error naming its own blast
+radius, never a run failure. The manifest cache serves stale on a failed refresh,
+because a server down for a minute must not silently shrink every agent's prompt.
+
 ### 12.5 Context growth
 
 Left alone, a five-hop handoff chain carries five accumulated contexts. Mitigated
