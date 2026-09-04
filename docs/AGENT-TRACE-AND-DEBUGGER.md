@@ -558,24 +558,41 @@ Served by `GET /api/runs/{id}/constellation` (`ConstellationRoutes`) — nodes f
   That is the reported symptom, exactly: a run that succeeded, with iterations
   visible and the Agents tab empty.
 
-- **So the empty state says WHY, and does not guess.** The copy used to read "no
-  activations were recorded for this run — runs from before the agent harness
-  shipped have none; every run since has at least one", which is usually false
-  and sends somebody to look for data that was never written while telling them
-  their run is old when it ran this morning.
+- **So the view draws the agent anyway, from the iteration record.** There were
+  two bad answers here in succession. The first said "runs from before the agent
+  harness have none; every run since has at least one" — false. The second said
+  the activation path was switched off and named the environment variable, which
+  is true and is *our deployment configuration*: a person reading their own run
+  should never be shown one.
 
-  `ConstellationRoutes` now returns `emptyCause`, determined from what the run
-  actually left behind rather than assumed:
+  `ConstellationRoutes.derivedNodes` reconstructs a node per agent step from
+  `agent_iterations` when no activation rows exist. Every column is recorded,
+  not inferred:
 
-  | `emptyCause` | Determined by | What the tab says |
-  |---|---|---|
-  | `no_agent_steps` | no `agent_iterations` rows either | this run had no agent step, and an empty constellation is correct |
-  | `activations_disabled` | iterations exist, activations do not | the flag was off when it ran, and names it |
-  | `null` | there are nodes | nothing to explain |
+  | Field | Source |
+  |---|---|
+  | `status` | `error` if any iteration failed, `running` if any is open, else `ok` — from the ITERATIONS, never from the run, because a run can succeed with a failed agent step retried after it |
+  | `tokens` / `costCents` | `sum(tokens_delta)`, `sum(cost_delta_cents)` — the same numbers the activation path writes to its budget ledger |
+  | `iterations` | `count(*)`, which is what `budget_consumed_json->iterations` also is |
+  | `startedAt` / `endedAt` | `min(started_at)` / `max(completed_at)` |
+  | `stopReason` | **null.** Nothing recorded one on this path, and "completed" would be a guess presented as a fact |
 
-  The `activations_disabled` branch also says that nothing was lost from the run
-  — there was never an activation to show — because the reader's next question is
-  whether their data is gone.
+  So an ordinary single-agent run now draws its agent like any other run, and
+  the apologetic empty state is gone.
+
+- **`derived: true` travels with the response, and the view says one thing with
+  it.** Not a quality warning — a derived node's numbers are the run's real
+  numbers. It means exactly one thing: handoff EDGES were never recorded,
+  because `agent_handoffs` is written on the same path as `agent_activations`.
+
+  With ONE node there is nothing missing and the view says nothing. With two or
+  more it says so, because silence would let a reader conclude the agents never
+  handed off to each other — which is a stronger claim than "we did not record
+  it", and the wrong one.
+
+- **`emptyCause` survives for the genuinely empty case.** A run with no agent
+  step at all gets "this run had no agent steps" and a pointer at Flow and
+  Timeline. That is an answer, not a symptom.
 
 ### 5.4 Timeline — waterfall
 
@@ -693,6 +710,41 @@ action type instead.
 The model lives in `src/components/app/debug/activity.ts`, separate from the
 component, because deciding what is consequential is the part worth testing.
 `__tests__/activity-view.test.ts` holds the acceptance criteria as assertions.
+
+#### The layout is the inspector's; only the words changed
+
+The first cut of this view was a flat list of sentences and the feedback was
+immediate: the old inspector was better, because you could click a step and read
+what actually happened in it without leaving the page. What nobody could read
+was its LABELS.
+
+So Activity is two panes. The rail on the left is the narrative — one sentence
+per step, folded where nothing needed the reader — and the pane on the right is
+`IterationDetail`, unchanged: prompt, model response, parsed action, tool call,
+observation, memory.
+
+Three things follow from the detail pane no longer being expert-only:
+
+- **The detail header says "Step 4", not "Iteration 4 · CALL_TOOL".** The number
+  is kept — it is how people refer to a step out loud, and it is what the raw
+  list is indexed by. The mechanical action type keeps its place beside the human
+  phrase, quietly, so the one reader who wants `CALL_TOOL` need not switch views
+  for it.
+- **The expert toggle is now "Raw iteration list".** It no longer offers
+  "detail", because the detail is always on screen. What it adds is the numeric
+  list, the action types and the prompt diff.
+- **A step whose tool failed no longer reads "Succeeded".** `statusOf` used the
+  iteration's own `status`, and the runtime writes `status = 'completed'` with
+  `observationSuccess = false` when a tool call fails: the LOOP step completed,
+  the tool did not. Both are true, and the pill reported only the first — so a
+  green "Succeeded" sat directly above "Could not reach Salesforce — the
+  connection timed out". The observation now wins, and `=== false` is checked
+  rather than falsiness, because null means the step made no observation at all.
+
+The rail selects the failing step by default rather than step 1: opening a
+failed run on "the agent thought about what to do next" wastes the one glance
+most people give this screen. A fold that contains the selected step opens
+itself, so arriving from a link never lands on a closed group.
 
 **Rows are composed, never parsed.** `reasoningSummary` when the agent left one;
 otherwise a generated sentence that names the tool and does not invent intent

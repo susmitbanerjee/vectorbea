@@ -203,12 +203,88 @@ export const SingleAgent: StoryObj = {
   render: () => (
     <Frame
       title="One agent, one node"
-      note="P6 routed the existing single-agent path through the activation, so a
-            single-agent run has exactly one. The model is uniform: this is a constellation
-            of one, not an error and not an empty state."
+      note="A single-agent run has exactly one. The model is uniform: this is a
+            constellation of one, not an error and not an empty state."
       constellation={{
         runId: "r",
         nodes: [node({ id: "solo", depth: 0, agentName: "triage", tokens: 5_200, iterations: 6 })],
+        edges: [],
+        cycles: [],
+        loopGuard: GUARD,
+      }}
+    />
+  ),
+};
+
+/**
+ * The common case in this deployment: no activation rows, so the node is
+ * reconstructed from the iteration record.
+ *
+ * Nothing is missing from a one-agent picture — there are no handoffs to draw —
+ * so the view says nothing about it. This is what replaced the empty state that
+ * named an environment variable at the reader.
+ */
+export const DerivedSingleAgent: StoryObj = {
+  name: "Derived — one agent",
+  render: () => (
+    <Frame
+      title="Drawn from the step record"
+      note="No activation rows exist for this run, so the node was built from
+            agent_iterations. The numbers are the run's real numbers. With one agent
+            there are no edges to miss, and the view says nothing about it."
+      constellation={{
+        runId: "r",
+        derived: true,
+        nodes: [node({ id: "n-agent-1", depth: 0, agentName: "Support triage", tokens: 5_200, iterations: 6 })],
+        edges: [],
+        cycles: [],
+        loopGuard: GUARD,
+      }}
+    />
+  ),
+};
+
+/**
+ * Two derived agents: now something IS absent, and it is said.
+ *
+ * Silence here would let a reader conclude the agents never handed off to each
+ * other, which is a stronger claim than "we did not record it" — and the wrong
+ * one.
+ */
+export const DerivedMultipleAgents: StoryObj = {
+  name: "Derived — handoffs not recorded",
+  render: () => (
+    <Frame
+      title="Two agents, no edges recorded"
+      note="The note above the diagram is the whole point: the cards are complete,
+            the connections between them were never written."
+      constellation={{
+        runId: "r",
+        derived: true,
+        nodes: [
+          node({ id: "n-agent-1", depth: 0, agentName: "Researcher", tokens: 5_200, iterations: 6 }),
+          node({ id: "n-agent-2", depth: 0, agentName: "Writer", tokens: 2_100, iterations: 3 }),
+        ],
+        edges: [],
+        cycles: [],
+        loopGuard: GUARD,
+      }}
+    />
+  ),
+};
+
+/** A run with no agent step at all. An answer, not a symptom. */
+export const NoAgentSteps: StoryObj = {
+  name: "No agent steps",
+  render: () => (
+    <Frame
+      title="Nothing to draw"
+      note="Not every workflow has an agent. This says so, and points at the views
+            that do have something."
+      constellation={{
+        runId: "r",
+        emptyCause: "no_agent_steps",
+        nodes: [],
         edges: [],
         cycles: [],
         loopGuard: GUARD,

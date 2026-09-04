@@ -2,6 +2,9 @@
 
 import * as React from "react";
 import type { contracts } from "@vectorbea/shared";
+import { openRunStream, type RunStreamState } from "~/lib/api/run-stream";
+import { getApiBaseUrl } from "~/lib/api/config";
+import { getAccessToken } from "~/lib/auth/token";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
@@ -51,6 +54,8 @@ export interface RunDetailData {
   retryStep: (nodeId: string) => Promise<void>;
   /** Re-run the whole workflow from the trigger. */
   retryRun: () => Promise<void>;
+  /** Live-stream transport state, or null when the run is not being followed. */
+  stream: RunStreamState | null;
   scope: { workspaceId: string | null; environmentId: string | null };
 }
 
@@ -105,16 +110,70 @@ export function useRunDetailData(runId: string): RunDetailData {
     [run.data, incident],
   );
 
-  /* A run that is still moving is re-read; a finished one is not. Polling a
+  /* A run that is still moving is followed; a finished one is not. Watching a
      completed run forever is the kind of thing nobody notices until it is a
      line on a bill. */
   const live = run.data ? IN_FLIGHT.has(run.data.status) : false;
+
+  /*
+   * ── WHY THIS IS A STREAM AND WAS A THREE-SECOND POLL ─────────────────────
+   *
+   * The log panel lagged, and the reason was not the interval. The poll asked
+   * for `page: 1, pageSize: 200`, and `RunEventRepository.listByRun` orders
+   * `sequence ASC` — so it re-fetched the OLDEST two hundred events every three
+   * seconds. On a run that emits more than two hundred, the newest events never
+   * arrived at all: not a delay, a ceiling. Short runs merely felt slow.
+   *
+   * `openRunStream` already solved this and nothing imported it. It is the SSE
+   * client for `GET /api/runs/:id/stream`, with reconnect backoff, de-duplication
+   * on `sequence`, a backfill through `?afterSequence=` that closes the server's
+   * 500-event replay hole, and a polling fallback for when Redis is absent and
+   * the server says `stream_unavailable`. It has its own tests.
+   *
+   * The run RECORD is still re-read on a timer, deliberately: status, cost and
+   * token totals live on `agent_runs` and are not published as events, so
+   * nothing would move them. That poll is slower than the old one because it no
+   * longer carries the log.
+   */
+  const [streamState, setStreamState] = React.useState<RunStreamState | null>(null);
+
+  React.useEffect(() => {
+    if (!live || !workspaceId) return;
+
+    const stream = openRunStream({
+      runId,
+      baseUrl: getApiBaseUrl(),
+      /* `.token`, not the record: `getAccessToken` returns the whole
+         AccessToken (with its expiry and user), and the stream wants the bearer
+         string. Same unwrap the trace stream does. */
+      getToken: async () => (await getAccessToken())?.token ?? null,
+      workspaceId,
+      onEvent: () => {
+        /* The event is already in the cache's future: refetching the page is
+           cheaper to keep correct than merging one event into a paged query,
+           and it happens only when something actually happened — which is the
+           whole difference from a timer. */
+        void events.refetch();
+      },
+      onStatus: setStreamState,
+      onComplete: () => {
+        /* Terminal. Read the run once more so the header stops saying running. */
+        void run.refetch();
+        void events.refetch();
+      },
+    });
+
+    return () => stream.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, runId, workspaceId]);
+
   React.useEffect(() => {
     if (!live) return;
+    /* The run row itself. Ten seconds, not three: the log no longer rides on
+       this timer, and the fields it carries change at step boundaries. */
     const timer = window.setInterval(() => {
       void run.refetch();
-      void events.refetch();
-    }, 3000);
+    }, 10_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, runId]);
@@ -165,6 +224,13 @@ export function useRunDetailData(runId: string): RunDetailData {
     cancel,
     retryStep,
     retryRun,
+    /*
+     * How the log is arriving. Null when the run is finished and nothing is
+     * following it. The panel says "Refreshing on a timer" for `polling`,
+     * because a reader watching a quiet log deserves to know whether it is
+     * quiet or stalled.
+     */
+    stream: streamState,
     scope,
   };
 }

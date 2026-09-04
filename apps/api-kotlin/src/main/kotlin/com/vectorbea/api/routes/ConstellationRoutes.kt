@@ -1011,7 +1011,7 @@ class ConstellationRoutes(
      * Ordered by first activity so the columns read left to right in the order
      * the run actually executed them.
      */
-    private fun derivedNodes(runId: java.util.UUID, workspaceId: java.util.UUID): List<Map<String, Any?>> =
+    internal fun derivedNodes(runId: java.util.UUID, workspaceId: java.util.UUID): List<Map<String, Any?>> =
         runCatching {
             dataSource.connection.use { conn ->
                 conn.prepareStatement(

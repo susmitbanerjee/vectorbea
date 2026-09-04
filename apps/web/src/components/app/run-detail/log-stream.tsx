@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import type { RunStreamState } from "~/lib/api/run-stream";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
@@ -38,12 +39,22 @@ const LINE_H = 18;
 export type TimestampMode = "relative" | "absolute" | "elapsed";
 
 export function LogStream({
-  padTo, fullscreen, onToggleFullscreen, className,
+  padTo, fullscreen, onToggleFullscreen, className, stream,
 }: {
   padTo?: number;
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
   className?: string;
+  /**
+   * How lines are reaching this pane, or null when the run has finished and
+   * nothing is following it.
+   *
+   * A quiet log and a stalled one look identical, and the difference is the
+   * whole question a reader has while watching one. Before this the pane could
+   * not tell them apart either: it re-read the first page of events on a three
+   * second timer and said nothing about it.
+   */
+  stream?: RunStreamState | null;
 }) {
   const { run, events, focusIndex, scrubbing, select } = useReplay();
 
@@ -143,6 +154,7 @@ export function LogStream({
       {/* ── Controls ─────────────────────────────────────────────────────── */}
       <div className="border-subtle bg-surface-sunken flex shrink-0 flex-wrap items-center gap-1.5 border-b px-2 py-1.5">
         <Text variant="eyebrow" tone="muted">Log</Text>
+        <TransportNote stream={stream ?? null} />
 
         <div role="group" aria-label="Minimum level" className="flex items-center gap-0.5">
           {LEVELS.map((level) => (
@@ -326,6 +338,34 @@ function levelFor(type: string, status: string | null | undefined): LogLevel {
  * the run, not to a step". Inventing an index would silently file lines under
  * whichever step the scrubber happened to be on.
  */
+/**
+ * What the transport is doing, in the reader's words.
+ *
+ * Silent while the stream is open — the healthy state says nothing, because a
+ * permanent "Live" badge is a thing people stop seeing, and the two states worth
+ * distinguishing are "still connected" and "not any more".
+ */
+function TransportNote({ stream }: { stream: RunStreamState | null }) {
+  if (!stream) return null;
+  const label =
+    stream.status === "open" ? null
+    : stream.status === "connecting" ? "Connecting"
+    : stream.status === "reconnecting" ? `Reconnecting (attempt ${stream.attempt})`
+    /* Not "unavailable": lines ARE still arriving, just on a timer, and the log
+       is the same log. Saying unavailable would send somebody to check a
+       service that is working. */
+    : stream.status === "polling" ? "Refreshing on a timer"
+    : stream.status === "closed" ? null
+    : "Updates stopped";
+  if (!label) return null;
+
+  return (
+    <Text variant="eyebrow" tone="muted" aria-live="polite">
+      {label}
+    </Text>
+  );
+}
+
 function toLogLines(events: contracts.RunEvent[], nodeIds: string[]): LogLine[] {
   return [...events]
     .sort((a, b) => a.sequence - b.sequence)

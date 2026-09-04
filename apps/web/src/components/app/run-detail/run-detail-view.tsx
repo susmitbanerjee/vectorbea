@@ -15,6 +15,7 @@ import { StepTimeline } from "./step-timeline";
 import { CanvasMirror } from "./canvas-mirror";
 import { Inspector } from "./inspector";
 import { LogStream } from "./log-stream";
+import type { RunStreamState } from "~/lib/api/run-stream";
 import { CompareView, EventHistory } from "./compare-and-events";
 import { diagnoseRun } from "./diagnose-run";
 import { ApprovalGateIcon } from "~/components/icons/domain";
@@ -115,18 +116,22 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
         onCancel={data.cancel}
         onRetryStep={data.retryStep}
         onRetryRun={data.retryRun}
+        stream={data.stream}
       />
     </ReplayProvider>
   );
 }
 
-function RunDetailBody({ run, frozen, incident, onCancel, onRetryStep, onRetryRun }: {
+function RunDetailBody({
+  run, frozen, incident, onCancel, onRetryStep, onRetryRun, stream,
+}: {
   run: Run;
   frozen: boolean;
   incident: contracts.FailureIncident | null;
   onCancel: () => Promise<void>;
   onRetryStep: (nodeId: string) => Promise<void>;
   onRetryRun: () => Promise<void>;
+  stream: RunStreamState | null;
 }) {
   const { select, detail } = useReplay();
   const diagnosis = React.useMemo(
@@ -232,7 +237,7 @@ function RunDetailBody({ run, frozen, incident, onCancel, onRetryStep, onRetryRu
       {/* ── Panes ──────────────────────────────────────────────────────────── */}
       {logFullscreen ? (
         <div className="border-subtle relative h-[70vh] overflow-hidden rounded-lg border">
-          <LogStream fullscreen onToggleFullscreen={() => setLogFullscreen(false)} className="h-full" />
+          <LogStream fullscreen onToggleFullscreen={() => setLogFullscreen(false)} className="h-full" stream={stream} />
         </div>
       ) : (
         <div className="border-subtle flex h-[62vh] min-h-[26rem] overflow-hidden rounded-lg border">
@@ -272,6 +277,7 @@ function RunDetailBody({ run, frozen, incident, onCancel, onRetryStep, onRetryRu
             <div style={{ height: logHeight }} className="relative shrink-0">
               <LogStream
                 onToggleFullscreen={() => setLogFullscreen(true)}
+                stream={stream}
                 padTo={frozen ? 0 : undefined}
                 className="h-full"
               />
