@@ -238,8 +238,19 @@ class RetentionLookup(private val dataSource: DataSource?) {
         val ds = dataSource ?: return@getOrPut DEFAULT_DAYS
         try {
             ds.connection.use { conn ->
+                /* S3: the window is the workspace's PLAN entitlement, resolved
+                   through its billing account — never the plan of whoever
+                   triggered the run. `workspace_retention_days` falls back to
+                   the pre-S3 `log_retention_days` column when a workspace has no
+                   entitlement, so nothing changes for a tenant the catalogue has
+                   not reached.
+
+                   Payloads have their own key rather than sharing one with runs
+                   and events: payload BYTES dominate storage cost while a run
+                   row is cheap, and one number for all of them would price the
+                   cheapest at the rate of the most expensive. */
                 conn.prepareStatement(
-                    "SELECT log_retention_days FROM workspace_usage_policies WHERE workspace_id = ?"
+                    "SELECT workspace_retention_days(?, 'payloads')"
                 ).use { stmt ->
                     stmt.setObject(1, workspaceId)
                     stmt.executeQuery().use { rs ->

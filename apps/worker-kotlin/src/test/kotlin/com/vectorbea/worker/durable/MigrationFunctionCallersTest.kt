@@ -50,6 +50,13 @@ class MigrationFunctionCallersTest {
         "run_spans_drop_expired_partitions" to "PartitionMaintenance builds the name dynamically",
         "run_events_default_partition_rows" to "PartitionMaintenance builds the name dynamically",
         "run_spans_default_partition_rows" to "PartitionMaintenance builds the name dynamically",
+
+        // The trial defence (V062 §5). Both are called from the BODY of
+        // `assign_billing_account`, which is itself a trigger function — and a
+        // call inside a function body is not something `EXECUTE FUNCTION`
+        // reveals, so the derived set below cannot find them.
+        "normalise_identity" to "assign_billing_account() stamps the anchor with it",
+        "trial_already_consumed" to "assign_billing_account() withholds a second trial with it",
     )
 
     private fun repoRoot(): File {

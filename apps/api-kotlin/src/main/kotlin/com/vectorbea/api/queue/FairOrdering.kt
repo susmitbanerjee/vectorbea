@@ -34,6 +34,23 @@ import javax.sql.DataSource
  *
  * `plan_weight` divides the increment: a weight-2.0 tenant advances their clock
  * half as fast and is therefore served about twice as often under contention.
+ *
+ * ── WHERE THE WEIGHT COMES FROM (S3) ────────────────────────────────────────
+ * The plan, via `workspace_scheduling_weight()`, which reads the
+ * `scheduling_priority` entitlement and falls back to the pre-S3
+ * `workspace_usage_policies.plan_weight` when a workspace has no entitlement.
+ *
+ * This is a NUMBER IN AN EXISTING MECHANISM, not a new lane. Nothing about the
+ * ordering, the clamp to `now`, or the claim changes; a paid tenant's clock
+ * simply advances more slowly, so their run does not queue behind a free-tier
+ * batch. Adding a priority lane per tier would have been a second scheduler with
+ * its own starvation modes — the weight already interleaves correctly, and it
+ * degrades to today's behaviour for any workspace whose plan says nothing.
+ *
+ * The function is resolved in the database rather than passed in, because this
+ * statement must stay ONE statement: reading the weight in Kotlin first would
+ * put a round trip between reading the clock and advancing it, which is the race
+ * the single `UPDATE ... RETURNING` exists to close.
  */
 object FairOrdering {
 
@@ -98,10 +115,10 @@ object FairOrdering {
                 conn.prepareStatement(
                     """
                     WITH policy AS (
-                        SELECT COALESCE(MAX(plan_weight), 1.0)   AS weight,
-                               COALESCE(bool_or(priority_lane), false) AS priority_lane
-                          FROM workspace_usage_policies
-                         WHERE workspace_id = ?
+                        SELECT workspace_scheduling_weight(?) AS weight,
+                               COALESCE((SELECT bool_or(priority_lane)
+                                           FROM workspace_usage_policies
+                                          WHERE workspace_id = ?), false) AS priority_lane
                     )
                     UPDATE workspaces w
                        SET vclock = GREATEST(w.vclock, EXTRACT(EPOCH FROM now()))
@@ -111,8 +128,9 @@ object FairOrdering {
                     """.trimIndent()
                 ).use { stmt ->
                     stmt.setObject(1, workspaceId)
-                    stmt.setDouble(2, cost)
-                    stmt.setObject(3, workspaceId)
+                    stmt.setObject(2, workspaceId)
+                    stmt.setDouble(3, cost)
+                    stmt.setObject(4, workspaceId)
                     stmt.executeQuery().use { rs ->
                         if (rs.next()) {
                             val vtime = rs.getDouble("vclock")

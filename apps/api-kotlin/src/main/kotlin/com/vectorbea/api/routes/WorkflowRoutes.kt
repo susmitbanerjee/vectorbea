@@ -124,6 +124,11 @@ class WorkflowRoutes(
     private val cache: CacheService,
     private val telemetry: TelemetryClient? = null,
     private val scheduleRepo: ScheduleRepository? = null,
+    /**
+     * Team size, delegation depth and gated node types, checked when a version is
+     * saved. Null skips the check — the behaviour before S3.
+     */
+    private val entitlements: com.vectorbea.api.entitlements.EntitlementGuard? = null,
 ) {
     private val log = LoggerFactory.getLogger(WorkflowRoutes::class.java)
 
@@ -238,6 +243,18 @@ class WorkflowRoutes(
         val graph = body.graph ?: throw ApiError.ValidationError("graph is required")
         validateGraphShape(graph)
         validateCronTrigger(body.triggerConfig)
+
+        // Teams, delegation depth and gated node types, against the WORKSPACE's
+        // plan. At save rather than at run: a team of twelve on a plan that
+        // allows eight is a form error now, and a 3am production failure later.
+        //
+        // After the shape validation so a malformed graph is refused as malformed
+        // — a plan refusal for a graph that was never valid sends the author to
+        // the pricing page to fix a typo.
+        entitlements?.let { guard ->
+            com.vectorbea.api.entitlements.GraphPlanCheck.enforce(
+                guard, ctx.workspaceId, mapper.writeValueAsString(graph))
+        }
 
         val version = repo.createVersion(
             CreateWorkflowVersionRequest(

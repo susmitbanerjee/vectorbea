@@ -29,13 +29,26 @@ class AuthMiddleware(
     private val jwtVerifier: JwtVerifier?,
     private val userRepo: AppUserRepository?,
     private val config: AppConfig? = null,
+    /**
+     * Authenticates `vb_`-prefixed API keys. Null leaves key auth unavailable,
+     * which is the correct state for a deployment that has not enabled it.
+     */
+    private val apiKeys: com.vectorbea.api.entitlements.ApiKeyService? = null,
 ) {
     private val log = LoggerFactory.getLogger(AuthMiddleware::class.java)
+
+    /** Mirrors `ApiKeyService`'s prefix. A key is greppable in a leaked log. */
+    private val API_KEY_PREFIX = "vb_"
 
     /** Paths that never require authentication. */
     private val publicPaths = setOf(
         "/healthz", "/health", "/metrics", "/version",
         "/api/bootstrap", "/api/network/check",
+        /* Webhooks carry no JWT — a provider has no session. They are
+           authenticated by SIGNATURE instead, verified before anything is stored
+           (see `WebhookProcessor`), which is a stronger check than a bearer
+           token because it also proves the body was not altered. */
+        "/api/billing/webhooks/",
     )
 
     /**
@@ -60,6 +73,27 @@ class AuthMiddleware(
             ?: throw ApiError.Unauthorized(
                 "Authorization: Bearer <supabase_access_token> header is required"
             )
+
+        /*
+         * ── API KEY, BEFORE THE JWT PATH ────────────────────────────────────
+         *
+         * Distinguished by the `vb_` prefix rather than by trying the JWT first
+         * and falling back: a key is not a malformed JWT, and running it through
+         * the verifier would produce a misleading "invalid or expired token" for
+         * a credential that is neither.
+         *
+         * WHAT THIS DOES NOT DO is grant anything the UI would not. The key
+         * yields a principal whose `authorizedWorkspaceIds` is exactly the one
+         * workspace the key names, so `RequestContext` verifies it the same way
+         * it verifies a browser session, and every entitlement check downstream
+         * resolves from that workspace. There is no API-specific enforcement path
+         * to keep in step with the UI's, because there is no second path at all.
+         */
+        if (token.startsWith(API_KEY_PREFIX)) {
+            val keys = apiKeys
+                ?: throw ApiError.Unauthorized("API key authentication is not enabled")
+            return authenticateApiKey(request, token, keys)
+        }
 
         // Verify JWT — throws AuthException (→ 401) on any verification failure
         val claims = try {
@@ -95,6 +129,50 @@ class AuthMiddleware(
         log.debug("[auth] authenticated sub={} betaStatus={} workspaces={}",
             claims.sub, profile.betaStatus, profile.authorizedWorkspaceIds.size)
         return request.copy(principal = principal)
+    }
+
+    /**
+     * Turn a valid key into a principal scoped to exactly one workspace.
+     *
+     * ── THE ACTOR IS THE KEY'S, NOT A SUPERUSER ─────────────────────────────
+     * A key created by a guest `acts_as` that guest, so its runs are charged to
+     * that guest's member spend cap. Minting a key is therefore not a way out of
+     * a budget somebody set for you — which is the whole reason `acts_as_user_id`
+     * exists rather than the key simply being "the workspace".
+     *
+     * A key with no actor gets `appUserId = the key's own id`. That is
+     * deliberate and slightly unusual: it is a stable, non-null identity that
+     * belongs to no member, so the run is attributable in the audit while
+     * counting against nobody's personal cap — and it can never collide with a
+     * real `app_users.id`, because the two come from different tables.
+     *
+     * The role is `developer`: enough to run and to build, never enough to
+     * change members, billing or other keys. A credential that can mint more
+     * credentials is a credential that cannot be contained after a leak.
+     */
+    private fun authenticateApiKey(
+        request: Request,
+        token: String,
+        keys: com.vectorbea.api.entitlements.ApiKeyService,
+    ): Request {
+        val resolved = keys.authenticate(token)   // throws InvalidApiKey
+
+        val actorId = resolved.actsAsUserId ?: resolved.id
+        val principal = AuthPrincipal(
+            supabaseUserId         = "apikey:${resolved.id}",
+            appUserId              = actorId,
+            email                  = null,
+            authorizedWorkspaceIds = setOf(resolved.workspaceId),
+            workspaceRoles         = mapOf(resolved.workspaceId to "developer"),
+            /* A key exists only inside an approved workspace — the beta gate was
+               applied to the human who created it. Re-gating here would break
+               every integration the moment a key outlived its creator's session. */
+            betaStatus             = "approved",
+            isPlatformAdmin        = false,
+        )
+
+        log.debug("[auth] authenticated api key {} for workspace {}", resolved.id, resolved.workspaceId)
+        return request.copy(principal = principal, apiKeyId = resolved.id)
     }
 
     private fun extractBearerToken(req: Request): String? {

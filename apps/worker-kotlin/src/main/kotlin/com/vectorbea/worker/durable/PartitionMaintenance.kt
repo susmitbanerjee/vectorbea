@@ -140,6 +140,7 @@ class PartitionMaintenance(
             }
             reportDefaultPartition()
             pruneEventSequenceCounters()
+            reconcileUsageLedger()
         } catch (e: Exception) {
             log.error("[partitions] maintenance tick failed: {}", e.message)
         }
@@ -331,6 +332,51 @@ class PartitionMaintenance(
      * the flag is on" is a reason to make sure the cleanup works before the flag
      * flips, not a reason to skip it.
      */
+    /**
+     * Repair meter writes that were lost, before S4 ever bills from the ledger.
+     *
+     * ── WHY THE LEDGER NEEDS A SWEEP AT ALL ─────────────────────────────────
+     * `UsageMeter` swallows its errors on purpose — a ledger write is never worth
+     * a customer's run — so a database blip between creating a run row and
+     * writing its `runs` row leaves that run unbilled, silently and permanently.
+     * Silently is survivable; permanently is not, because S4 bills from this
+     * table and an under-count nobody can detect is revenue that simply
+     * disappears.
+     *
+     * `reconcile_run_usage` is idempotent by the same primary key the meter uses,
+     * so a run that WAS metered is left exactly as it is — the sweep can never
+     * turn a repair into a double charge.
+     *
+     * ── WHY HERE ────────────────────────────────────────────────────────────
+     * This tick already holds the Redis lock, so exactly one worker in the fleet
+     * runs it; it already runs hourly, which is far more often than an invoice;
+     * and it is already the home of periodic database housekeeping. A second
+     * scheduler for one statement would be a second thing to notice had stopped.
+     *
+     * The window is deliberately wider than the interval (two hours against one)
+     * so a skipped cycle — a worker restart, a lock held by a slow peer — still
+     * gets swept by the next one rather than leaving a permanent hole.
+     */
+    private fun reconcileUsageLedger() {
+        runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement("SELECT reconcile_run_usage(now() - interval '2 hours')")
+                    .use { st ->
+                        st.executeQuery().use { rs ->
+                            if (rs.next()) {
+                                val repaired = rs.getInt(1)
+                                // Only when it did something. A quiet log line every
+                                // hour saying "0" is how a log stops being read.
+                                if (repaired > 0) {
+                                    log.warn("[usage] reconciled {} run(s) whose meter write was lost", repaired)
+                                }
+                            }
+                        }
+                    }
+            }
+        }.onFailure { log.warn("[usage] ledger reconcile failed: {}", it.message) }
+    }
+
     private fun pruneEventSequenceCounters() {
         runCatching {
             dataSource.connection.use { conn ->

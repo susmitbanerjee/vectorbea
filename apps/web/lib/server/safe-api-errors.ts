@@ -1,9 +1,19 @@
 import "server-only";
 
+import { PlanLimitError } from "@/lib/server/entitlements";
+
 type SafeError = {
   message: string;
   status: number;
   code?: string;
+  /**
+   * Machine-readable facts behind the message, spread into the JSON body.
+   *
+   * A plan refusal is the reason this exists. "Forbidden" is a toast; `{limit:
+   * 3, current: 3, plan: "free", upgradeTo: "Pro"}` is a progress bar and an
+   * upgrade button that names the right plan.
+   */
+  detail?: Record<string, unknown>;
 };
 
 function normalizeMessage(error: unknown) {
@@ -22,6 +32,26 @@ function isMissingMigrationError(message: string) {
 }
 
 export function toSafeApiError(error: unknown, fallbackMessage: string): SafeError {
+  /*
+   * A plan refusal is ALREADY safe and already specific, so it passes straight
+   * through rather than being matched on its wording.
+   *
+   * This branch is first for a reason: without it a PlanLimitError fell to the
+   * bottom of this function and came back as a 500 "internal error" — the
+   * enforcement decision would be correct, and the customer would be told the
+   * product was broken. Every plan refusal must name the limit, the plan and the
+   * upgrade path, and losing all three to a generic fallback is the exact
+   * failure the typed error exists to prevent.
+   */
+  if (error instanceof PlanLimitError) {
+    return {
+      message: error.message,
+      status: error.status,
+      code: error.code,
+      detail: error.detail,
+    };
+  }
+
   const rawMessage = normalizeMessage(error);
   const lower = rawMessage.toLowerCase();
 

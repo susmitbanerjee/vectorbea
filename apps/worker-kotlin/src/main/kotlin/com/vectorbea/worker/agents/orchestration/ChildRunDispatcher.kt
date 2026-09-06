@@ -264,14 +264,61 @@ class ChildRunDispatcher(
     fun capsFor(workspaceId: UUID): Caps = runCatching {
         dataSource.connection.use { conn ->
             conn.prepareStatement(
-                """SELECT max_activations_per_run, max_activations_per_workspace,
-                          child_vtime_penalty
-                     FROM workspace_usage_policies WHERE workspace_id = ?"""
+                /* The WORKSPACE cap comes from the plan (V062 §7); the per-RUN
+                   cap and the vtime penalty stay on `workspace_usage_policies`.
+                
+                   The split is deliberate. "How many agents may this tenant have
+                   running at once" is packaging — it is what one tenant's
+                   fan-out can take from everybody else, and it belongs on a
+                   price sheet. "How many children may ONE run dispatch at once"
+                   is a scheduler detail: it makes a 20-wide fan-out dispatch in
+                   waves rather than seizing the lane, and it would be the same
+                   number on every plan. Selling it would be selling an
+                   implementation detail of the queue. */
+                """SELECT CASE
+                             /* AN OPERATOR MAY TIGHTEN; THE PLAN MAY NOT LOOSEN
+                                THAT BACK.
+                
+                                `max_activations_per_workspace` is NOT NULL
+                                DEFAULT 32 on every policy row, so a value of 32
+                                is indistinguishable from nobody having touched
+                                it — and treating that as a deliberate cap would
+                                silently pin every paid plan at the free default.
+                                A value BELOW the default is the only evidence
+                                somebody chose it, and when they did it is
+                                because a tenant is misbehaving right now.
+                                Letting the plan raise it back would take away
+                                the one lever an operator has during an
+                                incident. */
+                             WHEN p.max_activations_per_workspace IS NOT NULL
+                              AND p.max_activations_per_workspace < 32
+                             THEN LEAST(
+                                 workspace_limit(?, 'max_activations_per_workspace', 32),
+                                 p.max_activations_per_workspace)
+                             ELSE workspace_limit(?, 'max_activations_per_workspace',
+                                                  COALESCE(p.max_activations_per_workspace, 32))
+                          END AS max_activations_per_workspace,
+                          COALESCE(p.max_activations_per_run, 8)   AS max_activations_per_run,
+                          COALESCE(p.child_vtime_penalty, 1.0)     AS child_vtime_penalty
+                     FROM (SELECT 1) anchor
+                     LEFT JOIN workspace_usage_policies p ON p.workspace_id = ?"""
             ).use { st ->
-                st.setObject(1, workspaceId)
+                st.setObject(1, workspaceId)   // workspace_limit(...) — tightened arm
+                st.setObject(2, workspaceId)   // workspace_limit(...) — plan arm
+                st.setObject(3, workspaceId)   // the policy LEFT JOIN
                 st.executeQuery().use { rs ->
                     if (!rs.next()) Caps.DEFAULT
-                    else Caps(rs.getInt(1), rs.getInt(2), rs.getDouble(3))
+                    /* BY NAME, not by position. The select list above changed
+                       order when the workspace cap moved to the plan, and a
+                       positional read would have silently swapped the per-run
+                       and per-workspace caps — giving every tenant 32 children
+                       per run and capping the workspace at 8. Both numbers stay
+                       plausible, so nothing would have failed loudly. */
+                    else Caps(
+                        perRun = rs.getInt("max_activations_per_run"),
+                        perWorkspace = rs.getInt("max_activations_per_workspace"),
+                        vtimePenalty = rs.getDouble("child_vtime_penalty"),
+                    )
                 }
             }
         }

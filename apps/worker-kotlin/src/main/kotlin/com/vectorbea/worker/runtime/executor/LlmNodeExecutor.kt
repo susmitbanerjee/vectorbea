@@ -91,6 +91,19 @@ class LlmNodeExecutor(
      */
     private val tokenEstimator: com.vectorbea.worker.net.TokenEstimator =
         com.vectorbea.worker.net.TokenEstimator(),
+    /**
+     * Whether to ask Anthropic to cache the prefix. Defaults to the env flag.
+     *
+     * Injected rather than read straight from the companion at the point of use so
+     * a test can exercise the ON path deterministically. A test that reads the
+     * ambient environment passes whether or not the feature works, which on a
+     * change that moves money is worse than having no test.
+     *
+     * It does NOT gate reading the cache figures back: those are recorded for all
+     * three providers regardless, because OpenAI and Gemini cache whether or not
+     * we asked. See [LlmResponse.cacheReadTokens].
+     */
+    private val promptCacheEnabled: Boolean = PROMPT_CACHE_ENABLED,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -99,6 +112,40 @@ class LlmNodeExecutor(
     companion object {
         const val DEFAULT_TIMEOUT_MS         = 60_000L
         const val DEFAULT_MAX_RESPONSE_BYTES = 1_048_576L // 1 MB
+
+        /**
+         * Anthropic prompt caching. Off until measured — see the note on
+         * [anthropicSystemBlock] for why this cannot be assumed to be a saving.
+         */
+        val PROMPT_CACHE_ENABLED: Boolean =
+            System.getenv("LLM_PROMPT_CACHE_ENABLED")?.equals("true", ignoreCase = true) ?: false
+
+        /**
+         * The smallest system block worth marking, in characters.
+         *
+         * Anthropic will not cache a prefix below a model-dependent minimum
+         * (roughly 1k-4k tokens); below it the breakpoint is silently ignored and
+         * the tokens bill as ordinary input. ~4 chars per token is wrong for JSON
+         * — see [com.vectorbea.worker.net.TokenEstimator] — so this is deliberately
+         * generous rather than precise: its job is to skip prompts that obviously
+         * cannot cache, not to predict the boundary. Tune from the measured hit
+         * rate, which is the only number that settles it.
+         */
+        val PROMPT_CACHE_MIN_CHARS: Int =
+            System.getenv("LLM_PROMPT_CACHE_MIN_CHARS")?.toIntOrNull()?.coerceAtLeast(0) ?: 4_000
+
+        /**
+         * Node config key: this caller resends the same prefix and wants it cached.
+         *
+         * Opt-IN, and this is the crux of the economics rather than a convenience.
+         * A cache write costs 1.25x base input and only pays back on the SECOND
+         * request that shares the prefix. An agent loop resends its system prompt
+         * on every iteration and repays it immediately; a one-shot LLM node in a
+         * workflow never sends that prefix again, so caching it is a pure 1.25x
+         * loss on every call. Size alone cannot tell those two apart — only the
+         * caller knows whether it is a loop.
+         */
+        const val CFG_CACHE_PREFIX = "cachePrefix"
     }
 
     override suspend fun execute(
@@ -230,7 +277,7 @@ class LlmNodeExecutor(
                 tokensIn = response?.tokensIn,
                 tokensOut = response?.tokensOut,
                 latencyMs = System.currentTimeMillis() - startMs,
-                costUsd = response?.tokenCount?.let { estimateCostUsd(it, model) },
+                costUsd = response?.let { costUsdFor(it, model, provider) },
                 attemptNumber = context.attemptGroup,
                 callIndex = 0,
                 outcome = outcome,
@@ -393,7 +440,8 @@ class LlmNodeExecutor(
             circuit?.beforeCall(connectionId)
             callProvider(provider, model, baseUrl, String(apiKeyChars), messages,
                 temperature, maxTokens, timeoutMs, maxRespBytes, capture, outputSchema,
-                hadLease = lease != null)
+                hadLease = lease != null,
+                cachePrefix = cfg[CFG_CACHE_PREFIX] == true)
                 .also { circuit?.onSuccess(connectionId) }
         } catch (e: ConnectionCircuit.CircuitOpenException) {
             settleOnce(lease?.reservedTokens ?: 0)   // nothing was sent; return it whole
@@ -498,7 +546,7 @@ class LlmNodeExecutor(
         }
 
         val durationMs = System.currentTimeMillis() - startMs
-        val estimatedCostUsd = result.tokenCount?.let { estimateCostUsd(it, model) }
+        val estimatedCostUsd = costUsdFor(result, model, provider)
         // ---- Verify the citations before anything is returned -----------------
         //
         // Before the output leaves this executor, not after: a fabricated citation
@@ -576,6 +624,17 @@ class LlmNodeExecutor(
                 // honest rather than a guess at the input/output ratio.
                 WorkerMetrics.llmTokensTotal.inc(ws, wf, model, "total", delta = it.toLong())
             }
+            /* The cache hit rate, as a rate. `cache_read / total` over any window
+               is the number that decides whether the flag stays on, and it cannot
+               be computed from the `total` series alone. Emitted only when the
+               provider reported the field, so a zero here means "cached nothing",
+               never "did not say". */
+            result.cacheReadTokens?.let {
+                WorkerMetrics.llmTokensTotal.inc(ws, wf, model, "cache_read", delta = it.toLong())
+            }
+            result.cacheWriteTokens?.let {
+                WorkerMetrics.llmTokensTotal.inc(ws, wf, model, "cache_write", delta = it.toLong())
+            }
             estimatedCostUsd?.let {
                 WorkerMetrics.llmCostMicros.inc(ws, wf, model, delta = Math.round(it * 1_000_000))
             }
@@ -598,7 +657,26 @@ class LlmNodeExecutor(
         runCatching {
             context.tracer?.close(
                 llmSpan, "llm_call", model, status = "ok", stepId = node.id,
-                attributesJson = """{"provider":${jsonAttr(provider)},"model":${jsonAttr(model)}}""",
+                /*
+                 * The cache figures land on the SPAN as well as the metric,
+                 * because the two answer different questions. The metric answers
+                 * "what is the hit rate right now"; the span answers "what did
+                 * THIS run cost, and would it have cost less" — asked days later,
+                 * about one run, by someone reading a trace. A counter cannot be
+                 * queried per run and a Prometheus window cannot be joined to a
+                 * workflow version.
+                 *
+                 * Deliberately NOT `costCents`: that column stays null until the
+                 * summation in TraceGraphBuilder is fixed, or every node's cost is
+                 * multiplied by its nesting depth.
+                 */
+                attributesJson = buildString {
+                    append("""{"provider":${jsonAttr(provider)},"model":${jsonAttr(model)}""")
+                    append(""","cache_enabled":${promptCacheEnabled && cfg[CFG_CACHE_PREFIX] == true}""")
+                    result.cacheReadTokens?.let { append(""","cache_read_tokens":$it""") }
+                    result.cacheWriteTokens?.let { append(""","cache_write_tokens":$it""") }
+                    append("}")
+                },
                 tokensIn = result.tokensIn, tokensOut = result.tokensOut,
             )
         }
@@ -736,8 +814,13 @@ class LlmNodeExecutor(
         outputSchema: Map<String, Any?>?,
         /** Whether the capacity bucket admitted this call. See [doHttpPost]. */
         hadLease: Boolean,
+        /**
+         * The caller resends this prefix and wants it cached. Anthropic only —
+         * OpenAI and Gemini cache without being asked and have nothing to opt into.
+         */
+        cachePrefix: Boolean,
     ): LlmResponse = when (provider) {
-        "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
+        "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease, cachePrefix)
         "gemini"    -> callGemini(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
         else        -> callOpenAiCompatible(provider, model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
     }
@@ -800,6 +883,7 @@ class LlmNodeExecutor(
         capture: CallCapture,
         outputSchema: Map<String, Any?>?,
         hadLease: Boolean,
+        cachePrefix: Boolean,
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.anthropic.com") + "/v1/messages"
 
@@ -811,7 +895,7 @@ class LlmNodeExecutor(
             put("model", model)
             put("messages", chatMessages)
             put("max_tokens", maxTokens ?: 1024)
-            systemMsg?.let { put("system", it) }
+            systemMsg?.let { put("system", anthropicSystemBlock(it, cachePrefix)) }
             temperature?.let { put("temperature", it) }
             // Anthropic has no response_format; a FORCED tool call is the
             // equivalent. tool_choice is what makes it forced - without it the model
@@ -834,6 +918,56 @@ class LlmNodeExecutor(
         )
 
         return parseAnthropicResponse(response)
+    }
+
+    /**
+     * The `system` field, with a cache breakpoint at its end when that pays.
+     *
+     * ── WHY THE BREAKPOINT GOES HERE AND NOWHERE ELSE ───────────────────────
+     * Anthropic caching is a PREFIX match: everything up to the breakpoint is the
+     * cache key, and one changed byte anywhere before it invalidates the whole
+     * entry. The render order is `tools` -> `system` -> `messages`, so the end of
+     * the system block is the last position that is byte-identical on every
+     * iteration of an agent loop.
+     *
+     * `AgentPromptBuilder` puts the instructions, the serialised tool catalogue
+     * and the team roster in the system prompt, and the objective, inputs and
+     * ACCUMULATED OBSERVATIONS in the user message. The observations grow by one
+     * entry per iteration. A breakpoint placed after them would be invalidated by
+     * the very next turn — we would pay the 1.25x write premium on every
+     * iteration and never once read the entry back. That is strictly worse than
+     * not caching at all, and it is the single easy way to get this wrong.
+     *
+     * ── WHY IT IS RETURNED AS A LIST ────────────────────────────────────────
+     * `cache_control` is a property of a content BLOCK. A bare string cannot
+     * carry one, so marking the prefix means promoting `system` to a one-element
+     * array. Unmarked, it stays a string — identical bytes on the wire to what we
+     * sent before this change, which is what keeps the flag-off path a true
+     * no-op.
+     *
+     * ── THE THREE CONDITIONS, EACH LOAD-BEARING ─────────────────────────────
+     *   flag         the whole feature is off until measured (see the class note)
+     *   cachePrefix  the CALLER resends this prefix. A one-shot node does not,
+     *                and paying a write for a prefix nobody reads back is a loss.
+     *   length       below the model's minimum the breakpoint is ignored, so
+     *                marking it is noise in the request and in the trace.
+     */
+    internal fun anthropicSystemBlock(
+        systemPrompt: String,
+        cachePrefix: Boolean,
+        /* Passed rather than read from the companion so the decision is a pure
+           function of its inputs. An env-var read inside here would make the one
+           branch that costs money untestable in the state that matters. */
+        enabled: Boolean = promptCacheEnabled,
+        minChars: Int = PROMPT_CACHE_MIN_CHARS,
+    ): Any {
+        val worthCaching = enabled && cachePrefix && systemPrompt.length >= minChars
+        if (!worthCaching) return systemPrompt
+        return listOf(mapOf(
+            "type" to "text",
+            "text" to systemPrompt,
+            "cache_control" to mapOf("type" to "ephemeral"),
+        ))
     }
 
     // ── Gemini ────────────────────────────────────────────────────────────────
@@ -1039,8 +1173,15 @@ class LlmNodeExecutor(
             val usage      = root["usage"] as? Map<String, Any>
             val tokenCount = (usage?.get("total_tokens") as? Number)?.toInt()
 
+            /* OpenAI caches automatically and reports the hit here. `prompt_tokens`
+               INCLUDES these, so they must be discounted rather than added. */
+            @Suppress("UNCHECKED_CAST")
+            val promptDetails = usage?.get("prompt_tokens_details") as? Map<String, Any>
+            val cachedIn = (promptDetails?.get("cached_tokens") as? Number)?.toInt()
+
             LlmResponse(
                 content = content, finishReason = finish, tokenCount = tokenCount,
+                cacheReadTokens = cachedIn,
                 // The provider echoes the version it actually served. This is the
                 // field that distinguishes "gpt-4o" the alias from the specific
                 // model that made the decision under audit.
@@ -1074,10 +1215,12 @@ class LlmNodeExecutor(
                     // provider took. Downstream parses it identically either way.
                     content = mapper.writeValueAsString(toolUse["input"]),
                     finishReason = root["stop_reason"] as? String,
-                    tokenCount = if (inTok != null && outTok != null) inTok + outTok else null,
+                    tokenCount = anthropicTotal(inTok, outTok, usage),
                     modelVersion = root["model"] as? String,
                     tokensIn = inTok,
                     tokensOut = outTok,
+                    cacheReadTokens = anthropicCacheRead(usage),
+                    cacheWriteTokens = anthropicCacheWrite(usage),
                 )
             }
             val text    = content.firstOrNull { it["type"] == "text" }?.get("text") as? String
@@ -1091,12 +1234,43 @@ class LlmNodeExecutor(
                the input side alone, and a combined figure cannot be graded: a
                short completion would read as a good input estimate. */
             LlmResponse(content = text, finishReason = stop,
-                tokenCount = inputTokens + outputTokens,
-                tokensIn = inputTokens, tokensOut = outputTokens)
+                tokenCount = anthropicTotal(inputTokens, outputTokens, usage),
+                tokensIn = inputTokens, tokensOut = outputTokens,
+                cacheReadTokens = anthropicCacheRead(usage),
+                cacheWriteTokens = anthropicCacheWrite(usage))
         } catch (e: Exception) {
             throw LlmCallException("Failed to parse Anthropic response: ${e.javaClass.simpleName}")
         }
     }
+
+    /**
+     * Anthropic's true total, which is NOT `input_tokens + output_tokens`.
+     *
+     * ── THE TRAP THIS EXISTS TO CLOSE ───────────────────────────────────────
+     * Unlike OpenAI, Anthropic reports cached tokens in fields SEPARATE from
+     * `input_tokens` and excludes them from it. Summing only the two obvious
+     * fields was correct while nothing was ever cached — and the moment caching
+     * is switched on it silently under-counts every call by the cached fraction,
+     * which on an agent loop is most of the prompt. The bill would not move and
+     * every number on the Cost tab would fall by ~80%, reading as a saving.
+     *
+     * So the total is all four: fresh input, cache reads, cache writes, output.
+     * Nulls are treated as absent-and-zero HERE only because a missing usage
+     * object still yields a non-null total from the two required fields; the
+     * decision about how to price an absent count belongs to the caller.
+     */
+    private fun anthropicTotal(inTok: Int?, outTok: Int?, usage: Map<String, Any>?): Int? {
+        if (inTok == null || outTok == null) return null
+        return inTok + outTok + (anthropicCacheRead(usage) ?: 0) + (anthropicCacheWrite(usage) ?: 0)
+    }
+
+    /** Cached input served this call. Null when the provider did not report it. */
+    private fun anthropicCacheRead(usage: Map<String, Any>?): Int? =
+        (usage?.get("cache_read_input_tokens") as? Number)?.toInt()
+
+    /** Input written to the cache this call, billed at a premium over base input. */
+    private fun anthropicCacheWrite(usage: Map<String, Any>?): Int? =
+        (usage?.get("cache_creation_input_tokens") as? Number)?.toInt()
 
     @Suppress("UNCHECKED_CAST")
     private fun parseGeminiResponse(json: String): LlmResponse {
@@ -1112,9 +1286,14 @@ class LlmNodeExecutor(
             val usageMeta  = root["usageMetadata"] as? Map<String, Any>
             val tokenCount = (usageMeta?.get("totalTokenCount") as? Number)?.toInt()
 
+            /* Gemini caches implicitly and, like OpenAI, counts the hit inside
+               `promptTokenCount` — so this is a discount, never an addition. */
+            val cachedIn = (usageMeta?.get("cachedContentTokenCount") as? Number)?.toInt()
+
             LlmResponse(content = text, finishReason = finishReason, tokenCount = tokenCount,
                 tokensIn = (usageMeta?.get("promptTokenCount") as? Number)?.toInt(),
-                tokensOut = (usageMeta?.get("candidatesTokenCount") as? Number)?.toInt())
+                tokensOut = (usageMeta?.get("candidatesTokenCount") as? Number)?.toInt(),
+                cacheReadTokens = cachedIn)
         } catch (e: Exception) {
             throw LlmCallException("Failed to parse Gemini response: ${e.javaClass.simpleName}")
         }
@@ -1174,6 +1353,78 @@ class LlmNodeExecutor(
     internal fun estimateTokens(messages: List<Map<String, Any>>, maxTokens: Int?): Long {
         val chars = messages.sumOf { (it["content"] as? String)?.length ?: 0 }
         return (chars / 4L) + (maxTokens ?: 1024).toLong()
+    }
+
+    /**
+     * Cost with cached input priced as cached rather than as fresh.
+     *
+     * ── WHAT THIS FIXES AND WHAT IT DELIBERATELY DOES NOT ───────────────────
+     * FIXES: cached input billed at the full rate. OpenAI and Gemini cache
+     * automatically and fold the hit into their headline prompt count, so every
+     * agent run was over-reported — 2.8x on a measured ten-iteration loop.
+     *
+     * DOES NOT FIX: the rate itself. [estimateCostUsd] still applies ONE blended
+     * $/M to input and output together, from a table that names only 2024 models.
+     * That is the larger error (1.8x to 29x depending on the model string) and it
+     * is deliberately left alone here — this commit ships alone, and mixing a
+     * table rewrite into it would make the measured before/after unreadable.
+     *
+     * ── THE ARITHMETIC ──────────────────────────────────────────────────────
+     * The multipliers are relative to base input: a cache read costs ~0.1x on
+     * Anthropic and ~0.5x on OpenAI/Gemini, and an Anthropic cache WRITE costs
+     * ~1.25x. So a cached token is not free and a written one costs more than a
+     * fresh one — a naive "subtract the cached tokens" would under-report in one
+     * direction and over-report in the other.
+     *
+     * `tokens` arrives from the provider's own usage object and already includes
+     * both cache figures — for Anthropic because [anthropicTotal] adds them, for
+     * OpenAI and Gemini because the provider folds them in. So each is REPLACED
+     * at its own multiplier, never added.
+     */
+    private fun costUsdFor(result: LlmResponse, model: String, provider: String): Double? {
+        val total = result.tokenCount ?: return null
+        return estimateCostUsd(
+            effectiveBillableTokens(
+                total, result.cacheReadTokens, result.cacheWriteTokens, provider),
+            model)
+    }
+
+    /**
+     * Tokens to bill, with cached input REPLACED at its own rate.
+     *
+     * Pure and internal because this is the arithmetic that silently moves money:
+     * every branch is a plausible-looking one-liner and three of them are wrong.
+     *
+     *   - Adding the cached tokens instead of replacing them double-counts, since
+     *     every provider's total already includes them.
+     *   - Treating a cache read as free under-reports by 10-50% of the prefix.
+     *   - Treating a cache WRITE as a read under-reports by 12.5x on that slice —
+     *     a write costs MORE than a fresh token, not less.
+     *
+     * Clamped, because a provider is free to report a cached count that exceeds
+     * what we believe the total is, and a negative fresh count would flip the
+     * sign of the bill.
+     */
+    internal fun effectiveBillableTokens(
+        total: Int,
+        cacheRead: Int?,
+        cacheWrite: Int?,
+        provider: String,
+    ): Int {
+        val read  = (cacheRead ?: 0).coerceIn(0, total)
+        val write = (cacheWrite ?: 0).coerceIn(0, total - read)
+        val fresh = (total - read - write).coerceAtLeast(0)
+
+        /* Anthropic publishes 0.1x for a read; OpenAI and Gemini discount a cached
+           prefix by half. Per provider because getting it wrong is a silent 5x on
+           the cached fraction, which on an agent loop is most of the prompt. */
+        val readMultiplier  = if (provider == "anthropic") 0.10 else 0.50
+        /* Anthropic only. The other two neither charge for nor report a write, so
+           `write` is always 0 there and this multiplier never applies. */
+        val writeMultiplier = 1.25
+
+        return (fresh + (read * readMultiplier) + (write * writeMultiplier))
+            .toInt().coerceAtLeast(0)
     }
 
     private fun estimateCostUsd(tokens: Int, model: String): Double {
@@ -1257,6 +1508,29 @@ class LlmNodeExecutor(
         val tokensIn: Int? = null,
         val tokensOut: Int? = null,
         val logprobsJson: String? = null,
+        /**
+         * Input tokens served from the provider's prompt cache, billed at a
+         * fraction of the base input rate.
+         *
+         * ── WHY THIS IS RECORDED EVEN WITH CACHING OFF ──────────────────────
+         * OpenAI and Gemini cache automatically, with no opt-in and no way to
+         * decline, and both INCLUDE the cached tokens in the headline prompt
+         * count. Pricing that count at the full rate over-reports every agent run
+         * — measured at 2.8x on a ten-iteration loop, because 87% of its input is
+         * a resent prefix. So this field is populated for all three providers
+         * regardless of [PROMPT_CACHE_ENABLED]: the flag governs whether we ASK
+         * Anthropic to cache, never whether we notice that caching happened.
+         *
+         * Null means the provider said nothing, which is not the same as zero and
+         * must not be priced as if it were.
+         */
+        val cacheReadTokens: Int? = null,
+        /**
+         * Input tokens written to the cache this call, billed at ~1.25x base input.
+         *
+         * Anthropic only. OpenAI and Gemini do not charge for, or report, a write.
+         */
+        val cacheWriteTokens: Int? = null,
     )
 
     /**

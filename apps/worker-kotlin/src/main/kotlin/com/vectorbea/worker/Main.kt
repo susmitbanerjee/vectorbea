@@ -636,6 +636,25 @@ fun main() {
     )
     partitionMaintenance.start()
 
+    // ── Retention sweeper ─────────────────────────────────────────────────────
+    //
+    // Per-workspace, per-entity deletion of data past its plan's window. Its own
+    // scheduler rather than another phase of `PartitionMaintenance`, because the
+    // two answer different questions and must be able to fail separately: one
+    // keeps the PLATFORM's partitions healthy, the other enforces a CUSTOMER's
+    // policy. Folding them together would mean an archive export that is behind —
+    // which correctly blocks a partition drop — also silently stops enforcing
+    // retention on every workspace.
+    //
+    // It shares the export store with the archiver and takes its own Redis lock,
+    // so exactly one worker sweeps at a time however many replicas are running.
+    val retentionSweeper = com.vectorbea.worker.retention.RetentionSweeper(
+        dataSource = database.dataSource,
+        redisCommands = redis.commands,
+        exporter = com.vectorbea.worker.retention.WorkspaceExporter(database.dataSource),
+    )
+    retentionSweeper.start()
+
     // ── Metrics server ────────────────────────────────────────────────────────
     // §5.4: `job_queue_depth{workspace, priority}`. Sampled on scrape rather than
     // counted in-process, because the queue is a Postgres table that every replica and
@@ -683,6 +702,10 @@ fun main() {
         heartbeat.drain()
         timerScheduler.stop()
         crashRecovery.stop()
+        /* Stopped early and without waiting: a sweep interrupted mid-batch loses
+           nothing — every batch has already committed and the next pass recomputes
+           what is left — so there is no reason to hold a shutdown open for it. */
+        retentionSweeper.stop()
         typedConsumers.forEach { it.stop(drainTimeoutMs = 30_000L) }
         legacyConsumer?.stop(drainTimeoutSeconds = 30L)
         claimWakeup?.close()

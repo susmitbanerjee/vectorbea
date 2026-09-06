@@ -103,13 +103,10 @@ Upgrade path: [Railway Redis](https://railway.app) or [Render Redis](https://ren
 
 1. Connect your GitHub repo.
 2. Add a new **Service** → point to `apps/api-kotlin`.
-3. Set **Root Directory**: `apps/api-kotlin`.
-4. Set **Build Command**: `gradle fatJar --no-daemon -q`
-5. Set **Start Command**: `java $JAVA_OPTS -jar build/libs/vectorbea-api-all.jar`
-
-   Or use the Dockerfile (recommended for reproducibility):
-   - Set **Dockerfile path**: `apps/api-kotlin/Dockerfile`
-
+3. Leave **Root Directory** empty (repository root, `/`). The Dockerfile needs
+   the shared Kotlin packages under `packages/` in its build context.
+4. Set **Dockerfile Path**: `apps/api-kotlin/Dockerfile`.
+5. Set **Config File Path**: `/apps/api-kotlin/railway.json`.
 6. Set environment variables (see [Required Env Vars](#required-env-vars) below).
 
 **Health checks** (Railway → Settings → Health Check):
@@ -128,9 +125,12 @@ Upgrade path: [Railway Redis](https://railway.app) or [Render Redis](https://ren
 ### 4. Kotlin Worker — Railway (Background Worker)
 
 1. Add another **Service** from the same repo.
-2. Set **Root Directory**: `apps/worker-kotlin`.
-3. Set **Dockerfile path**: `apps/worker-kotlin/Dockerfile` (recommended).
-4. The worker has **no inbound HTTP** — it's a long-running background process.
+2. Leave **Root Directory** empty (repository root, `/`). The Dockerfile needs
+   `packages/observability-kotlin` and `packages/graph-kotlin` in its build
+   context.
+3. Set **Dockerfile Path**: `apps/worker-kotlin/Dockerfile`.
+4. Set **Config File Path**: `/apps/worker-kotlin/railway.json`.
+5. The worker has **no inbound HTTP** — it's a long-running background process.
 
 **Health / readiness:**
 - Railway won't route HTTP traffic to the worker.

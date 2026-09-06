@@ -131,7 +131,16 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 409 });
     }
     const safe = toSafeApiError(error, "The invitation could not be created");
-    return NextResponse.json({ error: safe.message, code: safe.code }, { status: safe.status });
+    /*
+     * `...safe.detail` is what carries a plan refusal's numbers to the client:
+     * the limit, the current count, the workspace's plan and the upgrade path.
+     * Without the spread the page gets a sentence and has to parse it to render
+     * an upgrade button, which is how the button ends up naming the wrong plan.
+     */
+    return NextResponse.json(
+      { error: safe.message, code: safe.code, ...(safe.detail ?? {}) },
+      { status: safe.status },
+    );
   }
 }
 

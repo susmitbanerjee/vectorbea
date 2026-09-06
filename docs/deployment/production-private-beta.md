@@ -118,18 +118,25 @@ Use the same key for both API and worker.
 ## Deploying api-kotlin (Railway)
 
 1. Create a new Railway service
-2. Set **Root Directory** to `apps/api-kotlin`
-3. Railway auto-detects the Dockerfile
-4. Add all required env vars
-5. Set `RUN_MIGRATIONS=true` for first deploy (migrations are idempotent)
-6. Verify: `GET https://api.yourapp.com/health`
+2. Leave **Root Directory** empty (repository root, `/`). The API Dockerfile
+   copies shared Kotlin packages from `packages/`, so an isolated
+   `apps/api-kotlin` build context will fail.
+3. Set **Dockerfile Path** to `apps/api-kotlin/Dockerfile`
+4. Set **Config File Path** to `/apps/api-kotlin/railway.json`
+5. Add all required env vars
+6. Set `RUN_MIGRATIONS=true` for first deploy (migrations are idempotent)
+7. Verify: `GET https://api.yourapp.com/health`
 
 ## Deploying worker-kotlin (Railway)
 
 1. Create a second Railway service in same project
-2. Set **Root Directory** to `apps/worker-kotlin`
-3. Add all required env vars
-4. Worker starts polling Redis automatically
+2. Leave **Root Directory** empty (repository root, `/`). The worker Dockerfile
+   copies `packages/observability-kotlin` and `packages/graph-kotlin`; Railway
+   excludes both when the root is set to `apps/worker-kotlin`.
+3. Set **Dockerfile Path** to `apps/worker-kotlin/Dockerfile`
+4. Set **Config File Path** to `/apps/worker-kotlin/railway.json`
+5. Add all required env vars
+6. Worker starts polling Redis automatically
 
 ## Deploying web (Vercel)
 
