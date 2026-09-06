@@ -1,5 +1,6 @@
 package com.vectorbea.worker.retention
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.worker.logging.logger
 import io.lettuce.core.SetArgs
 import io.lettuce.core.api.sync.RedisCommands
@@ -114,8 +115,10 @@ class RetentionSweeper(
            would otherwise have them all contend for the lock in the same second,
            and the one that wins does its heaviest work while the fleet is still
            warming up. */
+        ScheduledJobHealth.register(JOB_SWEEP, pollIntervalMs)
         future = executor.scheduleWithFixedDelay(
-            ::tick, 120_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
+            { ScheduledJobHealth.record(JOB_SWEEP) { tick() } },
+            120_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
 
         /* A SECOND, MUCH SHORTER LOOP, for user-requested exports.
            The API has no exporter — it is a streaming multi-gigabyte job that has
@@ -124,8 +127,14 @@ class RetentionSweeper(
            person pressed a button and is watching; and separate from the sweep
            because an export must not wait behind an hour of deletion, nor a
            deletion behind somebody's download. */
+        /* Registered as its own job. It has a different cadence and a different
+           failure meaning from the sweep — a stalled export drain is somebody's
+           download never arriving, not data being retained too long — and one
+           staleness series covering both would go green whenever either ran. */
+        ScheduledJobHealth.register(JOB_EXPORT_DRAIN, 30_000L)
         exportFuture = executor.scheduleWithFixedDelay(
-            ::drainQueuedExports, 20_000L, 30_000L, TimeUnit.MILLISECONDS)
+            { ScheduledJobHealth.record(JOB_EXPORT_DRAIN) { drainQueuedExports() } },
+            20_000L, 30_000L, TimeUnit.MILLISECONDS)
 
         log.info("[retention] sweeper started (interval={}ms, deleteEnabled={}, batch={})",
             pollIntervalMs, deleteEnabled, batchSize)
@@ -196,6 +205,7 @@ class RetentionSweeper(
         }
         return runCatching { sweep() }.getOrElse { e ->
             log.error("[retention] sweep failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
             Outcome(null, 0, 0, 0, 0, 0, false)
         }
     }
@@ -615,5 +625,7 @@ class RetentionSweeper(
 
     private companion object {
         const val LOCK_KEY = "vectorbea:retention:sweep"
+        const val JOB_SWEEP = "retention-sweep"
+        const val JOB_EXPORT_DRAIN = "retention-export-drain"
     }
 }

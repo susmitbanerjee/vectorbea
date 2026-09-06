@@ -28,6 +28,41 @@ datasources:
           url: '$${__value.raw}'
           datasourceUid: tempo
 
+  # ── The application database, READ ONLY ────────────────────────────────────
+  #
+  # WHY A SECOND KIND OF DATASOURCE AT ALL
+  # The technical dashboards read Prometheus. The product ones cannot: adoption,
+  # funnels and feature usage come from discrete events in `analytics_events`, and
+  # those are not metrics. Turning them into Prometheus series would mean a counter
+  # per event name per workspace — a cardinality disaster to answer questions that
+  # SQL answers exactly, over data that is already being written.
+  #
+  # It is also what makes the product dashboards environment-aware for free:
+  # `analytics_events.environment` has been a first-class column since V032, so the
+  # same `$env` selector works here as on the metric dashboards.
+  #
+  # THE CREDENTIAL MUST BE A READ-ONLY ROLE. Not the application user. Grafana
+  # dashboards accept arbitrary SQL from anyone who can edit a panel, and a
+  # connection with write access turns "someone experimented with a query" into a
+  # production incident. See ops/monitoring/railway/README.md §6 for the GRANT.
+  - name: Analytics
+    type: postgres
+    uid: analytics
+    access: proxy
+    url: ${ANALYTICS_DB_HOST}:${ANALYTICS_DB_PORT}
+    database: ${ANALYTICS_DB_NAME}
+    user: ${ANALYTICS_DB_USER}
+    secureJsonData:
+      password: ${ANALYTICS_DB_PASSWORD}
+    jsonData:
+      sslmode: require
+      postgresVersion: 1600
+      # Neon pools aggressively on its side; a large Grafana-side pool on top of it
+      # is how a dashboard refresh starves the application of connections.
+      maxOpenConns: 4
+      maxIdleConns: 2
+      timescaledb: false
+
   - name: Tempo
     type: tempo
     uid: tempo

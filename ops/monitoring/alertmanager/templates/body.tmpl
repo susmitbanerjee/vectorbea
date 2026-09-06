@@ -1,0 +1,22 @@
+{{/*
+  One body template, used by both receivers.
+
+  The action comes before the detail, deliberately. Someone reading this on a phone at
+  3am sees roughly four lines before they have to scroll, and those four lines should
+  tell them what to do rather than restate what the subject already said.
+*/}}
+{{ define "vectorbea.body" }}
+{{ range .Alerts }}
+{{ if eq .Status "resolved" }}RESOLVED — no action needed.
+{{ end }}WHAT TO DO:
+{{ .Annotations.action }}
+
+WHAT HAPPENED:
+{{ .Annotations.description }}
+
+Environment: {{ .Labels.environment }}
+Runbook:     docs/telemetry/RUNBOOKS.md#{{ .Labels.runbook | toLower }}
+Dashboard:   {{ .GeneratorURL }}
+Started:     {{ .StartsAt.Format "2006-01-02 15:04:05 MST" }}
+{{ end }}
+{{ end }}

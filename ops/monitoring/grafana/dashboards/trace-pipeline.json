@@ -1,0 +1,374 @@
+{
+  "uid": "vb-trace-pipeline",
+  "title": "Trace pipeline health",
+  "description": "Whether the observability layer is telling the truth. Drops, back-pressure, partition maintenance and customer trace export. Audience: whoever is about to trust a trace or a timeline.",
+  "tags": [
+    "vectorbea",
+    "telemetry",
+    "traces"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(job_last_success_timestamp_seconds, environment)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Are we losing telemetry?",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Run events dropped",
+      "description": "THE SERIOUS ONE. An event hole breaks timeline paging on ?afterSequence= and a lost RUN_FAILED is an outage reported as a success. The store applies back-pressure before it drops, so any drop means it blocked past AGENT_EVENT_BACKPRESSURE_TIMEOUT_MS — the database was not answering.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(worker_run_events_dropped_total{environment=~\"$env\"}[5m]) * 60)",
+          "refId": "A",
+          "legendFormat": "dropped/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Spans dropped, by reason",
+      "description": "A dropped span is a degraded trace — bad, but bounded. SpanWriter drops and counts by design rather than blocking execution. Also persisted to agent_runs.dropped_spans, because 'was this trace complete' gets asked hours later.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(worker_trace_spans_dropped_total{environment=~\"$env\"}[5m]) * 60)",
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Customer OTLP exports dropped",
+      "description": "A workspace's own observability endpoint is not accepting. This is a customer-visible failure of a feature they configured — check workspace_otel_exports.last_error.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(worker_trace_exports_dropped_total{environment=~\"$env\"}[5m]) * 60)",
+          "refId": "A",
+          "legendFormat": "dropped/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Spans written",
+      "description": "The denominator. A drop rate means nothing without it — 10 drops/min against 10,000 written is a different situation from 10 against 12.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(worker_trace_spans_written_total{environment=~\"$env\"}[5m]) * 60)",
+          "refId": "A",
+          "legendFormat": "written/min"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Event-store back-pressure — DB pool wait",
+      "description": "The upstream cause of nearly every event drop. Events block on the emitting thread waiting for a connection; when this climbs, drops follow.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, service) (rate(db_pool_wait_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "p95 {{service}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, service) (rate(db_pool_wait_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "refId": "A",
+          "legendFormat": "p99 {{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Partitions and archive",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 17
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Partition drops refused by the gate",
+      "description": "`work_outstanding` means the gate is correctly holding a drop because the export is behind. `gate_unavailable` is more urgent: the export state could not be read at all, so nothing will drop until a person acts.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(worker_partition_drops_gated_total{environment=~\"$env\"}[15m]) * 60)",
+          "refId": "A",
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Partition maintenance passes",
+      "description": "Whether the job that creates next month's partitions is actually running. run_events has NO default partition — when the last pre-created month elapses, every event write in the system errors.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(job_runs_total{environment=~\"$env\", job_name=\"partition-maintenance\"}[1h]) * 3600)",
+          "refId": "A",
+          "legendFormat": "{{outcome}}/h"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    }
+  ]
+}

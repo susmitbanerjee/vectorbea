@@ -35,6 +35,10 @@ services:
       # the root filesystem, which would take the application down with it.
       - '--storage.tsdb.retention.time=15d'
       - '--storage.tsdb.retention.size=4GB'
+      # Matches the Railway deployment. The agent pushes; Prometheus no longer scrapes
+      # the application. Without this the receive endpoint 404s and the agent retries
+      # into a wall — which presents as "no data", not as an error.
+      - '--web.enable-remote-write-receiver'
       - '--web.enable-lifecycle'
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -51,10 +55,23 @@ services:
           memory: 768M
 
   alertmanager:
-    image: prom/alertmanager:v0.27.0
+    # BUILT, not pulled — and this is the one service where that matters. Alertmanager
+    # does not expand environment variables in its config, so the ${SMTP_*} values have
+    # to be substituted by an entrypoint before it starts. Running the stock image here
+    # would mean the local stack silently used the literal string "${SMTP_PASSWORD}"
+    # as a password while production used the real one, so local would never exercise
+    # the delivery path at all. See ops/monitoring/railway/alertmanager.Dockerfile.
+    build:
+      context: ../..
+      dockerfile: ops/monitoring/railway/alertmanager.Dockerfile
     restart: unless-stopped
+    environment:
+      ALERT_EMAIL: ${ALERT_EMAIL:-}
+      ALERT_WEBHOOK_URL: ${ALERT_WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.resend.com}
+      SMTP_USER: ${SMTP_USER:-resend}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
     volumes:
-      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     ports:
       - "127.0.0.1:9093:9093"
@@ -101,6 +118,10 @@ services:
     image: otel/opentelemetry-collector-contrib:0.109.0
     restart: unless-stopped
     command: ["--config=/etc/otel/config.yml"]
+    environment:
+      TELEMETRY_INGEST_TOKEN: ${TELEMETRY_INGEST_TOKEN:-local-dev-token}
+      PROMETHEUS_REMOTE_WRITE_ENDPOINT: http://prometheus:9090/api/v1/write
+      TEMPO_ENDPOINT: tempo:4317
     volumes:
       - ./otel/config.yml:/etc/otel/config.yml:ro
     ports:
@@ -126,7 +147,12 @@ services:
           memory: 512M
 
   grafana:
-    image: grafana/grafana:11.2.0
+    # BUILT, not pulled — the access allow-list lives in the entrypoint, and running
+    # the stock image locally would mean the auth path that ships is the one path
+    # nobody ever exercises.
+    build:
+      context: ../..
+      dockerfile: ops/monitoring/railway/grafana.Dockerfile
     restart: unless-stopped
     environment:
       # No anonymous access. The dashboards show per-workspace cost and volume, which
@@ -134,6 +160,28 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
+
+      # ── Who may open this at all ────────────────────────────────────────────
+      # The container refuses to start without it. Locally, OAuth is normally not
+      # configured, so this has no effect beyond being present — but it is set here
+      # so the local file documents the production requirement rather than hiding it.
+      GRAFANA_ALLOWED_EMAILS: ${GRAFANA_ALLOWED_EMAILS:-susmit.b1@gmail.com}
+      # Unset locally: no OAuth, local admin login, and a loud warning at startup.
+      # Set on Railway, where a shared password would not be an identity.
+      GRAFANA_OAUTH_CLIENT_ID: ${GRAFANA_OAUTH_CLIENT_ID:-}
+      GRAFANA_OAUTH_CLIENT_SECRET: ${GRAFANA_OAUTH_CLIENT_SECRET:-}
+      GRAFANA_BREAK_GLASS: ${GRAFANA_BREAK_GLASS:-false}
+      # Must match the public URL or every generated link — including the one in an
+      # alert email — points at localhost.
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      # The Product and Workspace-support dashboards read analytics_events directly.
+      # This MUST be a read-only role: Grafana accepts arbitrary SQL from anyone who
+      # can edit a panel. See ops/monitoring/railway/README.md §6.
+      ANALYTICS_DB_HOST: ${ANALYTICS_DB_HOST:-host.docker.internal}
+      ANALYTICS_DB_PORT: ${ANALYTICS_DB_PORT:-5432}
+      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-vectorbea}
+      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER:-grafana_ro}
+      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD:-}
       # Dashboards and datasources are provisioned from this repo, not clicked
       # together in the UI. A dashboard that exists only in Grafana's database is one
       # box failure away from being gone, and is not reviewable.
@@ -152,6 +200,38 @@ services:
       resources:
         limits:
           memory: 512M
+
+  # ── The per-environment agent, locally ──────────────────────────────────────
+  #
+  # Present so local development exercises the SAME path production uses. Without it
+  # the local stack would be the only place Prometheus scrapes services directly, and
+  # the config that actually ships would have no local coverage at all — which is how
+  # the previous version of this stack came to be untested.
+  #
+  # `host.docker.internal` is correct HERE and only here: locally the services really
+  # are on the host. On Railway the agent uses DNS discovery inside the private network.
+  telemetry-agent:
+    image: otel/opentelemetry-collector-contrib:0.109.0
+    restart: unless-stopped
+    command: ["--config=/etc/otel/config.yml"]
+    environment:
+      VECTORBEA_ENV: ${VECTORBEA_ENV:-local}
+      TELEMETRY_INGEST_TOKEN: ${TELEMETRY_INGEST_TOKEN:-local-dev-token}
+      TELEMETRY_INGEST_ENDPOINT: otel-collector:4317
+      API_METRICS_TARGET: host.docker.internal:8080
+      WORKER_DNS_NAME: host.docker.internal
+    volumes:
+      - ./agent/config.local.yml:/etc/otel/config.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - otel-collector
+    ports:
+      - "127.0.0.1:4319:4317"   # where local api/worker send spans
+    deploy:
+      resources:
+        limits:
+          memory: 192M
 
 volumes:
   prometheus-data:

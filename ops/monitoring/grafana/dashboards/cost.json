@@ -2,21 +2,50 @@
   "uid": "vb-cost",
   "title": "Cost",
   "description": "What the platform is spending on models, and who is spending it. Costs are ESTIMATES computed from token counts and a per-model price table — they will not match a provider invoice to the cent. Use them to spot the customer costing 40x the median, not to reconcile a bill.",
-  "tags": ["vectorbea", "cost"],
+  "tags": [
+    "vectorbea",
+    "cost"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "1m",
-  "time": { "from": "now-7d", "to": "now" },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(job_last_success_timestamp_seconds, environment)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        }
+      },
+      {
         "name": "workspace",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(llm_cost_usd_micros_total, workspace)",
         "includeAll": true,
         "multi": true,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -26,145 +55,317 @@
       "type": "stat",
       "title": "Spend, last 24h",
       "description": "Estimated. Micros divided by 1e6 — the counter is an integer because a per-call cost of $0.0004 would truncate to zero in dollars.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
-        { "expr": "sum(increase(llm_cost_usd_micros_total[24h])) / 1e6", "legendFormat": "USD" }
+        {
+          "expr": "sum(increase(llm_cost_usd_micros_total{environment=~\"$env\"}[24h])) / 1e6",
+          "legendFormat": "USD"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } },
-      "options": { "colorMode": "value", "graphMode": "area" }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      }
     },
     {
       "id": 2,
       "type": "stat",
       "title": "Spend, last 7d",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
       "targets": [
-        { "expr": "sum(increase(llm_cost_usd_micros_total[7d])) / 1e6", "legendFormat": "USD" }
+        {
+          "expr": "sum(increase(llm_cost_usd_micros_total{environment=~\"$env\"}[7d])) / 1e6",
+          "legendFormat": "USD"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } },
-      "options": { "colorMode": "value", "graphMode": "area" }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      }
     },
     {
       "id": 3,
       "type": "stat",
       "title": "Cost per run (24h)",
       "description": "Total spend divided by runs completed. The number that decides whether a pricing model works. Rising while volume is flat means workflows are getting more expensive, not busier.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
-          "expr": "(sum(increase(llm_cost_usd_micros_total[24h])) / 1e6) / clamp_min(sum(increase(worker_workflow_runs_succeeded_total[24h])), 1)",
+          "expr": "(sum(increase(llm_cost_usd_micros_total{environment=~\"$env\"}[24h])) / 1e6) / clamp_min(sum(increase(worker_workflow_runs_succeeded_total{environment=~\"$env\"}[24h])), 1)",
           "legendFormat": "USD/run"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 4 } },
-      "options": { "colorMode": "value", "graphMode": "area" }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      }
     },
     {
       "id": 4,
       "type": "stat",
       "title": "Tokens, last 24h",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
       "targets": [
-        { "expr": "sum(increase(llm_tokens_total[24h]))", "legendFormat": "tokens" }
+        {
+          "expr": "sum(increase(llm_tokens_total{environment=~\"$env\"}[24h]))",
+          "legendFormat": "tokens"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } },
-      "options": { "colorMode": "value", "graphMode": "area" }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      }
     },
     {
       "id": 10,
       "type": "row",
       "title": "By workspace",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
     },
     {
       "id": 11,
       "type": "timeseries",
       "title": "Spend rate by workspace",
       "description": "USD per hour. This is the panel that finds the customer whose usage does not fit the plan they are on.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 16, "x": 0, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 6
+      },
       "targets": [
         {
-          "expr": "sum by (workspace) (rate(llm_cost_usd_micros_total{workspace=~\"$workspace\"}[1h])) * 3600 / 1e6",
+          "expr": "sum by (workspace) (rate(llm_cost_usd_micros_total{environment=~\"$env\", workspace=~\"$workspace\"}[1h])) * 3600 / 1e6",
           "legendFormat": "{{workspace}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "custom": { "fillOpacity": 15, "stacking": { "mode": "normal" } } } },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "fillOpacity": 15,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
     },
     {
       "id": 12,
       "type": "barchart",
       "title": "Top workspaces, 7d",
       "description": "Absolute spend. Note the `overflow` series if it appears: past 1,000 distinct label sets the metric collapses the long tail rather than exhausting memory. If overflow is significant, read per-workspace cost from Postgres instead.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
       "targets": [
         {
-          "expr": "topk(10, sum by (workspace) (increase(llm_cost_usd_micros_total[7d])) / 1e6)",
+          "expr": "topk(10, sum by (workspace) (increase(llm_cost_usd_micros_total{environment=~\"$env\"}[7d])) / 1e6)",
           "legendFormat": "{{workspace}}",
           "instant": true
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      }
     },
     {
       "id": 20,
       "type": "row",
       "title": "By workflow and model",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
+      }
     },
     {
       "id": 21,
       "type": "barchart",
       "title": "Top workflows, 7d",
       "description": "Which workflows cost the most to run. A workflow near the top with low run volume is doing something expensive per run — usually a large context or an agent loop that is not converging.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
       "targets": [
         {
-          "expr": "topk(10, sum by (workflow) (increase(llm_cost_usd_micros_total{workspace=~\"$workspace\"}[7d])) / 1e6)",
+          "expr": "topk(10, sum by (workflow) (increase(llm_cost_usd_micros_total{environment=~\"$env\", workspace=~\"$workspace\"}[7d])) / 1e6)",
           "legendFormat": "{{workflow}}",
           "instant": true
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      }
     },
     {
       "id": 22,
       "type": "piechart",
       "title": "Spend by model, 7d",
       "description": "Where the money goes by model. The lever this panel exists to support is moving a node to a cheaper model — and §10's point that reliability is a per-node spend decision applies in both directions.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 15 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 15
+      },
       "targets": [
         {
-          "expr": "sum by (model) (increase(llm_cost_usd_micros_total{workspace=~\"$workspace\"}[7d])) / 1e6",
+          "expr": "sum by (model) (increase(llm_cost_usd_micros_total{environment=~\"$env\", workspace=~\"$workspace\"}[7d])) / 1e6",
           "legendFormat": "{{model}}",
           "instant": true
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "values": ["value", "percent"] } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "values": [
+            "value",
+            "percent"
+          ]
+        }
+      }
     },
     {
       "id": 23,
       "type": "timeseries",
       "title": "Call volume by model",
       "description": "Calls per minute. Read against the spend panel: high volume with low spend is a cheap model doing a lot of work, which is usually what you want.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 15 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 15
+      },
       "targets": [
         {
-          "expr": "sum by (model) (rate(llm_calls_total{workspace=~\"$workspace\"}[5m]) * 60)",
+          "expr": "sum by (model) (rate(llm_calls_total{environment=~\"$env\", workspace=~\"$workspace\"}[5m]) * 60)",
           "legendFormat": "{{model}}"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        }
+      }
     }
   ]
 }

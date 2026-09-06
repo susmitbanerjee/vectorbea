@@ -1,19 +1,35 @@
-# Scrape config.
+# Central Prometheus. Receives; barely scrapes.
 #
-# The API and the worker each expose `/metrics`. They are separate jobs rather than one
-# because they answer different questions and the alerts below target the worker's
-# series specifically — putting them in one job would make every query carry a
-# `job="…"` filter it would be easy to forget.
+# ── WHAT CHANGED, AND WHY IT HAD TO ──────────────────────────────────────────
+# This file used to scrape `host.docker.internal:8080` and three hard-coded worker
+# ports. That works on exactly one topology — every process on one box — and the
+# platform does not run on one box; it runs on Railway, where the API and the worker
+# live in per-environment private networks this process cannot reach.
+#
+# The result was a scrape config that had never successfully scraped anything, three
+# dashboards rendering nothing, and 110 metrics emitted into the void. See
+# docs/TELEMETRY-AUDIT.md §8.
+#
+# So the direction is inverted: a per-environment agent scrapes inside its own
+# network and pushes here (ops/monitoring/agent/config.yml). This process receives
+# remote-write from the central collector and scrapes only the monitoring stack
+# itself, which IS on its own private network and IS reachable.
+#
+# Requires `--web.enable-remote-write-receiver` — set in docker-compose.yml. Without
+# it the receive endpoint 404s and every agent retries into a wall.
 
 global:
-  # 15s rather than the 1m default: the claim-latency alert evaluates over 5 minutes,
-  # and at a 1m interval that is five samples — too few for a p95 to mean anything.
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    # Stamped on every series so a future second box, or a staging stack, is
-    # distinguishable in a federated view rather than silently merged.
-    environment: '${VECTORBEA_ENV}'
+    # Identifies THIS MONITORING STACK, not the environment being monitored. The
+    # `environment` label on application series is stamped by the agent that
+    # collected it — see the agent config for why it is set there and not here.
+    #
+    # Note that external_labels are applied to remote-READ and federation, not to
+    # received remote-write, which is what makes it safe for this to differ from the
+    # `environment` label the series already carry.
+    monitor: 'vectorbea-central'
 
 rule_files:
   - /etc/prometheus/alerts.yml
@@ -24,32 +40,24 @@ alerting:
         - targets: ['alertmanager:9093']
 
 scrape_configs:
-  - job_name: 'vectorbea-api'
-    metrics_path: /metrics
-    static_configs:
-      - targets: ['host.docker.internal:8080']
-        labels:
-          service: api
-
-  # The worker's metrics are on a separate port from its work, deliberately: the port
-  # can be firewalled independently and a scrape cannot contend with the queue.
+  # ── Self-monitoring only ────────────────────────────────────────────────────
   #
-  # Every replica is listed. Prometheus needs to see them individually — the whole
-  # point of `worker_in_flight{worker_id}` is telling one worker from another, and a
-  # single load-balanced target would round-robin between them and produce nonsense.
-  - job_name: 'vectorbea-worker'
-    metrics_path: /metrics
-    static_configs:
-      - targets:
-          - 'host.docker.internal:9090'
-          - 'host.docker.internal:9091'
-          - 'host.docker.internal:9092'
-        labels:
-          service: worker
-    # A worker that is down should show as absent rather than as a gap in an existing
-    # series, so the instance label is kept as-is.
-    honor_labels: true
-
+  # Application targets are NOT here. They arrive by remote-write. The one thing
+  # this stack can still scrape directly is itself, and it should: a Prometheus that
+  # cannot see its own ingestion rate cannot tell "no traffic" from "not receiving",
+  # and those look identical on a dashboard and mean opposite things.
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+        labels:
+          service: prometheus
+          environment: infra
+
+  # The central collector's own telemetry — queue depth, refused spans, export
+  # failures. When ingest breaks, this is the series that says so.
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888']
+        labels:
+          service: otel-collector
+          environment: infra

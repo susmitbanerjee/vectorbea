@@ -1,0 +1,247 @@
+{
+  "uid": "vb-scheduled-jobs",
+  "title": "Scheduled jobs",
+  "description": "Every background loop in the platform, and whether it has run recently. This exists because a job that silently stops was previously invisible until its consequence surfaced months later.",
+  "tags": [
+    "vectorbea",
+    "jobs"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(job_last_success_timestamp_seconds, environment)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Is every scheduled job still alive?",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Time since last success, against each job's own interval",
+      "description": "Expressed as a RATIO of the job's own interval, so jobs whose cadences differ by three orders of magnitude are readable on one axis. 1.0 means a pass is due now. The staleness alert fires at 3.0 — three missed passes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "expr": "(time() - job_last_success_timestamp_seconds{environment=~\"$env\"}) / job_expected_interval_seconds{environment=~\"$env\"}",
+          "refId": "A",
+          "legendFormat": "{{job_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 3
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "row",
+      "title": "Per-job detail",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      }
+    },
+    {
+      "id": 4,
+      "type": "table",
+      "title": "Job status",
+      "description": "Absolute staleness in seconds. A job appearing here with a large value that never resets has either stopped or is failing every pass — the panel to the right separates those two.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "time() - job_last_success_timestamp_seconds{environment=~\"$env\"}",
+          "refId": "A",
+          "legendFormat": "{{job_name}}",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Pass outcomes, by job",
+      "description": "This is what tells a STOPPED job from a FAILING one. No series at all means the loop is not running. A series with outcome=failed means it is running and throwing — a different problem with a different fix.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "targets": [
+        {
+          "expr": "sum by (job_name, outcome) (rate(job_runs_total{environment=~\"$env\"}[15m]) * 60)",
+          "refId": "A",
+          "legendFormat": "{{job_name}} {{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Pass duration p95 vs interval",
+      "description": "A job whose duration approaches its interval is one slow pass from overlapping itself — and scheduleWithFixedDelay hides that by simply running less often, which reads as a healthy job on a longer cadence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, job_name) (rate(job_duration_seconds_bucket{environment=~\"$env\"}[15m])))",
+          "refId": "A",
+          "legendFormat": "p95 {{job_name}}"
+        },
+        {
+          "expr": "job_expected_interval_seconds{environment=~\"$env\"}",
+          "refId": "A",
+          "legendFormat": "interval {{job_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 package com.vectorbea.worker.durable
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.queue.WorkflowRunJob
 import io.lettuce.core.RedisClient
@@ -34,6 +35,8 @@ class TimerScheduler(
     private val pollIntervalMs: Long = 15_000L,
     private val lockTtlSeconds: Long = 30L,
 ) {
+    private companion object { const val JOB_NAME = "timer-scheduler" }
+
     private val log = logger()
     private val running = AtomicBoolean(false)
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
@@ -44,7 +47,10 @@ class TimerScheduler(
 
     fun start() {
         if (running.compareAndSet(false, true)) {
-            future = executor.scheduleWithFixedDelay(::tick, 5_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
+            ScheduledJobHealth.register(JOB_NAME, pollIntervalMs)
+            future = executor.scheduleWithFixedDelay(
+                { ScheduledJobHealth.record(JOB_NAME) { tick() } },
+                5_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
             log.info("[timers] scheduler started (pollInterval={}ms)", pollIntervalMs)
         }
     }
@@ -113,6 +119,7 @@ class TimerScheduler(
             }
         } catch (e: Exception) {
             log.error("[timers] tick failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
         }
     }
 

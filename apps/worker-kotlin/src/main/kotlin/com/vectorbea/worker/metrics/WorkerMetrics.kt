@@ -961,6 +961,19 @@ object WorkerMetrics {
                 })
             } catch (_: Exception) { /* skip broken metric */ }
         }
+        // ── Metrics owned by the shared observability library ─────────────────
+        //
+        // The worker's own primitives above are a near-copy of `observability.metrics`
+        // and predate it; unifying them is its own piece of work. What must NOT wait
+        // for that is rendering the shared registry, because anything registered
+        // there — `ScheduledJobHealth` above all — would otherwise be incremented
+        // correctly and never appear on the wire.
+        //
+        // That is precisely the failure mode `scripts/load/verify-metrics.mjs` was
+        // written to catch, and the hand-written list above is where it keeps
+        // happening. The API has rendered both registries from its `/metrics` since
+        // the library landed; this brings the worker in line.
+        append(com.vectorbea.observability.metrics.MetricsRegistry.scrape())
         append("# EOF\n")
     }
 

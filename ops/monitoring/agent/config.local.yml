@@ -1,0 +1,124 @@
+# The agent, for LOCAL development only.
+#
+# Identical to `config.yml` except for how it finds the worker.
+#
+# ── WHY A SEPARATE FILE RATHER THAN ONE PARAMETERISED CONFIG ─────────────────
+# Railway uses `dns_sd_configs` with AAAA lookups, because its internal DNS returns
+# one answer per replica and that is how `worker_in_flight{worker_id}` gets a series
+# per machine. Locally there is no such DNS: replicas are three processes on the host,
+# distinguished by port, and an AAAA lookup of `host.docker.internal` returns one
+# address no matter how many are running.
+#
+# The two are genuinely different discovery mechanisms, and collapsing them into one
+# file behind a variable would mean the config that ships to production is never the
+# config anyone runs locally. That is precisely how the previous version of this stack
+# ended up committed, reviewed and non-functional.
+#
+# Everything else — the environment stamping, the redaction, the egress path — is the
+# same, deliberately, so local development exercises the real pipeline.
+
+extensions:
+  bearertokenauth/egress:
+    scheme: Bearer
+    token: ${env:TELEMETRY_INGEST_TOKEN}
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      global:
+        scrape_interval: 15s
+        scrape_timeout: 10s
+      scrape_configs:
+        - job_name: vectorbea-api
+          metrics_path: /metrics
+          static_configs:
+            - targets: ['${env:API_METRICS_TARGET}']
+              labels:
+                service: api
+
+        # Three ports rather than DNS discovery — the local equivalent of three
+        # replicas. A worker that is not running simply fails to scrape, which is the
+        # correct outcome: it shows as absent rather than as a gap in a live series.
+        - job_name: vectorbea-worker
+          metrics_path: /metrics
+          static_configs:
+            - targets:
+                - '${env:WORKER_DNS_NAME}:9090'
+                - '${env:WORKER_DNS_NAME}:9091'
+                - '${env:WORKER_DNS_NAME}:9092'
+              labels:
+                service: worker
+
+        - job_name: telemetry-agent
+          static_configs:
+            - targets: ['127.0.0.1:8888']
+              labels:
+                service: telemetry-agent
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 128
+    spike_limit_mib: 32
+
+  resource:
+    attributes:
+      - key: environment
+        value: ${env:VECTORBEA_ENV}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:VECTORBEA_ENV}
+        action: upsert
+
+  attributes/redact:
+    actions:
+      - key: vectorbea.input
+        action: delete
+      - key: vectorbea.output
+        action: delete
+      - key: db.statement
+        action: delete
+      - key: http.request.body
+        action: delete
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  otlp/central:
+    endpoint: ${env:TELEMETRY_INGEST_ENDPOINT}
+    tls:
+      insecure: true
+    auth:
+      authenticator: bearertokenauth/egress
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 60s
+    sending_queue:
+      enabled: true
+      queue_size: 1000
+
+service:
+  extensions: [bearertokenauth/egress]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      address: 127.0.0.1:8888
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlp/central]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes/redact, batch]
+      exporters: [otlp/central]

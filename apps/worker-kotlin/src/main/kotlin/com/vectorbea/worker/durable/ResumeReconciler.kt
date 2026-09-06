@@ -1,5 +1,6 @@
 package com.vectorbea.worker.durable
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.metrics.WorkerMetrics
 import com.vectorbea.worker.queue.WorkflowRunJob
@@ -79,6 +80,7 @@ class ResumeReconciler(
     private var future: ScheduledFuture<*>? = null
 
     companion object {
+        const val JOB_NAME = "resume-reconciler"
         val SWEEP_INTERVAL_MS: Long =
             System.getenv("RESUME_RECONCILER_INTERVAL_MS")?.toLongOrNull() ?: 30_000L
         val MIN_PARKED_MS: Long =
@@ -112,8 +114,10 @@ class ResumeReconciler(
             return
         }
         if (running.compareAndSet(false, true)) {
+            ScheduledJobHealth.register(JOB_NAME, pollIntervalMs)
             future = executor.scheduleWithFixedDelay(
-                ::tick, pollIntervalMs, pollIntervalMs, TimeUnit.MILLISECONDS)
+                { ScheduledJobHealth.record(JOB_NAME) { tick() } },
+                pollIntervalMs, pollIntervalMs, TimeUnit.MILLISECONDS)
             log.info("[reconciler] started (interval={}ms, minParked={}ms, maxAttempts={})",
                 pollIntervalMs, minParkedMs, maxAttempts)
         }
@@ -135,6 +139,7 @@ class ResumeReconciler(
             stuck.count { reconcile(it) }
         } catch (e: Exception) {
             log.error("[reconciler] sweep failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
             0
         }
     }

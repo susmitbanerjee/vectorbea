@@ -1,5 +1,6 @@
 package com.vectorbea.worker.heartbeat
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.worker.config.WorkerConfig
 import com.vectorbea.worker.logging.logger
 import io.lettuce.core.api.sync.RedisCommands
@@ -70,8 +71,14 @@ class WorkerHeartbeat(
         log.info("[heartbeat] starting (interval={}ms, ttl={}s)",
             config.heartbeatIntervalMs, config.heartbeatTtlSeconds)
 
+        /* Registered like every other loop even though it already publishes
+           `worker_heartbeat_age_seconds`. That gauge answers "is this worker
+           alive"; this answers "is the heartbeat LOOP alive", and they differ in
+           the case that matters — a scheduler thread that died leaves the last
+           age value frozen rather than climbing, which reads as healthy. */
+        ScheduledJobHealth.register(JOB_NAME, config.heartbeatIntervalMs)
         scheduler.scheduleAtFixedRate(
-            ::beat,
+            { ScheduledJobHealth.record(JOB_NAME) { beat() } },
             0L,
             config.heartbeatIntervalMs,
             TimeUnit.MILLISECONDS,
@@ -105,16 +112,23 @@ class WorkerHeartbeat(
         val active = activeTasks.get()
         val st = status.get()
 
+        /* Either write failing means this beat did not fully land, so the pass is
+           not a success. Both destinations are read by something: Redis by the
+           TTL-based liveness checks, Postgres by `workers.last_heartbeat_at` and
+           the fleet view. A worker whose heartbeat writes have been failing for
+           five minutes is not heartbeating, however healthy the process feels. */
         try {
             writeRedisHeartbeat(now, active, st)
         } catch (e: Exception) {
             log.warn("[heartbeat] Redis write failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
         }
 
         try {
             writeDbHeartbeat(now, active, st)
         } catch (e: Exception) {
             log.warn("[heartbeat] DB write failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
         }
 
         log.debug("[heartbeat] beat [status={}, activeTasks={}]", st.value, active)
@@ -153,6 +167,8 @@ class WorkerHeartbeat(
     }
 
     companion object {
+        const val JOB_NAME = "worker-heartbeat"
+
         /**
          * Fleet registration. `workspace_id` / `environment_id` are explicitly
          * NULL: a worker serves every tenant on the queue and has no workspace to

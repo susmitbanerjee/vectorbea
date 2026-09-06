@@ -2,21 +2,50 @@
   "uid": "vb-fleet-health",
   "title": "Fleet health",
   "description": "Is the fleet keeping up? Read top-left to bottom-right: how much work is waiting, how long it waits, who is doing it, and whether anything is dying. Every panel here corresponds to a metric named in section 5.4.",
-  "tags": ["vectorbea", "fleet"],
+  "tags": [
+    "vectorbea",
+    "fleet"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "refresh": "30s",
-  "time": { "from": "now-3h", "to": "now" },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(job_last_success_timestamp_seconds, environment)",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        }
+      },
+      {
         "name": "workspace",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "query": "label_values(job_queue_depth, workspace)",
         "includeAll": true,
         "multi": true,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -25,120 +54,274 @@
       "id": 1,
       "type": "row",
       "title": "Is work waiting?",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "id": 2,
       "type": "timeseries",
       "title": "Queue depth",
       "description": "Runs queued and not yet claimed, by workspace. A single workspace climbing alone is one tenant flooding; everything climbing together is a capacity problem.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
       "targets": [
         {
-          "expr": "sum by (workspace) (job_queue_depth{workspace=~\"$workspace\"})",
+          "expr": "sum by (workspace) (job_queue_depth{environment=~\"$env\", workspace=~\"$workspace\"})",
           "legendFormat": "{{workspace}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "fillOpacity": 10, "showPoints": "never" }
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
         }
       },
-      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] } }
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
     },
     {
       "id": 3,
       "type": "timeseries",
       "title": "Claim latency — p50 / p95 / p99",
       "description": "Time from a run being ready to a worker taking it. p95 over 30s for 5 minutes is the SystemSaturated alert. This rises BEFORE anything fails, which is what makes it the saturation signal.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
       "targets": [
-        { "expr": "histogram_quantile(0.50, sum by (le) (rate(job_claim_latency_seconds_bucket[5m])))", "legendFormat": "p50" },
-        { "expr": "histogram_quantile(0.95, sum by (le) (rate(job_claim_latency_seconds_bucket[5m])))", "legendFormat": "p95" },
-        { "expr": "histogram_quantile(0.99, sum by (le) (rate(job_claim_latency_seconds_bucket[5m])))", "legendFormat": "p99" }
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(job_claim_latency_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(job_claim_latency_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(job_claim_latency_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "legendFormat": "p99"
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "custom": { "fillOpacity": 0, "showPoints": "never" },
+          "custom": {
+            "fillOpacity": 0,
+            "showPoints": "never"
+          },
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              { "color": "green", "value": null },
-              { "color": "red", "value": 30 }
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 30
+              }
             ]
           }
         }
       },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      }
     },
     {
       "id": 10,
       "type": "row",
       "title": "Who is doing it?",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      }
     },
     {
       "id": 11,
       "type": "timeseries",
       "title": "In flight, by worker",
       "description": "Runs currently executing on each replica. One worker flat at its ceiling while others are idle means work is not being distributed — check the claim loop, not the capacity.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 10
+      },
       "targets": [
-        { "expr": "worker_in_flight", "legendFormat": "{{worker_id}}" }
+        {
+          "expr": "worker_in_flight{environment=~\"$env\"}",
+          "legendFormat": "{{worker_id}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 20,
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      }
     },
     {
       "id": 12,
       "type": "timeseries",
       "title": "Slots available",
       "description": "Free execution slots across the fleet. At zero while queue depth is climbing, the fleet is full and needs replicas. Above zero while runs wait, the bottleneck is elsewhere.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 10
+      },
       "targets": [
-        { "expr": "sum(worker_slots_available)", "legendFormat": "fleet total" },
-        { "expr": "worker_pool_capacity_available", "legendFormat": "{{pool}}" }
+        {
+          "expr": "sum(worker_slots_available{environment=~\"$env\"})",
+          "legendFormat": "fleet total"
+        },
+        {
+          "expr": "worker_pool_capacity_available{environment=~\"$env\"}",
+          "legendFormat": "{{pool}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
       "id": 13,
       "type": "timeseries",
       "title": "Suspended runs (should be free)",
       "description": "Runs that yielded rather than holding a slot. Read this AGAINST in-flight: this climbing while in-flight stays flat is suspension working. Both climbing together means a suspend path is still occupying a permit.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 10
+      },
       "targets": [
-        { "expr": "sum by (reason) (rate(run_suspended_total[5m]) * 60)", "legendFormat": "{{reason}}/min" }
+        {
+          "expr": "sum by (reason) (rate(run_suspended_total{environment=~\"$env\"}[5m]) * 60)",
+          "legendFormat": "{{reason}}/min"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10 } } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        }
+      }
     },
     {
       "id": 20,
       "type": "row",
       "title": "Is anything dying?",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 }
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      }
     },
     {
       "id": 21,
       "type": "timeseries",
       "title": "Lease expiry rate",
       "description": "A lease expires when a worker holding a run stops heartbeating. Never normal. Over 1/min for 5 minutes is the WorkersDyingOrOverloaded alert.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 19 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 19
+      },
       "targets": [
-        { "expr": "sum(rate(lease_expiry_total[5m])) * 60", "legendFormat": "expiries/min" }
+        {
+          "expr": "sum(rate(lease_expiry_total{environment=~\"$env\"}[5m])) * 60",
+          "legendFormat": "expiries/min"
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] },
-          "custom": { "fillOpacity": 20, "thresholdsStyle": { "mode": "line" } }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "custom": {
+            "fillOpacity": 20,
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          }
         }
       }
     },
@@ -147,31 +330,79 @@
       "type": "stat",
       "title": "Dead letters (15m)",
       "description": "Jobs that exhausted their retries. Should be zero. Any non-zero value is the DeadLetterNeedsAttention alert and needs a person to read the payload.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 19 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 19
+      },
       "targets": [
-        { "expr": "sum(increase(dead_letter_total[15m]))", "legendFormat": "dead-lettered" }
+        {
+          "expr": "sum(increase(dead_letter_total{environment=~\"$env\"}[15m]))",
+          "legendFormat": "dead-lettered"
+        }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
         }
       },
-      "options": { "colorMode": "background", "graphMode": "area", "textMode": "auto" }
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "textMode": "auto"
+      }
     },
     {
       "id": 23,
       "type": "timeseries",
       "title": "DB pool wait",
       "description": "Time waiting for a connection, not time running a query. Rising here means the pool is the bottleneck — a different problem with a different fix from a slow query.",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 19 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
       "targets": [
-        { "expr": "histogram_quantile(0.95, sum by (le, service) (rate(db_pool_wait_seconds_bucket[5m])))", "legendFormat": "p95 {{service}}" },
-        { "expr": "histogram_quantile(0.99, sum by (le, service) (rate(db_pool_wait_seconds_bucket[5m])))", "legendFormat": "p99 {{service}}" }
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, service) (rate(db_pool_wait_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "legendFormat": "p95 {{service}}"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum by (le, service) (rate(db_pool_wait_seconds_bucket{environment=~\"$env\"}[5m])))",
+          "legendFormat": "p99 {{service}}"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 0 } } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "fillOpacity": 0
+          }
+        }
+      }
     }
   ]
 }

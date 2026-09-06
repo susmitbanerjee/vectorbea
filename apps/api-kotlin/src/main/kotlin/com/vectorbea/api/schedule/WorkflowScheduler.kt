@@ -1,5 +1,6 @@
 package com.vectorbea.api.schedule
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.api.queue.JobType
 import com.vectorbea.api.queue.WorkflowQueue
 import com.vectorbea.api.queue.WorkflowRunJob
@@ -46,9 +47,14 @@ class WorkflowScheduler(
     }
     private var future: ScheduledFuture<*>? = null
 
+    private companion object { const val JOB_NAME = "workflow-scheduler" }
+
     fun start() {
         if (running.compareAndSet(false, true)) {
-            future = executor.scheduleWithFixedDelay(::tick, 10_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
+            ScheduledJobHealth.register(JOB_NAME, pollIntervalMs)
+            future = executor.scheduleWithFixedDelay(
+                { ScheduledJobHealth.record(JOB_NAME) { tick() } },
+                10_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
             log.info("[scheduler] cron scheduler started (pollInterval={}ms)", pollIntervalMs)
         }
     }
@@ -105,6 +111,7 @@ class WorkflowScheduler(
             }
         } catch (e: Exception) {
             log.error("[scheduler] tick failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
         }
     }
 
