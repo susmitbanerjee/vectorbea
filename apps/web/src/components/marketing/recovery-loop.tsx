@@ -196,6 +196,28 @@ const LOG_TONE = {
   recover: "text-accent",
 } as const;
 
+/* ── Reserved geometry ────────────────────────────────────────────────────────
+   Every box in this module is sized for its WORST frame, never for its current
+   one. The loop plays under prose the visitor is reading: a panel that grew a
+   row when a log line arrived, or lost one when the tail rolled over, shoved
+   the rest of the page up and down for the whole eight seconds.
+
+   So: the log is a fixed-height tail — lines anchor to the bottom and the
+   oldest leaves through the top — and the caption and controls hold their
+   space whatever text is in them. */
+
+/** How many entries of tail the log shows. */
+const LOG_TAIL = 6;
+/** One rendered row, in the exact metrics the rows use (fallbacks are the token values). */
+const LOG_ROW = "calc(var(--text-mono-sm, 0.71875rem) * var(--text-mono-sm--line-height, 1.55))";
+/** Rows reserved: LOG_TAIL entries, with headroom for the long ones that wrap. */
+const LOG_ROWS = 9;
+/** gap-1 between entries, on the 4px lattice. */
+const LOG_GAP = "0.25rem";
+const LOG_HEIGHT = `calc(${LOG_ROWS} * ${LOG_ROW} + ${LOG_ROWS - 1} * ${LOG_GAP})`;
+/** Top edge fade: what runs off the top has scrolled away, it has not been cut. */
+const LOG_FADE = `linear-gradient(to bottom, transparent, black calc(1.5 * ${LOG_ROW}))`;
+
 export function RecoveryLoop({ className }: { className?: string }) {
   const [reduceMotion, setReduceMotion] = React.useState<boolean | null>(null);
   const [frame, setFrame] = React.useState(0);
@@ -242,14 +264,14 @@ export function RecoveryLoop({ className }: { className?: string }) {
     [current.states],
   );
 
-  // The last six log lines, so the stream reads as a tail rather than a wall.
+  // The last few log lines, so the stream reads as a tail rather than a wall.
   const logLines = React.useMemo(() => {
     const lines: { text: string; tone: keyof typeof LOG_TONE; key: number }[] = [];
     for (let i = 0; i <= frame; i += 1) {
       const entry = TIMELINE[i].log;
       if (entry) lines.push({ ...entry, key: i });
     }
-    return lines.slice(-6);
+    return lines.slice(-LOG_TAIL);
   }, [frame]);
 
   const committed = current.states.filter((s) => s === "committed" || s === "recovered").length;
@@ -268,8 +290,10 @@ export function RecoveryLoop({ className }: { className?: string }) {
         <span className="bg-surface-active text-fg-muted font-ui text-caption rounded-xs px-1.5 py-0.5">
           production
         </span>
-        <span className="font-code text-mono-sm tabular text-fg-muted ml-auto">
-          {committed} / {TOTAL} committed
+        <span className="font-code text-mono-sm tabular text-fg-muted ml-auto whitespace-nowrap">
+          {/* Fixed digit column: 3 -> 12 must not change this string's width,
+              or the header rewraps mid-run. */}
+          <span className="inline-block w-[2ch] text-right">{committed}</span> / {TOTAL} committed
         </span>
       </div>
 
@@ -279,8 +303,9 @@ export function RecoveryLoop({ className }: { className?: string }) {
           <Text variant="eyebrow" tone="muted" className="mb-2 block">Checkpoint ribbon</Text>
           <CheckpointRibbon nodes={nodes} size="md" runId="hero-loop" />
 
+          {/* Two lines are reserved for the caption whether it needs one or two. */}
           <p
-            className="font-ui text-body-sm text-fg-primary mt-3 min-h-10"
+            className="font-ui text-body-sm text-fg-primary mt-3 h-10 line-clamp-2"
             aria-live="polite"
           >
             {current.caption}
@@ -314,14 +339,16 @@ export function RecoveryLoop({ className }: { className?: string }) {
               type="button"
               onClick={() => setPlaying((p) => !p)}
               className={cn(
-                "font-ui text-caption text-fg-muted rounded-xs px-1.5 py-0.5",
+                // min-w holds "Pause" and "Play" at one width, so toggling
+                // playback cannot rewrap the hint beside it.
+                "font-ui text-caption text-fg-muted min-w-11 rounded-xs px-1.5 py-0.5",
                 "transition-colors duration-fast outline-none",
                 "hover:text-fg-primary focus-visible:focus-ring",
               )}
             >
               {playing ? "Pause" : "Play"}
             </button>
-            <span className="font-ui text-caption text-fg-disabled">
+            <span className="font-ui text-caption text-fg-disabled min-w-0 flex-1 truncate">
               {reduceMotion
                 ? "Paused — reduced motion is on. Press play to watch the recovery."
                 : "Drag to replay the failure."}
@@ -330,24 +357,39 @@ export function RecoveryLoop({ className }: { className?: string }) {
         </div>
 
         {/* ── The log stream ─────────────────────────────────────────── */}
-        <div className="bg-surface-sunken border-subtle min-w-0 rounded-md border p-3">
+        <div className="bg-surface-sunken border-subtle flex min-w-0 flex-col rounded-md border p-3">
           <Text variant="eyebrow" tone="muted" className="mb-2 block">Event log</Text>
-          <ol className="grid gap-1">
-            {logLines.map((line) => (
-              <li
-                key={line.key}
-                className={cn(
-                  "font-code text-mono-sm break-words",
-                  LOG_TONE[line.tone],
-                  // Log stream (§7.2 #3): 3px rise, 140ms. Reduced motion
-                  // collapses this to an opacity step via the token layer.
-                  "animate-[ink-log-line_140ms_var(--ease-entrance)_both]",
-                )}
-              >
-                {line.text}
-              </li>
-            ))}
-          </ol>
+          {/* The height is reserved, not measured: the tail is pinned to the
+              bottom of a fixed box so a new line pushes the oldest out of view
+              instead of pushing the page down. */}
+          <div
+            className="relative overflow-hidden"
+            style={{
+              height: LOG_HEIGHT,
+              // The oldest line fades out through the top edge, so a tail that
+              // is longer than the reserved box reads as scrolled rather than
+              // cut. Narrow columns wrap more lines and lean on this.
+              maskImage: LOG_FADE,
+              WebkitMaskImage: LOG_FADE,
+            }}
+          >
+            <ol className="absolute inset-x-0 bottom-0 grid gap-1">
+              {logLines.map((line) => (
+                <li
+                  key={line.key}
+                  className={cn(
+                    "font-code text-mono-sm break-words",
+                    LOG_TONE[line.tone],
+                    // Log stream (§7.2 #3): 3px rise, 140ms. Reduced motion
+                    // collapses this to an opacity step via the token layer.
+                    "animate-[ink-log-line_140ms_var(--ease-entrance)_both]",
+                  )}
+                >
+                  {line.text}
+                </li>
+              ))}
+            </ol>
+          </div>
         </div>
       </div>
     </div>
