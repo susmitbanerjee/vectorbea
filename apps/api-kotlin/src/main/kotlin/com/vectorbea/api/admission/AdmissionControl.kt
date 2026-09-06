@@ -34,6 +34,19 @@ import javax.sql.DataSource
  * it is the constraint they can act on. Telling them "the platform is busy" when
  * their own eight runs are the problem sends them to the wrong support article.
  *
+ * WHERE THE WORKSPACE CAP COMES FROM (S3)
+ * ---------------------------------------
+ * The workspace's PLAN, resolved through its billing account — never the plan of
+ * whoever pressed Run. A Pro member triggering a run inside a Free workspace is
+ * held to Free's concurrency, and the refusal names Free. `workspace_limit()`
+ * does the resolution inside the snapshot statement so the active count and the
+ * ceiling are read at the same instant.
+ *
+ * The monthly QUOTA is checked before this, in `RunRoutes`, and not here: a quota
+ * is account-scoped and a concurrency cap is workspace-scoped, and folding two
+ * different subjects into one snapshot would make the refusal ambiguous about
+ * which one the caller hit.
+ *
  * WHY THIS IS CHEAP
  * -----------------
  * Two aggregate queries against indexes that already exist for the claim
@@ -126,6 +139,17 @@ class AdmissionControl(
         workspaceId: UUID,
         executionClass: ExecutionClass,
         priority: Short,
+        /**
+         * The plan governing the WORKSPACE, so a concurrency refusal can name it
+         * and the upgrade path rather than being a bare number.
+         *
+         * Passed in rather than resolved here because the caller has already
+         * resolved it for the quota check, and resolving twice would let the two
+         * refusals in one request disagree about which plan they are talking
+         * about. Optional so a caller without entitlements wired still works —
+         * the sentence degrades, nothing breaks.
+         */
+        plan: com.vectorbea.api.entitlements.PlanSummary? = null,
     ): Admitted {
         val snap = try {
             snapshot(workspaceId, executionClass)
@@ -141,6 +165,10 @@ class AdmissionControl(
                 limit = snap.workspaceLimit,
                 active = snap.workspaceActive,
                 queued = snap.workspaceQueued,
+                planCode = plan?.code,
+                planName = plan?.name,
+                upgradeToName = plan?.upgradeToName,
+                upgradeUrl = plan?.upgradeUrl,
             )
         }
 
@@ -180,10 +208,11 @@ class AdmissionControl(
         dataSource.connection.use { conn ->
             conn.prepareStatement(SNAPSHOT_SQL).use { stmt ->
                 stmt.setString(1, executionClass.wire)
-                stmt.setObject(2, workspaceId)
-                stmt.setObject(3, workspaceId)
-                stmt.setObject(4, workspaceId)
-                stmt.setString(5, executionClass.wire)
+                stmt.setObject(2, workspaceId)   // ws_active
+                stmt.setObject(3, workspaceId)   // ws_queued
+                stmt.setObject(4, workspaceId)   // workspace_limit(...)
+                stmt.setObject(5, workspaceId)   // its policy fallback
+                stmt.setString(6, executionClass.wire)
                 stmt.executeQuery().use { rs ->
                     if (!rs.next()) return Snapshot(0, 0, 0, 0, DEFAULT_WORKSPACE_LIMIT, 0.0)
                     Snapshot(
@@ -242,8 +271,21 @@ class AdmissionControl(
                   WHERE workspace_id = ? AND status IN ('claimed','running')) AS ws_active,
                 (SELECT count(*)::int FROM agent_runs
                   WHERE workspace_id = ? AND status IN ('queued','yielded'))  AS ws_queued,
-                (SELECT COALESCE(MAX(max_concurrent_runs), $DEFAULT_WORKSPACE_LIMIT)::int
-                   FROM workspace_usage_policies WHERE workspace_id = ?)   AS ws_limit,
+                -- S3: the ceiling comes from the workspace's PLAN, resolved
+                -- through its billing account. The pre-S3
+                -- workspace_usage_policies value is the fallback for a
+                -- workspace whose plan says nothing about the key, which keeps
+                -- a hand-tuned tenant working if a seed row is ever missing.
+                --
+                -- Resolved in SQL rather than passed in because this whole
+                -- snapshot is deliberately one statement: reading the limit
+                -- separately would compare an active count taken at one instant
+                -- against a limit read at another.
+                workspace_limit(
+                    ?, 'max_concurrent_runs',
+                    (SELECT COALESCE(MAX(max_concurrent_runs), $DEFAULT_WORKSPACE_LIMIT)::int
+                       FROM workspace_usage_policies WHERE workspace_id = ?)
+                )                                                          AS ws_limit,
                 (SELECT count(*)::float / 300.0 FROM agent_runs
                   WHERE execution_class = ?
                     AND completed_at > now() - interval '5 minutes')       AS rate

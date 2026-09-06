@@ -112,7 +112,9 @@ Full baseline and migration order: `/docs/audit/CURRENT-STATE.md`.
 ## Agent runtime work — standing rules
 
 Design docs: docs/AGENT-HARNESS-ARCHITECTURE.md, docs/AGENT-TRACE-AND-DEBUGGER.md,
-docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md.
+docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md,
+docs/PLANS-AND-ENTITLEMENTS.md, docs/RETENTION.md,
+docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md.
 Read the relevant sections before changing runtime code. The docs explain WHY
 each guard exists; most were written after a production bug.
 
@@ -149,6 +151,34 @@ each guard exists; most were written after a production bug.
    workspace-scoped at the same boundary, and fail closed if the check errors.
 9. One engine. A new orchestration pattern is a policy over the existing
    primitives, never a second runtime.
+10. Retention is a DELETION, not a filter. Data past its window is removed from
+   Postgres — no `hidden` column, no read-time predicate. A filter leaves the
+   bytes present, still billed, and one forgotten `WHERE` away from being served
+   by an export, a support query or the next feature. `RetentionAcceptanceTest`
+   fails the build if a soft-delete column appears. See docs/RETENTION.md.
+11. Entitlements resolve from the workspace's BILLING ACCOUNT, never from the
+   requesting user's plan. A Pro member acting inside a Free workspace gets Free
+   limits, at every enforcement point. `resolve_entitlements()` and every method
+   on `EntitlementGuard` take a workspace and have no parameter for a user —
+   keep it that way. Nothing outside `com.vectorbea.api.entitlements` and
+   `lib/server/entitlements.ts` may read `plans` or `plan_entitlements`
+   directly. See docs/PLANS-AND-ENTITLEMENTS.md.
+12. A workspace is SHAREABLE, so every limit needs a second question answered:
+   who is spending it. Runs carry `triggered_by_user_id`, the usage ledger
+   carries `actor_user_id`, and a guest is held to their own member cap — an
+   API key inherits that cap rather than escaping it. Moving a workspace between
+   billing accounts opens retention grace via a TRIGGER on the column, not a
+   check in a route, because a support script moving it would otherwise put Pro
+   data under Free retention silently. See docs/SHARED-WORKSPACE-LIMITS.md.
+13. Billing never sits on a read path. Entitlements resolve from
+   `billing_accounts.plan_code`, which billing only ever WRITES — no quota check
+   calls a payment provider, so a provider outage cannot stop a run.
+   `BillingRepository` has no provider field and could not call one. Past due
+   sets `billing_restricted_at` and must NEVER change `plan_code`, because
+   `plan_code` drives retention and a late card would then delete a customer's
+   data. Webhooks are verified over the RAW body, deduplicated on the provider's
+   event id, ordered by the PROVIDER's timestamp, and an unrecognised type is
+   stored and ignored — never inferred. See docs/BILLING.md.
 
 ### Conventions
 

@@ -278,8 +278,54 @@ fun main() {
 
     val appUserRepo: AppUserRepository? = ds?.let { AppUserRepository(it) }
 
+    // ── S3: plans and entitlements ───────────────────────────────────────────
+    //
+    // Built once and shared by every enforcement point. One resolver means one
+    // cache, one catalogue-version probe, and — the part that matters — one
+    // implementation of "which plan governs this workspace". A second one would
+    // eventually disagree with this one, and the disagreement would be a tenant
+    // getting somebody else's limits.
+    //
+    // Constructed HERE, above `AuthMiddleware`, because the middleware needs
+    // `ApiKeyService` to authenticate `vb_` keys — and a key must resolve its
+    // workspace before any route runs, or the request would reach an enforcement
+    // point with no principal and be treated as dev-mode.
+    val entitlementResolver = ds?.let { com.vectorbea.api.entitlements.EntitlementResolver(it) }
+    val entitlementGuard = if (ds != null && entitlementResolver != null)
+        com.vectorbea.api.entitlements.EntitlementGuard(entitlementResolver, ds) else null
+    val usageMeter = if (ds != null)
+        com.vectorbea.api.entitlements.UsageMeter(ds, entitlementResolver) else null
+    val apiKeyService = if (ds != null)
+        com.vectorbea.api.entitlements.ApiKeyService(ds, entitlementGuard) else null
+
+    // ── S4: billing, built and switched off ──────────────────────────────────
+    //
+    // `BillingProviderRegistry.fromEnv()` returns a registry with no live
+    // provider unless credentials are present, so every call runs against the
+    // noop provider: our schema moves, nothing is charged, and the whole domain
+    // is exercisable before there is a bank account.
+    //
+    // Nothing on the entitlement path touches any of this. A provider outage
+    // cannot reach a quota check, because a quota check reads
+    // `billing_accounts.plan_code` and billing only ever WRITES it.
+    val billingProviders = com.vectorbea.api.billing.BillingProviderRegistry.fromEnv()
+    val billingRepo = ds?.let { com.vectorbea.api.billing.BillingRepository(it) }
+    val billingService = if (ds != null && billingRepo != null)
+        com.vectorbea.api.billing.BillingService(ds, billingRepo, billingProviders) else null
+    val webhookProcessor = if (ds != null && billingRepo != null)
+        com.vectorbea.api.billing.WebhookProcessor(ds, billingRepo) else null
+    val usageReporter = if (ds != null && billingRepo != null)
+        com.vectorbea.api.billing.UsageReporter(ds, billingRepo, billingProviders) else null
+    /* Settles ended subscriptions, applies the dunning schedule, reports usage
+       and reconciles it. Inert on a deployment with no subscriptions, which is
+       why it is not behind a second flag — see BillingScheduler's header. */
+    val billingScheduler = if (ds != null && usageReporter != null)
+        com.vectorbea.api.billing.BillingScheduler(ds, usageReporter, billingProviders) else null
+    if (entitlementGuard == null) log.warn("Entitlements disabled — no database; plan limits are NOT enforced")
+
     val authMiddleware = if (jwtVerifier != null && appUserRepo != null) {
-        AuthMiddleware(jwtVerifier = jwtVerifier, userRepo = appUserRepo, config = config)
+        AuthMiddleware(jwtVerifier = jwtVerifier, userRepo = appUserRepo, config = config,
+            apiKeys = apiKeyService)
     } else {
         log.warn("AuthMiddleware: disabled (dev mode)")
         null
@@ -352,7 +398,7 @@ fun main() {
     } else log.warn("ConnectionRoutes disabled — no database")
 
     if (agentRepo != null && connectionRepo != null) {
-        AgentRoutes(agentRepo, connectionRepo, cacheService).register(router)
+        AgentRoutes(agentRepo, connectionRepo, cacheService, entitlementGuard).register(router)
     } else log.warn("AgentRoutes disabled — no database")
 
     if (toolRepo != null && connectionRepo != null) {
@@ -360,7 +406,7 @@ fun main() {
     } else log.warn("ToolRoutes disabled — no database")
 
     if (workflowRepo != null) {
-        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo).register(router)
+        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo, entitlementGuard).register(router)
     } else log.warn("WorkflowRoutes disabled — no database")
 
     // Cron schedules: read API + the firing loop (see WorkflowScheduler).
@@ -398,6 +444,8 @@ fun main() {
             telemetry = telemetry,
             admission = ds?.let { com.vectorbea.api.admission.AdmissionControl(it) },
             runRateLimiter = tokenBucket,
+            entitlements = entitlementGuard,
+            usageMeter = usageMeter,
         ).register(router)
 
         com.vectorbea.api.routes.DebugRoutes(
@@ -447,7 +495,7 @@ fun main() {
     } else log.warn("WorkerRoutes/BootstrapRoutes disabled — no database")
 
     if (appUserRepo != null) {
-        MeRoutes(appUserRepo).register(router)
+        MeRoutes(appUserRepo, entitlementGuard).register(router)
     } else log.warn("MeRoutes disabled — no database")
 
     // Beta access + admin routes
@@ -477,6 +525,39 @@ fun main() {
            authorisation and this endpoint aggregates everything that workspace
            ever did. */
         com.vectorbea.api.routes.FailureRoutes(ds).register(router)
+
+        // Retention: what this workspace keeps and until when, the deletion
+        // audit, on-demand export, and the sweeper's heartbeat. The heartbeat is
+        // served by the API rather than the worker because an alert needs one
+        // stable URL, and the worker fleet is many processes that come and go.
+        com.vectorbea.api.routes.RetentionRoutes(ds).register(router)
+
+        // API keys, and the spend-by-member view an owner needs once a workspace
+        // is shared. Both require the guard: a key is created against a plan
+        // ceiling, and a member budget is compared against the plan's default.
+        if (apiKeyService != null && entitlementGuard != null) {
+            com.vectorbea.api.routes.ApiKeyRoutes(ds, apiKeyService, entitlementGuard).register(router)
+        }
+
+        // Billing. Registered unconditionally when there is a database — an
+        // endpoint that only exists once a flag is on is an endpoint nobody
+        // tests. What is gated is the UI; the API runs on noop until a provider
+        // is configured.
+        if (billingRepo != null && billingService != null && webhookProcessor != null) {
+            com.vectorbea.api.routes.BillingRoutes(
+                billingRepo, billingService, billingProviders, webhookProcessor,
+            ).register(router)
+        }
+
+        // What this workspace is entitled to, and the public plan catalogue. The
+        // settings page and every UI feature gate read the resolved entitlements
+        // rather than a plan code, so a limit raised in the database changes what
+        // the page says without a deploy — and so a UI gate cannot promise
+        // something the API will refuse.
+        if (entitlementResolver != null && entitlementGuard != null) {
+            com.vectorbea.api.routes.EntitlementRoutes(ds, entitlementResolver, entitlementGuard)
+                .register(router)
+        }
     } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
     // 7b. Cron scheduler — fires due workflow schedules onto the queue
@@ -503,11 +584,14 @@ fun main() {
     Runtime.getRuntime().addShutdownHook(Thread {
         log.info("Shutdown signal received — stopping server...")
         workflowScheduler?.stop()
+        billingScheduler?.stop()
         server.stop(delaySeconds = 5)
         database?.close()
         redis?.close()
         log.info("Shutdown complete")
     })
+
+    billingScheduler?.start()
 
     server.start()
     log.info("vectorbea-api running on port {} — press Ctrl+C to stop", config.port)

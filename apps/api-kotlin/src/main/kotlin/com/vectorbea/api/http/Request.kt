@@ -26,6 +26,17 @@ data class Request(
     val requestId: String = "",
     /** Verified auth principal — null when auth is disabled (dev mode) or for public endpoints. */
     val principal: com.vectorbea.api.auth.AuthPrincipal? = null,
+    /**
+     * The API key this request authenticated with, when it did.
+     *
+     * Carried ALONGSIDE [principal] rather than instead of it: a key that acts
+     * as a member produces a principal too, because a key must be held to that
+     * member's spend cap rather than escaping it. "Which key" and "whose budget"
+     * are different questions, and an incident asks both.
+     *
+     * Null for every browser request, which is the overwhelming majority.
+     */
+    val apiKeyId: java.util.UUID? = null,
 ) {
     companion object {
         private const val DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024 // 2 MB

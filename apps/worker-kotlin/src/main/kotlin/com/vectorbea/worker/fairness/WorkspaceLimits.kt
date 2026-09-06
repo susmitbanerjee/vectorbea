@@ -65,11 +65,33 @@ class WorkspaceLimitsProvider(
     companion object {
         private const val SAFETY_LIMIT = 20_000
 
+        /**
+         * The TOTAL comes from the plan; the per-class split does not.
+         *
+         * S3 makes overall concurrency a plan entitlement, resolved through the
+         * workspace's billing account — so a Pro member running inside a Free
+         * workspace is held to Free's ceiling here, at the claim, where it is
+         * actually enforced across every replica.
+         *
+         * The per-class caps stay on `workspace_usage_policies` deliberately.
+         * They are not packaging: they are how a fixed total is divided between
+         * the agent, long and short pools, which is an operational tuning
+         * decision about pool pressure and has no business being on a price
+         * sheet. Selling "max 3 concurrent LONG runs" would be selling a detail
+         * of the scheduler.
+         *
+         * The LEFT JOIN keeps a workspace with no policy row working: the plan
+         * still supplies the total, and the per-class values fall back to the
+         * caller's defaults.
+         */
         private val SQL = """
-            SELECT max_concurrent_runs, max_concurrent_agent_runs,
-                   max_concurrent_long_runs, max_concurrent_short_runs
-              FROM workspace_usage_policies
-             WHERE workspace_id = ?
+            SELECT workspace_limit(?, 'max_concurrent_runs',
+                                   COALESCE(p.max_concurrent_runs, ?)) AS max_concurrent_runs,
+                   COALESCE(p.max_concurrent_agent_runs, ?)            AS max_concurrent_agent_runs,
+                   COALESCE(p.max_concurrent_long_runs,  ?)            AS max_concurrent_long_runs,
+                   COALESCE(p.max_concurrent_short_runs, ?)            AS max_concurrent_short_runs
+              FROM (SELECT 1) AS anchor
+              LEFT JOIN workspace_usage_policies p ON p.workspace_id = ?
              LIMIT 1
         """.trimIndent()
     }
@@ -81,7 +103,12 @@ class WorkspaceLimitsProvider(
         val loaded = try {
             dataSource.connection.use { conn ->
                 conn.prepareStatement(SQL).use { stmt ->
-                    stmt.setObject(1, workspaceId)
+                    stmt.setObject(1, workspaceId)          // workspace_limit(...)
+                    stmt.setInt(2, defaults.maxTotal)       // its policy/default fallback
+                    stmt.setInt(3, defaults.maxAgent)
+                    stmt.setInt(4, defaults.maxLong)
+                    stmt.setInt(5, defaults.maxShort)
+                    stmt.setObject(6, workspaceId)          // the policy LEFT JOIN
                     stmt.executeQuery().use { rs ->
                         if (rs.next()) {
                             WorkspaceLimits(

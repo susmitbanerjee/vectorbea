@@ -17,7 +17,14 @@ import java.util.UUID
  * These are the bootstrap routes for workspace setup.
  * /api/me must be called after every login to discover authorized workspaces.
  */
-class MeRoutes(private val userRepo: AppUserRepository) {
+class MeRoutes(
+    private val userRepo: AppUserRepository,
+    /**
+     * Plan enforcement for workspace creation. Null skips the check — the
+     * behaviour before S3, kept for tests that build a router by hand.
+     */
+    private val entitlements: com.vectorbea.api.entitlements.EntitlementGuard? = null,
+) {
 
     private val log = LoggerFactory.getLogger(MeRoutes::class.java)
 
@@ -77,6 +84,15 @@ class MeRoutes(private val userRepo: AppUserRepository) {
         if (!slug.matches(Regex("[a-z0-9][a-z0-9-]{0,61}[a-z0-9]?"))) {
             throw ApiError.ValidationError("slug must be lowercase alphanumeric with hyphens, 2-63 chars")
         }
+
+        // `max_workspaces`, resolved through the account this workspace will join
+        // — which is the account the caller already OWNS workspaces on, not an
+        // account they happen to be a member of. Being invited to somebody's Team
+        // workspace grants no headroom on your own Free plan.
+        //
+        // Before the insert, because the insert's trigger would otherwise mint
+        // the row and the refusal would arrive after the workspace existed.
+        entitlements?.requireNewWorkspaceAllowed(principal.appUserId)
 
         val wsId = try {
             userRepo.createWorkspace(

@@ -2262,6 +2262,22 @@ class AgentBrainRunner(
                 put("temperature",  config.temperature)
                 put("maxTokens",    config.maxTokens)
                 put("timeoutMs",    config.timeoutMs)
+                /*
+                 * ── THIS IS THE LOOP THAT PAYS FOR A CACHE WRITE ────────────
+                 *
+                 * An agent iteration resends `systemPrompt` byte-for-byte:
+                 * instructions, the serialised tool catalogue and the roster do
+                 * not change between turns — only the observations do, and those
+                 * are in the user message, AFTER the breakpoint. So the write
+                 * premium is paid once on iteration 1 and read back on every
+                 * iteration after it.
+                 *
+                 * A one-shot LLM node sets nothing here and stays uncached, which
+                 * is correct: it never sends that prefix again, so a write it can
+                 * never read back would be a pure loss. See
+                 * `LlmNodeExecutor.CFG_CACHE_PREFIX`.
+                 */
+                put(LlmNodeExecutor.CFG_CACHE_PREFIX, true)
                 put("messages", listOf(
                     mapOf("role" to "system", "content" to systemPrompt),
                     mapOf("role" to "user",   "content" to userPrompt),

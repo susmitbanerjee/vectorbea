@@ -68,6 +68,24 @@ object RbacGuard {
         "DELETE /api/tools/:id"                      to Permission.TOOL_DELETE,
         "POST /api/tools/test-unsaved"               to Permission.TOOL_WRITE,
 
+        /* Exporting is a BULK EXTRACTION of every run, event and trace the
+           workspace holds, so it sits with the governance surfaces rather than
+           the build ones. A developer can already read any single run; handing
+           the whole history out as one downloadable object is a different act,
+           and the person accountable for it is an admin. */
+        "POST /api/retention/exports"                to Permission.WORKSPACE_WRITE,
+
+        /* ── API keys and member budgets: the admin floor ────────────────────
+           A key can spend the workspace's whole allowance and, when minted
+           without an actor, is attributable to nobody. A member budget decides
+           how much of the host's money a guest may burn. Both are governance
+           decisions about somebody else's money, which is the admin's job and
+           not a developer's — and a developer who could mint an unattributed key
+           would have a way around the member cap set for them. */
+        "POST /api/api-keys"                         to Permission.WORKSPACE_WRITE,
+        "DELETE /api/api-keys/:id"                   to Permission.WORKSPACE_WRITE,
+        "PUT /api/workspaces/member-budget/:userId"  to Permission.WORKSPACE_WRITE,
+
         // ── Running: developer and up ────────────────────────────────────────
         "POST /api/workflows/:workflowId/run"        to Permission.WORKFLOW_RUN,
         "POST /api/workflows/:workflowId/runs/debug" to Permission.WORKFLOW_RUN,

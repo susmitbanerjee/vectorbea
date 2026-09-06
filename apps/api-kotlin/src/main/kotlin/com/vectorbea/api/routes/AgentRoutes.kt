@@ -102,6 +102,15 @@ class AgentRoutes(
     private val repo: AgentRepository,
     private val connectionRepo: ConnectionRepository,
     private val cache: CacheService,
+    /**
+     * `max_agents`, enforced at SAVE time rather than at run time.
+     *
+     * A configuration refused when it is written is a form error the author fixes
+     * in the moment. The same configuration refused when it runs is a production
+     * failure at 3am, in a workflow that has been green for a week, belonging to
+     * somebody who did not write it. Null skips the check.
+     */
+    private val entitlements: com.vectorbea.api.entitlements.EntitlementGuard? = null,
 ) {
     fun register(router: Router) {
         router.get("/api/agents", ::list)
@@ -132,6 +141,18 @@ class AgentRoutes(
         val name = requireMaxLength(requireField(body.name, "name"), "name", 255)
         val type = requireOneOf(requireField(body.type, "type"), "type", AGENT_TYPES)
         val slug = slugify(body.slug?.takeIf { it.isNotBlank() } ?: name)
+
+        // The count is taken BEFORE this agent exists, so `requireLimit` compares
+        // with `>=`: a workspace holding 3 of 3 is refused the fourth. Archived
+        // agents do not count — a customer who archived one has already done the
+        // thing the refusal would ask them to do.
+        entitlements?.let { guard ->
+            guard.requireLimit(
+                ctx.workspaceId,
+                com.vectorbea.api.entitlements.EntitlementKeys.MAX_AGENTS,
+                guard.agentCount(ctx.workspaceId),
+            )
+        }
 
         // type-specific validation
         var llmConnectionId: UUID? = null

@@ -51,6 +51,13 @@ class RunProcessor(
      * there is nothing to wake.
      */
     private val childDispatcher: com.vectorbea.worker.agents.orchestration.ChildRunDispatcher? = null,
+    /**
+     * Writes what the run consumed to the billing ledger, once, at the terminal
+     * transition. Defaulted rather than injected because there is no
+     * configuration to make — it needs the same DataSource this processor already
+     * holds, and a null one would silently stop billing.
+     */
+    private val usageMeter: RunUsageMeter = RunUsageMeter(dataSource),
     private val leaseManager: RunLeaseManager = RunLeaseManager(dataSource),
     /**
      * Durably re-enqueue a continuation job after a cooperative yield. Default is
@@ -1438,6 +1445,25 @@ class RunProcessor(
          * one is in code that a customer's config can reach.
          */
         runCatching { exportTrace(runId) }
+        /*
+         * ── METER WHAT THE RUN CONSUMED ─────────────────────────────────────
+         *
+         * Behind the same CAS as everything else here, and for the same reason:
+         * the transition is what makes "this run finished" true exactly once, so
+         * a redelivered message cannot meter it twice. S4 bills from this ledger,
+         * and a double-counted run is a double CHARGE.
+         *
+         * The CAS is not the only protection — `meter_run_usage` keys on the run
+         * id and overwrites rather than incrementing, so the ledger holds one row
+         * per metric however many times this is called. Two independent defences
+         * on purpose: the CAS is a runtime property a refactor could weaken, and
+         * the primary key is a schema property it cannot.
+         *
+         * Outside any held connection, like every other call in this function —
+         * see the hold-and-wait note above. `RunUsageMeter` takes and releases
+         * exactly one.
+         */
+        runCatching { usageMeter.meterTerminal(runId) }
 }
 
     private fun markRunFailed(job: WorkflowRunJob, sanitizedMessage: String, start: Instant) {

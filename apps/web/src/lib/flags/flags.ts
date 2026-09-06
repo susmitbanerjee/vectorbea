@@ -68,6 +68,16 @@ const REGISTRY = {
     description: "Diff between two published workflow versions.",
     blockedBy: "GAP-11 — versions can be listed, not compared.",
   },
+  billing: {
+    default: false,
+    description: "Plan comparison, upgrade/downgrade, invoices and payment methods.",
+    blockedBy:
+      "None technically — S4 is complete and tested against the noop provider. " +
+      "OFF because there is no bank account: no Stripe or Razorpay credentials " +
+      "exist, so every action would run against the noop provider and change our " +
+      "schema without charging anybody. Turning this on before a provider is " +
+      "configured would show customers a working checkout that takes no money.",
+  },
   usageForecasting: {
     default: false,
     description: "Projected spend and quota exhaustion.",
@@ -104,6 +114,7 @@ export const FLAG_NAMES = Object.keys(REGISTRY) as FlagName[];
  * only form that actually reaches the client.
  */
 const ENV_OVERRIDES: Record<FlagName, string | undefined> = {
+  billing: process.env.NEXT_PUBLIC_FLAG_BILLING,
   checkpointRibbon: process.env.NEXT_PUBLIC_FLAG_CHECKPOINT_RIBBON,
   failureClustering: process.env.NEXT_PUBLIC_FLAG_FAILURE_CLUSTERING,
   queuePosition: process.env.NEXT_PUBLIC_FLAG_QUEUE_POSITION,

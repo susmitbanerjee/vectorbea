@@ -3,6 +3,7 @@ import "server-only";
 import { createHash, randomBytes, randomUUID } from "crypto";
 
 import { appQuery, appQueryOne, withTransaction } from "@/lib/server/app-db";
+import { requireSeatForNewMember } from "@/lib/server/entitlements";
 import { emailConfigured, sendEmail } from "@/lib/server/email";
 import { teamInvitationEmail, workspaceWelcomeEmail } from "@/lib/server/email-templates";
 import { parseRole, type MemberRole } from "@/lib/server/workspace-members";
@@ -134,6 +135,19 @@ export async function createInvitation(args: {
   if (already) {
     throw new Error(`${email} is already a member of this workspace.`);
   }
+
+  /*
+   * PLAN ENFORCEMENT, before the token is minted and the email is sent.
+   *
+   * Resolved from the WORKSPACE's billing account, never from the inviter's
+   * plan — an admin on Pro inviting somebody into a Free workspace is bound by
+   * Free, and the refusal says Free.
+   *
+   * Here rather than at acceptance, because a refusal at acceptance reaches the
+   * invitee, who can do nothing about it, instead of the admin, who can. It also
+   * means a seat that cannot be filled is never promised in an email.
+   */
+  await requireSeatForNewMember({ workspaceId: args.workspaceId, email });
 
   const rawToken = randomBytes(32).toString("hex");
   const expires = new Date(Date.now() + INVITE_TTL_HOURS * 3600_000).toISOString();
@@ -336,6 +350,32 @@ export interface AcceptedInvitation {
  */
 export async function acceptInvitation(token: string, userId: string): Promise<AcceptedInvitation> {
   const tokenHash = hashToken(token);
+
+  /*
+   * SEATS ARE CHECKED AGAIN HERE, and deliberately BEFORE the transaction.
+   *
+   * The invitation-time check is the primary one — it refuses the admin, who can
+   * act on it. This one catches the window between: an account that downgraded,
+   * or filled its last seat from another workspace, after the invitation went
+   * out. Without it, a Free account could hand out invitations before a
+   * downgrade and have them all land afterwards.
+   *
+   * BEFORE the transaction, not inside it. `requireSeatForNewMember` takes its
+   * own pooled connections, and calling it while holding the transaction's
+   * connection is hold-and-wait: with `max: 3` on this pool, three concurrent
+   * acceptances would each own one connection and each need another, and none
+   * could release until it got one. The read below is a plain SELECT, so moving
+   * it out costs a small TOCTOU window and buys a class of deadlock that does
+   * not appear until the moment several people accept at once.
+   */
+  const pending = await appQueryOne<{ workspace_id: string }>(
+    `SELECT workspace_id FROM workspace_invitations
+      WHERE token_hash = $1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > now()`,
+    [tokenHash],
+  );
+  if (pending) {
+    await requireSeatForNewMember({ workspaceId: pending.workspace_id, userId });
+  }
 
   const joined = await withTransaction(async (tx) => {
     const rows = await tx.query<InvitationRow & { workspace_name: string }>(

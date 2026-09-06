@@ -62,6 +62,23 @@ class RunTraceExporter(
     private val sampler: TraceSampler,
     private val enabled: Boolean =
         System.getenv("OTEL_TRACE_EXPORT_ENABLED")?.lowercase() == "true",
+    /**
+     * Whether the `otel_export` plan entitlement actually blocks an export.
+     *
+     * OFF by default, per the standing rule that every new runtime behaviour
+     * ships behind a flag until its phase is signed off — and with particular
+     * force here, because the thing being switched on STOPS a customer's
+     * telemetry from arriving. A workspace that has been exporting happily for
+     * months would go silent, and the first symptom would be an empty dashboard
+     * rather than an error anybody sees.
+     *
+     * Shares `ENTITLEMENTS_ENFORCED` with the API's guard rather than owning a
+     * flag of its own: enforcement arriving in one service and not the other is
+     * how a customer gets refused on one surface and served on another, and two
+     * flags is two chances to set only one.
+     */
+    private val planGateEnforced: Boolean =
+        System.getenv("ENTITLEMENTS_ENFORCED")?.lowercase() == "true",
     /** Spans per OTLP request. */
     private val batchSize: Int =
         System.getenv("OTEL_TRACE_EXPORT_BATCH")?.toIntOrNull()?.coerceIn(1, 2_000) ?: 512,
@@ -143,6 +160,29 @@ class RunTraceExporter(
 
         val row = config.rowFor(workspaceId) ?: return Result(0, 0, "no destination")
 
+        /*
+         * S3: OTLP export is a paid feature, gated on the WORKSPACE's plan.
+         *
+         * Enforced HERE and not only at the settings screen that configures the
+         * destination, because a destination configured while the account was on
+         * Team must stop being used when the account downgrades — and nothing
+         * deletes the row on a downgrade, deliberately: a customer who upgrades
+         * again should find their endpoint still there rather than have to
+         * re-enter a token.
+         *
+         * `workspace_has_feature` rather than a Kotlin resolver: the worker has
+         * no entitlement client, and duplicating the resolution rule here to gate
+         * one export would be the second opinion the SQL function exists to
+         * prevent. It fails CLOSED, which for an export means "do not ship", and
+         * that is the right direction — the alternative is shipping a paying
+         * customer's telemetry off-platform on a plan that never included it.
+         */
+        if (!planAllowsExport(workspaceId)) {
+            if (planGateEnforced) return Result(0, 0, "not on plan")
+            log.info("[otel] WOULD REFUSE export for workspace {} — the plan does not include " +
+                "otel_export (shadow mode: exporting anyway)", workspaceId)
+        }
+
         /* A child run is exported as part of its parent's tree. Checking here
            rather than at the call site keeps the rule in one place. */
         if (parentRunOf(runId) != null) return Result(0, 0, "child run")
@@ -206,6 +246,32 @@ class RunTraceExporter(
     }
 
     // ── Reading the tree ──────────────────────────────────────────────────────
+
+    /**
+     * Whether the workspace's plan includes `otel_export`.
+     *
+     * Not cached. This runs once per terminal top-level run of a workspace that
+     * has actually configured a destination — a small fraction of runs — and a
+     * cache here would need invalidating on a plan change, which is a whole
+     * mechanism to save one indexed read on an uncommon path.
+     *
+     * Failure is treated as "not allowed" for the same reason the SQL function
+     * fails closed: shipping telemetry off-platform is the outcome that cannot
+     * be taken back.
+     */
+    private fun planAllowsExport(workspaceId: UUID): Boolean = runCatching {
+        dataSource.connection.use { c ->
+            c.prepareStatement("SELECT workspace_has_feature(?, 'otel_export')").use { st ->
+                st.setObject(1, workspaceId)
+                st.queryTimeout = 3
+                st.executeQuery().use { rs -> rs.next() && rs.getBoolean(1) }
+            }
+        }
+    }.getOrElse {
+        log.warn("[otel] could not read the export entitlement for workspace {} — not exporting: {}",
+            workspaceId, it.message)
+        false
+    }
 
     private fun parentRunOf(runId: UUID): UUID? = dataSource.connection.use { c ->
         c.prepareStatement("SELECT parent_run_id FROM agent_runs WHERE id = ?").use { st ->

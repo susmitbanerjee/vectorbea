@@ -13,6 +13,9 @@ import {
   type WorkspacePolicy,
   type WorkspaceUsageCounters,
 } from "@/lib/server/workspace-usage";
+import { getWorkspacePlanPanel, type PlanPanel } from "@/lib/server/entitlements";
+import { getRetentionPanel, type RetentionPanel } from "@/lib/server/retention";
+import { getBillingPanel, type BillingPanel } from "@/lib/server/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +50,36 @@ export type SourceResult<T> =
   | { ok: false; reason: string; code?: string };
 
 export interface UsageResponse {
+  /**
+   * The PLAN, resolved through the workspace's billing account.
+   *
+   * A fifth independent source rather than a field on `policy`, because the two
+   * answer different questions and can fail separately: `policy` is the pre-S3
+   * per-workspace tuning table, and `plan` is what the workspace is entitled to.
+   * Where they disagree the plan governs — see V060 §10, which carried the
+   * hand-tuned values forward as account overrides so nobody was downgraded on
+   * the way through.
+   */
+  plan: SourceResult<PlanPanel | null>;
+  /**
+   * What this workspace keeps and until when, with the dates the deletion job
+   * will actually use.
+   *
+   * A sixth independent source for the same reason as `plan`: retention state
+   * only exists once the sweeper has observed a workspace, and a deployment that
+   * has never run it should still see its plan rather than an error over the
+   * whole page.
+   */
+  retention: SourceResult<RetentionPanel | null>;
+  /**
+   * Subscription, prices, invoices and payment methods.
+   *
+   * Always returned; the CLIENT decides whether to render it, gated on the
+   * `billing` flag. Returning it regardless means the data path is exercised in
+   * every environment rather than only once somebody turns the flag on — which
+   * is how a flagged feature is broken on the day it ships.
+   */
+  billing: SourceResult<BillingPanel | null>;
   policy: SourceResult<WorkspacePolicy>;
   usage: SourceResult<WorkspaceUsageCounters>;
   capacity: SourceResult<WorkspaceCapacity>;
@@ -70,7 +103,10 @@ export async function GET(request: NextRequest) {
     const auth = await assertWorkspaceMember(request, workspaceId);
     if (auth.error) return auth.error;
 
-    const [policy, usage, capacity, execution, auditEvents] = await Promise.all([
+    const [plan, retention, billing, policy, usage, capacity, execution, auditEvents] = await Promise.all([
+      settle(() => getWorkspacePlanPanel(workspaceId), "The plan could not be read"),
+      settle(() => getRetentionPanel(workspaceId), "Retention could not be read"),
+      settle(() => getBillingPanel(workspaceId), "Billing could not be read"),
       settle(() => getWorkspacePolicy(workspaceId), "The workspace limits could not be read"),
       settle(() => getWorkspaceUsageCounters(workspaceId), "Usage counters could not be read"),
       settle(() => getWorkspaceCapacity(workspaceId), "Seats and workflows could not be counted"),
@@ -79,6 +115,9 @@ export async function GET(request: NextRequest) {
     ]);
 
     return NextResponse.json({
+      plan,
+      retention,
+      billing,
       policy,
       usage,
       capacity,

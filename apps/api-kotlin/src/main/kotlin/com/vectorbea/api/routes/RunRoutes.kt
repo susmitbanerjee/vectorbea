@@ -182,6 +182,16 @@ class RunRoutes(
      * Token bucket for run creation, per workspace. Null disables the check.
      */
     private val runRateLimiter: com.vectorbea.api.rate.TokenBucket? = null,
+    /**
+     * Plan enforcement. Null skips every plan check — the behaviour before S3,
+     * kept so the unit tests that build a router by hand keep working.
+     */
+    private val entitlements: com.vectorbea.api.entitlements.EntitlementGuard? = null,
+    /**
+     * The billing ledger. Null skips metering; the run still executes, because a
+     * ledger write is never worth a customer's run.
+     */
+    private val usageMeter: com.vectorbea.api.entitlements.UsageMeter? = null,
 ) {
 
     /**
@@ -191,6 +201,34 @@ class RunRoutes(
      */
     private fun classifyVersion(versionId: UUID) =
         classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
+
+    /**
+     * Record who started this run, for per-member spend caps and the owner's
+     * spend-by-member view.
+     *
+     * Both columns are nullable and both may legitimately be null at once — a
+     * schedule has no human and no key. The API key id is recorded alongside the
+     * user rather than instead of it, because a key that acts as a member is
+     * still that member's spend: "which key" and "whose budget" are different
+     * questions and an incident asks both.
+     */
+    private fun attributeRun(runId: UUID, req: Request) {
+        val ds = dataSource ?: return
+        val userId = req.principal?.appUserId
+        val keyId = req.apiKeyId
+        if (userId == null && keyId == null) return
+
+        ds.connection.use { c ->
+            c.prepareStatement(
+                "UPDATE agent_runs SET triggered_by_user_id = ?, triggered_by_api_key_id = ? WHERE id = ?"
+            ).use { st ->
+                st.setObject(1, userId)
+                st.setObject(2, keyId)
+                st.setObject(3, runId)
+                st.executeUpdate()
+            }
+        }
+    }
 
     /**
      * Place a run in the weighted fair queue and advance the workspace clock.
@@ -385,12 +423,51 @@ class RunRoutes(
             }
         }
 
-        // ── 4e. Admission control ─────────────────────────────────────────────
+        // ── 4e. Plan quota ────────────────────────────────────────────────────
+        //
+        // THE GOVERNING RULE APPLIED: entitlements resolve from the WORKSPACE's
+        // billing account, never from `req.principal`. A Pro member triggering a
+        // run here gets this workspace's quota, and the refusal names this
+        // workspace's plan.
+        //
+        // THE GRACE MODEL: this is the ONLY place a quota is checked. A run that
+        // gets past this line finishes, however far past the quota the account
+        // travels while it runs — killing a run at 90% to save the last 10% of a
+        // quota throws away every provider call already paid for and every side
+        // effect already committed, and gives the customer nothing for it. The
+        // NEXT trigger is refused instead, which costs nobody anything.
+        val effective = entitlements?.resolve(ctx.workspaceId)
+        if (effective != null) {
+            // The ACCOUNT's pool, first: when both are spent, "your account is
+            // out of runs" is the message somebody can act on.
+            entitlements.requireQuota(effective)
+
+            // Then this WORKSPACE's tighter bound, so one workspace — or one
+            // guest inside it — cannot drain the account's whole month before
+            // anybody else gets a run.
+            entitlements.requireWorkspaceQuota(effective)
+
+            // And then THIS MEMBER's share. A workspace is shareable, so a guest
+            // invited to help can otherwise burn the host's tokens: the account
+            // pays, the guest spends, and every other limit is satisfied right up
+            // until the month is gone.
+            //
+            // Null for a schedule, a webhook or system work — charged to the
+            // workspace and to nobody's cap, because an owner's cron job is not a
+            // guest's spend.
+            entitlements.requireMemberSpend(effective, req.principal?.appUserId)
+        }
+
+        // ── 4f. Admission control ─────────────────────────────────────────────
         // The decision to accept, and — under load — what accepting means. A run
         // accepted silently into a deep queue is the failure this prevents: the
         // caller gets a position and an ETA in the same response, not twenty
         // minutes of nothing.
-        val admitted = admission?.admit(ctx.workspaceId, executionClass, placement.priority)
+        //
+        // The plan goes in so a concurrency refusal names it and the upgrade
+        // path. Same resolved snapshot as the quota check above, so two refusals
+        // in one request cannot disagree about which plan governs.
+        val admitted = admission?.admit(ctx.workspaceId, executionClass, placement.priority, effective?.plan)
 
         // ── 5. Create run row with status=queued ──────────────────────────────
         val run = runRepo.create(CreateRunRequest(
@@ -405,6 +482,30 @@ class RunRoutes(
             fairVtime = placement.fairVtime,
             priority = placement.priority,
         ))
+
+        // ── 5a. Attribute the run to whoever started it ───────────────────────
+        //
+        // Written straight after the insert rather than passed into `create`, so
+        // the attribution cannot change the run-creation contract that the worker
+        // and the resume path both depend on. A failure here loses a member's
+        // spend attribution for one run; it must never lose the run.
+        runCatching { attributeRun(run.id, req) }
+
+        // ── 5b. Meter the run, once, against the workspace's account ──────────
+        //
+        // Keyed on the RUN id inside `meter_run_usage`, which is the only
+        // identifier that survives a resume, a retry and a redelivery — all three
+        // reach a meter call for a run that already has a ledger row, and all
+        // three must leave it at one. S4 bills from this table, so a
+        // double-counted run is a double charge.
+        //
+        // Here rather than at completion because admission is what the quota
+        // governs: metering at completion would let an account queue a thousand
+        // runs against a spent quota, since none of them had finished yet.
+        //
+        // A replay writes nothing at all — the function refuses a run whose
+        // execution_mode_kind is 'replay', so the debugger stays free.
+        usageMeter?.meterRunAdmitted(run.id, effective?.accountId)
 
         // ── 6. Append lifecycle events ────────────────────────────────────────
         val source = "api:trigger"
@@ -833,6 +934,18 @@ class RunRoutes(
         val runId = req.pathUUID("id")
         val original = runRepo.findById(runId, ctx.workspaceId) ?: throw ApiError.NotFound("Run")
         val q = queue ?: throw ApiError.ServiceUnavailable("Queue not available")
+
+        // Replay is a paid feature, gated on the WORKSPACE's plan. Before the
+        // quota check below, because "your plan does not include replay" and
+        // "you are out of runs" are different answers and the first is the one
+        // that is true here.
+        //
+        // Note what is NOT checked: the monthly run quota. A replay makes no
+        // provider calls and `meter_run_usage` refuses to write a row for it, so
+        // charging it against a quota would bill a debugging session — which is
+        // the same rule the dashboards already apply to replays, and the reason
+        // an engineer can investigate a failure without it costing them.
+        entitlements?.requireFeature(ctx.workspaceId, com.vectorbea.api.entitlements.EntitlementKeys.REPLAY)
 
         // An absent or malformed body means "replay everything", which is the
         // safe default: a partial replay the user did not ask for would make live
