@@ -1,0 +1,57 @@
+# Prometheus, for the ALL-IN-ONE container.
+#
+# ── WHY THIS IS A SECOND FILE AND NOT A VARIABLE ─────────────────────────────
+# Prometheus does not expand environment variables in its config. Not in scrape
+# targets, not in the Alertmanager address, not anywhere that matters here. So the
+# difference between the two topologies — `alertmanager:9093` on a bridge network
+# versus `127.0.0.1:9093` in one container — cannot be a variable, and pretending
+# otherwise would mean a config that silently tries to resolve a host called
+# `${ALERTMANAGER_HOST}`.
+#
+# Two small files that are each correct beats one file that is correct nowhere. The
+# alert RULES are shared (`alerts.yml`); only the wiring differs.
+#
+# Requires `--web.enable-remote-write-receiver`, set in supervisord.conf. Without it
+# the receive endpoint 404s and the collector retries into a wall — which presents as
+# "no data", not as an error.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    # Identifies THIS MONITORING STACK, not the environment being monitored. The
+    # `environment` label on application series is stamped by the per-environment
+    # agent that collected it — see ops/monitoring/agent/config.yml.
+    monitor: 'vectorbea-central'
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['127.0.0.1:9093']
+
+scrape_configs:
+  # ── Self-monitoring only ────────────────────────────────────────────────────
+  #
+  # Application targets are NOT here. They arrive by remote-write from the collector,
+  # which receives them from the per-environment agents. What this process can still
+  # scrape directly is itself and its neighbours in this container — and it should: a
+  # Prometheus that cannot see its own ingestion rate cannot tell "no traffic" from
+  # "not receiving", and those look identical on a dashboard and mean opposite things.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['127.0.0.1:9090']
+        labels:
+          service: prometheus
+          environment: infra
+
+  # The collector's own telemetry — queue depth, refused spans, export failures.
+  # When ingest breaks, this is the series that says so.
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['127.0.0.1:8888']
+        labels:
+          service: otel-collector
+          environment: infra

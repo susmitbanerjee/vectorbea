@@ -305,8 +305,23 @@ jobs:
       # The agent config is the piece with no other coverage. It runs in every
       # environment, and nothing else would notice it being malformed until that
       # environment silently stopped reporting — which looks like calm.
+      # Env vars the collector config requires. `validate` resolves them, so an
+      # unset one fails the check for the wrong reason.
       - name: otelcol — central collector config
-        run: docker run --rm -v "$PWD/ops/monitoring/otel:/cfg" otel/opentelemetry-collector-contrib:0.109.0 validate --config=/cfg/config.yml
+        env:
+          TELEMETRY_INGEST_TOKEN: ci
+          OTLP_HTTP_PORT: "4318"
+          PROMETHEUS_REMOTE_WRITE_ENDPOINT: http://127.0.0.1:9090/api/v1/write
+          TEMPO_ENDPOINT: 127.0.0.1:4317
+        run: |
+          docker run --rm -v "$PWD/ops/monitoring/otel:/cfg"             -e TELEMETRY_INGEST_TOKEN -e OTLP_HTTP_PORT             -e PROMETHEUS_REMOTE_WRITE_ENDPOINT -e TEMPO_ENDPOINT             otel/opentelemetry-collector-contrib:0.109.0 validate --config=/cfg/config.yml
+
+      # The all-in-one image is the deployed artefact. Building it in CI is the only
+      # thing that catches a bad COPY path, a missing binary in an upstream image, or
+      # a shell script that picked up CRLF endings on a Windows checkout — all three
+      # of which have already happened once.
+      - name: Build the all-in-one image
+        run: docker build -f ops/monitoring/railway/allinone.Dockerfile -t vb-monitoring:ci .
 
       - name: otelcol — per-environment agent config
         run: docker run --rm -v "$PWD/ops/monitoring/agent:/cfg" otel/opentelemetry-collector-contrib:0.109.0 validate --config=/cfg/config.yml

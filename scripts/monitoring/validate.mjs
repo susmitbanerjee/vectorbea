@@ -269,8 +269,23 @@ if (!/severity\s*=\s*"page"/.test(am)) {
 // The dashboards show per-workspace cost, run volume and the product event stream.
 // Every one of these is a way that could stop being true without anyone noticing,
 // because Grafana would keep working perfectly in each case.
-const gfEntry = readFileSync(join(OPS, 'railway', 'grafana-entrypoint.sh'), 'utf8');
-const gfDocker = readFileSync(join(OPS, 'railway', 'grafana.Dockerfile'), 'utf8');
+// The access logic lives in ONE sourced file used by both the all-in-one container
+// and the standalone Grafana image, so this checks that file rather than either
+// entrypoint — and the check below asserts both still source it, because a copy that
+// drifts is the failure this shared file exists to prevent.
+const gfEntry = readFileSync(join(OPS, 'railway', 'lib', 'grafana-auth.sh'), 'utf8');
+const gfDocker = readFileSync(join(OPS, 'railway', 'allinone.Dockerfile'), 'utf8');
+
+for (const [file, label] of [
+  ['grafana-entrypoint.sh', 'standalone Grafana'],
+  ['allinone-entrypoint.sh', 'all-in-one'],
+]) {
+  const src = readFileSync(join(OPS, 'railway', file), 'utf8');
+  if (!/grafana_auth_configure/.test(src) || !/grafana-auth\.sh/.test(src)) {
+    fail(file, `the ${label} entrypoint does not use the shared access-control logic`);
+  }
+}
+ok('both entrypoints source one shared access-control implementation');
 
 if (!/GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT="true"/.test(gfEntry)) {
   // Without strict mode a non-matching user gets the DEFAULT role instead of being
@@ -287,13 +302,72 @@ if (!/email_verified &&/.test(gfEntry)) {
   fail('grafana-entrypoint.sh', 'the role expression does not require email_verified');
 } else ok('Grafana requires a verified address');
 
-if (!/GRAFANA_ALLOWED_EMAILS/.test(gfEntry) || !/exit 1/.test(gfEntry)) {
-  fail('grafana-entrypoint.sh', 'does not refuse to start when GRAFANA_ALLOWED_EMAILS is unset');
+// Fail-closed is two halves and both must hold: the shared function returns non-zero
+// when the allow-list is missing, AND every caller acts on that instead of carrying on.
+// A `|| exit 1` that someone drops turns a hard refusal into a warning.
+if (!/GRAFANA_ALLOWED_EMAILS/.test(gfEntry) || !/return 1/.test(gfEntry)) {
+  fail('lib/grafana-auth.sh', 'does not refuse when GRAFANA_ALLOWED_EMAILS is unset');
+} else if (![
+  'grafana-entrypoint.sh', 'allinone-entrypoint.sh',
+].every((f) => /grafana_auth_configure \|\| exit 1/.test(
+  readFileSync(join(OPS, 'railway', f), 'utf8')))) {
+  fail('railway entrypoints', 'an entrypoint ignores the access-control failure and starts anyway');
 } else ok('Grafana refuses to start with no allow-list configured');
 
 if (!/GF_AUTH_ANONYMOUS_ENABLED=false/.test(gfDocker)) {
   fail('grafana.Dockerfile', 'anonymous access is not explicitly disabled');
 } else ok('Grafana anonymous access is disabled');
+
+// ── The all-in-one container's routing boundary ─────────────────────────────
+//
+// In the six-service layout, Prometheus was private because it had no domain — an
+// absence, nothing to misconfigure. Here it is private because nginx does not route
+// to it, which is an active decision and therefore editable. These checks are the
+// only thing standing between an innocent-looking nginx edit and a publicly readable
+// per-workspace cost report.
+const nginxConf = readFileSync(join(OPS, 'railway', 'allinone', 'nginx.conf.template'), 'utf8');
+const supervisord = readFileSync(join(OPS, 'railway', 'allinone', 'supervisord.conf'), 'utf8');
+
+const upstreams = [...nginxConf.matchAll(/proxy_pass\s+http:\/\/([a-z]+)/g)].map((m) => m[1]);
+const allowedUpstreams = new Set(['grafana', 'collector']);
+const unexpected = upstreams.filter((u) => !allowedUpstreams.has(u));
+if (unexpected.length) {
+  fail('nginx.conf.template', `routes to ${[...new Set(unexpected)].join(', ')} — only grafana and collector may be reachable`);
+} else ok(`nginx routes to only ${[...new Set(upstreams)].join(' and ')}`);
+
+// The OTLP path must be the ONLY non-Grafana route, and it must reach the collector.
+if (!/location \/v1\/ \{[\s\S]{0,200}?proxy_pass http:\/\/collector/.test(nginxConf)) {
+  fail('nginx.conf.template', '/v1/ does not route to the collector — agents would hit Grafana');
+} else ok('/v1/ reaches the OTLP collector');
+
+for (const blocked of ['/prometheus', '/alertmanager', '/tempo', '/loki', '/api/v1/write']) {
+  const rx = new RegExp(`location ${blocked.replace(/\//g, '\\/')}\\s*\\{\\s*return 404`);
+  if (!rx.test(nginxConf)) {
+    fail('nginx.conf.template', `${blocked} is not explicitly refused`);
+  }
+}
+ok('internal service paths are explicitly refused');
+
+// Every program must be supervised, or a component dies silently and the container
+// keeps reporting healthy because nginx is still up.
+for (const prog of ['prometheus', 'alertmanager', 'tempo', 'loki', 'collector', 'grafana', 'nginx']) {
+  if (!new RegExp(`\\[program:${prog}\\]`).test(supervisord)) {
+    fail('supervisord.conf', `no [program:${prog}] — it would never start`);
+  }
+}
+if (!/\[supervisorctl\]/.test(supervisord)) {
+  fail('supervisord.conf', 'no [supervisorctl] section — `supervisorctl status` cannot answer');
+} else ok('all seven programs supervised, and supervisorctl can query them');
+
+// The collector config must not carry a shell-style default: collector 0.109 reads
+// `${env:PORT:-4318}` as a variable NAME and refuses to start.
+// Comments stripped: the file explains this exact trap by quoting the bad syntax,
+// and a check that reads its own documentation as a violation cannot be satisfied
+// without deleting the documentation.
+const otel = stripComments(readFileSync(join(OPS, 'otel', 'config.yml'), 'utf8'));
+if (/\$\{env:[A-Z_]+:-/.test(otel)) {
+  fail('otel/config.yml', 'uses ${env:VAR:-default}, which collector 0.109 rejects as an invalid variable name');
+} else ok('collector config uses no unsupported default-value syntax');
 
 const agent = stripComments(readFileSync(join(OPS, 'agent', 'config.yml'), 'utf8'));
 for (const required of ['VECTORBEA_ENV', 'TELEMETRY_INGEST_TOKEN', 'dns_sd_configs']) {

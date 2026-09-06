@@ -5,7 +5,9 @@ datasources:
     type: prometheus
     uid: prometheus
     access: proxy
-    url: http://prometheus:9090
+    # Env-driven so ONE provisioning file serves both topologies: service names on
+    # a bridge network under docker-compose, loopback in the all-in-one container.
+    url: ${PROMETHEUS_URL}
     isDefault: true
     jsonData:
       timeInterval: 15s
@@ -14,7 +16,7 @@ datasources:
     type: loki
     uid: loki
     access: proxy
-    url: http://loki:3100
+    url: ${LOKI_URL}
     jsonData:
       # Turns a `trace_id` in a log line into a link to the trace.
       #
@@ -67,7 +69,7 @@ datasources:
     type: tempo
     uid: tempo
     access: proxy
-    url: http://tempo:3200
+    url: ${TEMPO_URL}
     jsonData:
       # And the reverse direction: from a span to the logs emitted inside it.
       tracesToLogsV2:

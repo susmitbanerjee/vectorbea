@@ -2,6 +2,10 @@
 build/
 *.class
 *.jar
+# ...but not the wrapper. Without this the service's own .gitignore re-excludes
+# it even though the root .gitignore allows it — a nested rule wins for paths
+# beneath it, and the result is `./gradlew` failing on any fresh clone.
+!gradle/wrapper/gradle-wrapper.jar
 out/
 .idea/
 *.iml

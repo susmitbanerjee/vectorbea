@@ -1,141 +1,164 @@
 # Deploying the monitoring stack on Railway
 
-The stack is **six services in one Railway project** plus **one agent per application
-environment**. Only two things are reachable from the internet; everything else talks
-over Railway's private network.
+**One Railway service** running the whole stack, plus **one small agent per application
+environment**. One public domain, routed by path.
 
 ```
-                     ┌──────────────────────── monitoring project ─────────────────────────┐
-                     │                                                                     │
-  staging env        │   collector ──metrics──▶ prometheus ──▶ alertmanager ──▶ email      │
-  ┌──────────┐       │   (public)   ──traces───▶ tempo            │                        │
-  │ agent    │───────┼──▶  :4318                                  │                        │
-  │ api      │       │                                            ▼                        │
-  │ worker   │       │                        grafana ◀── queries ─┘                       │
-  └──────────┘       │                        (public) telemetry.vectorbea.com             │
-                     │                                                                     │
-  production env     │                                                                     │
-  ┌──────────┐       │                                                                     │
-  │ agent    │───────┘                                                                     │
-  │ api      │                                                                             │
-  │ worker   │                                                                             │
-  └──────────┘                                                                             │
-                     └─────────────────────────────────────────────────────────────────────┘
+  staging env            ┌──────────── telemetry.vectorbea.com (one service) ────────────┐
+  ┌──────────┐           │                                                               │
+  │ agent    │──┐        │        nginx  ── /v1/*  ──▶ collector ──metrics──▶ prometheus │
+  │ api      │  │  OTLP  │          │                      │                      │      │
+  │ worker   │  ├───────▶│          │                      └──traces──▶ tempo     ▼      │
+  └──────────┘  │  HTTPS │          └── /*  ──▶ grafana ◀────queries───┘    alertmanager │
+                │        │                                        └── loki (idle)   │    │
+  production env│        │                                                          ▼    │
+  ┌──────────┐  │        │                                                       email   │
+  │ agent    │──┘        │   prometheus / alertmanager / tempo / loki: NO route in       │
+  │ api      │           │                                                               │
+  │ worker   │           └───────────────────────────────────────────────────────────────┘
+  └──────────┘
 ```
 
 ## Why it is shaped like this
 
-**One stack, not one per environment.** A separate Grafana per environment means two
-sets of dashboards to keep in step, and the question you actually ask during an incident
-— "does staging look like this too?" — needs both on one screen. The `environment` label
-does the separating, and every dashboard has an `$env` selector.
+**One service, one container.** Prometheus, Alertmanager, Tempo, Loki, the OTel
+collector and Grafana all run side by side under supervisord, behind one nginx that
+routes the single public port. Six Railway services would mean six lots of root
+directory, Dockerfile path, variables and volumes — and each of those is a place to get
+it wrong once and lose twenty minutes. At this size the whole monitoring stack is
+smaller than the application it watches.
 
-**An agent per environment, because Railway's private network is per-environment.**
-Prometheus in the monitoring project genuinely cannot reach `worker.railway.internal` in
-the staging environment. The alternative would be public `/metrics` endpoints, and those
-would serve `llm_cost_usd_micros{workspace}` — a per-customer cost report — to anyone
-who asked. See `ops/monitoring/agent/config.yml`.
+This is also what the original design was: `ops/monitoring/docker-compose.yml` has
+always described one box running all of it. The six-service split was an artefact of
+moving to Railway, not a decision made on the merits. Those Dockerfiles still exist —
+see the appendix — for the day the trade stops being worth it.
 
-**Only Grafana and the collector are public.** Prometheus' query API has no
-authentication and can read every series including per-workspace cost; Tempo's OTLP port
-has none either. Neither may face the internet. The collector is the one component whose
-ingest can require a bearer token, so it is the only door in.
+**What is given up, honestly.** One component being OOM-killed takes the others with
+it, and there are no per-component memory limits: the compose file sets six, here
+there is one. supervisord restarts each program independently, so a crash is contained;
+a memory exhaustion is not.
+
+**An agent per application environment.** Railway's private network is scoped per
+project AND per environment, so this container genuinely cannot reach
+`worker.railway.internal` in staging. Each environment runs one small collector inside
+its own network that scrapes locally, stamps `environment`, and pushes out over one
+authenticated connection. The alternative — public `/metrics` endpoints — would serve
+`llm_cost_usd_micros{workspace}`, a per-customer cost report, to anyone who asked.
+
+**One Grafana for both environments**, separated by the `environment` label and an
+`$env` selector on every dashboard. Two Grafanas would mean two sets of dashboards to
+keep in step, and the question asked during an incident is "does staging look like this
+too?"
 
 ---
 
-## 1. Create the project and services
+## 1. Create the service
 
-Create a Railway project (suggested name `vectorbea-monitoring`) with a **single
-`production` environment** — this stack is not itself per-environment.
+One Railway project (suggested name `vectorbea-monitoring`), one environment, **one
+service**. Connect it to this repo and set:
 
-Add six services, each connected to this repo. **Per service, set exactly three
-things** in Settings:
+| Setting | Value |
+|---|---|
+| Root Directory | `/` |
+| `RAILWAY_DOCKERFILE_PATH` (service variable) | `ops/monitoring/railway/allinone.Dockerfile` |
+| Volume mount path | `/data` |
 
-| Service | Root Directory | Config-as-code path | Public? |
-|---|---|---|---|
-| `prometheus` | `/` | `ops/monitoring/railway/prometheus.railway.json` | no |
-| `alertmanager` | `/` | `ops/monitoring/railway/alertmanager.railway.json` | no |
-| `tempo` | `/` | `ops/monitoring/railway/tempo.railway.json` | no |
-| `loki` | `/` | `ops/monitoring/railway/loki.railway.json` | no |
-| `collector` | `/` | `ops/monitoring/railway/collector.railway.json` | **yes** |
-| `grafana` | `/` | `ops/monitoring/railway/grafana.railway.json` | **yes** |
+### `RAILWAY_DOCKERFILE_PATH` is not optional
 
-**Root Directory must be `/` — the repo root — for every one of them.** This is the
-setting most likely to be got wrong, because `ops/monitoring/railway` looks like the
-obvious answer. It is not: Railway makes the root directory the Docker **build
-context**, and every Dockerfile here copies from `ops/monitoring/…`. Narrow the root
-and the build fails at the first `COPY` with a path that plainly exists in the repo,
-which is a confusing five minutes.
+**Set it before the first deploy.** Without it Railway finds no Dockerfile at the root
+directory, falls back to **Railpack** auto-detection, sees `gradlew` and
+`build.gradle.kts` at the repo root, decides this is a Java project, and tries to build
+the entire Kotlin monorepo:
 
-The `.railway.json` file carries the Dockerfile path, the restart policy, the health
-check and — the part that matters day to day — `watchPatterns`. Without those, **one
-commit anywhere in the repo rebuilds and redeploys all six services**: six restarts and
-six gaps in collection, because someone edited the web app. With them, a dashboard edit
-rebuilds Grafana and nothing else.
+```
+using build driver railpack-v0.39.0
+  ↳ Detected Java
+  ↳ Using Gradle
+  $ ./gradlew clean build -x check -x test -Pproduction
+Error: Unable to access jarfile /app/gradle/wrapper/gradle-wrapper.jar
+```
 
-If you would rather not use config-as-code, the equivalent manual settings are Root
-Directory `/`, Builder `Dockerfile`, and Dockerfile Path
-`ops/monitoring/railway/<service>.Dockerfile` — but then set the watch paths by hand
-too, or accept the rebuild storm.
+The giveaway is the first line: `build driver railpack` means the Dockerfile was never
+read. Whatever error follows is a symptom of the wrong builder, not the cause.
 
-Attach a **volume** to `prometheus` (`/prometheus`), `tempo` (`/var/tempo`), `loki`
-(`/loki`) and `grafana` (`/var/lib/grafana`). Without one, a redeploy loses history —
-and for Grafana, loses every user account.
+**It must name a FILE, not a folder.** Pointing it at `ops/monitoring/railway/` makes
+Railway read the directory itself as a Dockerfile:
 
-### Ports
+```
+dockerfile invalid: failed to parse dockerfile: file with no instructions
+```
 
-Leave `PORT` alone; Railway assigns it. What matters is which services *use* it:
+### Root Directory must be `/`
 
-- **`collector`** binds its OTLP/HTTP receiver to `$PORT`, because its public domain
-  routes there. **`grafana`** does the same. Both are handled in config — nothing to
-  set.
-- **The private four** (`prometheus`, `alertmanager`, `tempo`, `loki`) listen on their
-  own fixed ports and are reached over the private network by explicit port, exactly as
-  the variables in §3 spell out. They need no domain and no `PORT`.
+The repo root. This is the other setting most likely to be got wrong, because
+`ops/monitoring/railway` looks like the obvious answer. It is not: Railway makes the
+root directory the Docker **build context**, and the Dockerfile copies from
+`ops/monitoring/…`. Narrow the root and the build fails at the first `COPY`, on a path
+that plainly exists in the repo.
 
-## 2. Domains
+### The volume
 
-- `grafana` → custom domain **`telemetry.vectorbea.com`**.
-- `collector` → a Railway-generated domain is fine (e.g.
-  `collector-production.up.railway.app`). Nothing human visits it.
+Mount one volume at **`/data`**. The entrypoint creates a subdirectory per component
+(`/data/prometheus`, `/data/tempo`, `/data/loki`, `/data/grafana`,
+`/data/alertmanager`). Without it a redeploy loses all history — and for Grafana, every
+user account.
+
+### Optional: config-as-code
+
+`ops/monitoring/railway/allinone.railway.json` carries the restart policy, the
+`/api/health` health check and `watchPatterns` so an unrelated commit does not rebuild
+the stack. Point the service's **Config-as-code** field at it. Set
+`RAILWAY_DOCKERFILE_PATH` as well, not instead — the variable is what guarantees the
+builder is right even if the config path is wrong.
+
+### Sizing
+
+Seven processes share one memory limit. Prometheus is the largest and is capped at
+15d/4GB of series. **2 GB is a sensible starting point**; below about 1 GB, Prometheus
+and Grafana will contend and you will see restarts under load rather than a clean
+failure.
+
+## 2. Domain
+
+Give the service the custom domain **`telemetry.vectorbea.com`**. That single domain
+serves both things, routed by path inside the container:
+
+| Path | Goes to | Auth |
+|---|---|---|
+| `/v1/metrics`, `/v1/traces` | the OTel collector | bearer token |
+| everything else | Grafana | Google OAuth, §4 |
+
+`/prometheus`, `/alertmanager`, `/tempo`, `/loki` and `/api/v1/write` return **404** —
+nginx has no route to them. Prometheus' query API has no authentication and can read
+every series including per-workspace cost, so it must never be reachable; the same
+applies to Alertmanager's silence API and Tempo's span store.
 
 > **Note:** `telemetry.vectorbea.com` previously pointed at the standalone
 > `apps/telemetry` service, which no longer exists — it was folded into `api-kotlin`,
-> and its admin console now lives at `api.vectorbea.com/admin/telemetry`. Repointing the
-> domain here is deliberate and is the last step of that move.
+> and its admin console now lives at `api.vectorbea.com/admin/telemetry`. Repointing
+> the domain here is deliberate and is the last step of that move.
 
 ## 3. Environment variables
 
-**On every monitoring service:**
+All on the one service. **The container refuses to start if any of the first three is
+missing** — each produces a stack that looks healthy and is quietly wrong, which is the
+failure this whole exercise exists to remove.
 
-| Variable | Value |
-|---|---|
-| `TELEMETRY_INGEST_TOKEN` | a long random secret — generate with `openssl rand -hex 32` |
+| Variable | Value | If unset |
+|---|---|---|
+| `TELEMETRY_INGEST_TOKEN` | `openssl rand -hex 32` | refuses to start — ingest would be open to anyone who found the domain |
+| `ALERT_EMAIL` | where pages and tickets go | refuses to start — Alertmanager would deliver every alert nowhere |
+| `GRAFANA_ALLOWED_EMAILS` | `susmit.b1@gmail.com` | refuses to start — see §4 |
+| `GF_SECURITY_ADMIN_PASSWORD` | `openssl rand -base64 32` | Grafana will not start |
+| `GF_SERVER_ROOT_URL` | `https://telemetry.vectorbea.com` | alert-email links point at localhost |
+| `GRAFANA_OAUTH_CLIENT_ID` / `_SECRET` | from Google, §4 | falls back to password login and warns loudly |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | any SMTP provider; Resend and Postmark have adequate free tiers | delivery fails |
+| `ALERT_WEBHOOK_URL` | optional — ntfy or a Telegram bot, so a page reaches a lock screen | webhook simply not used |
+| `ANALYTICS_DB_HOST` … `ANALYTICS_DB_PASSWORD` | the **read-only** Neon role, §6 | Product and Workspace dashboards show a datasource error |
 
-**`collector` also needs:**
-
-| Variable | Value |
-|---|---|
-| `PROMETHEUS_REMOTE_WRITE_ENDPOINT` | `http://prometheus.railway.internal:9090/api/v1/write` |
-| `TEMPO_ENDPOINT` | `tempo.railway.internal:4317` |
-
-**`alertmanager` also needs:**
-
-| Variable | Notes |
-|---|---|
-| `ALERT_EMAIL` | where pages and tickets go |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | any SMTP provider; Resend and Postmark both have adequate free tiers |
-| `ALERT_WEBHOOK_URL` | optional — an ntfy topic or Telegram bot, so a page reaches a lock screen |
-
-**`grafana` also needs:**
-
-| Variable | Notes |
-|---|---|
-| `GF_SECURITY_ADMIN_PASSWORD` | required; generate a long random one — see §4 for why it still matters |
-| `GF_SERVER_ROOT_URL` | `https://telemetry.vectorbea.com` |
-| `GRAFANA_ALLOWED_EMAILS` | **`susmit.b1@gmail.com`** — see §4. The container refuses to start without it. |
-| `GRAFANA_OAUTH_CLIENT_ID` / `GRAFANA_OAUTH_CLIENT_SECRET` | from the Google OAuth client, §4 |
-| `ANALYTICS_DB_HOST` … `ANALYTICS_DB_PASSWORD` | the **read-only** Neon role, see §6 |
+Everything else — the collector's endpoints, the OTLP port, the datasource URLs — is
+set by the entrypoint to loopback addresses. Do not override them unless you are
+splitting the stack back out.
 
 ## 4. Who can open telemetry.vectorbea.com
 
@@ -227,24 +250,31 @@ that same single address.
 In **each application environment** (Railway `staging` and `production` of the main
 project), add one more service. Same three settings as above:
 
-| Service | Root Directory | Config-as-code path |
+| Service | Root Directory | `RAILWAY_DOCKERFILE_PATH` |
 |---|---|---|
-| `telemetry-agent` | `/` | `ops/monitoring/railway/agent.railway.json` |
+| `telemetry-agent` | `/` | `ops/monitoring/railway/agent.Dockerfile` |
+
+Same rule as §1: set the variable, or Railpack builds the Kotlin monorepo instead.
 
 Variables:
 
 | Variable | staging | production |
 |---|---|---|
 | `VECTORBEA_ENV` | `dev` | `prod` |
-| `TELEMETRY_INGEST_ENDPOINT` | `https://<collector domain>` | same |
+| `TELEMETRY_INGEST_ENDPOINT` | `https://telemetry.vectorbea.com` | same |
 | `TELEMETRY_INGEST_TOKEN` | the secret from §3 | same |
 | `API_METRICS_TARGET` | `api.railway.internal:8080` | same |
 | `WORKER_DNS_NAME` | `worker.railway.internal` | same |
 
-`TELEMETRY_INGEST_ENDPOINT` is the collector's **public HTTPS domain, with no port and
-no path** — the agent exports OTLP over HTTP and appends `/v1/metrics` and `/v1/traces`
-itself. Appending `:4318` sends it to a port Railway's proxy does not serve, and the
-symptom is an environment that looks dark with no error on the receiving end.
+`TELEMETRY_INGEST_ENDPOINT` is the **domain only — no port, no path**. The agent
+exports OTLP over HTTP and appends `/v1/metrics` and `/v1/traces` itself, which is
+exactly what nginx routes to the collector. Appending `:4318` sends it to a port
+Railway's proxy does not serve, and the symptom is an environment that looks dark with
+no error visible on the receiving end.
+
+Yes, this is the same domain humans use for Grafana. The two are separated by path and
+by authentication — the collector requires the bearer token, Grafana requires OAuth —
+and nothing on `/v1/` reaches Grafana or vice versa.
 
 `VECTORBEA_ENV` is the label every dashboard's `$env` selector reads. **Getting it wrong
 mislabels an entire environment's data**, which is worse than having none — staging
@@ -279,15 +309,41 @@ GRANT SELECT ON analytics_events, analytics_daily_rollups TO grafana_ro;
 
 In order, because each step depends on the one before:
 
-1. **`collector` logs** show no startup errors and the OTLP receivers are listening.
-2. **`telemetry-agent` logs** in each environment show no 401s. A 401 means
+1. **The build log's first lines name a Dockerfile, not Railpack.** If you see
+   `using build driver railpack`, `RAILWAY_DOCKERFILE_PATH` is unset or wrong and
+   nothing below will work. Check this first — every other symptom of a wrong builder
+   is misleading.
+2. **All seven programs are running.** In the service's shell:
+   ```
+   supervisorctl -c /etc/supervisord.conf status
+   ```
+   Expect `RUNNING` for prometheus, alertmanager, tempo, loki, collector, grafana and
+   nginx. A `FATAL` here is the specific component to debug — the container as a whole
+   will still look healthy, which is exactly why this check exists.
+3. **The routing boundary holds.** From anywhere:
+   ```
+   curl -s -o /dev/null -w '%{http_code}
+' https://telemetry.vectorbea.com/prometheus
+   ```
+   **Must be 404.** So must `/alertmanager`, `/tempo`, `/loki` and `/api/v1/write`.
+   A 200 from any of them means nginx is routing somewhere it must not, and
+   Prometheus' query API — which has no authentication and can read per-workspace
+   cost — is on the public internet.
+4. **Ingest rejects an unauthenticated push.**
+   ```
+   curl -s -o /dev/null -w '%{http_code}
+' -X POST -H 'Content-Type: application/json'         -d '{}' https://telemetry.vectorbea.com/v1/traces
+   ```
+   **Must be 401.** A 200 means `TELEMETRY_INGEST_TOKEN` is not being enforced and
+   anyone can write series into your Prometheus.
+5. **`telemetry-agent` logs** in each environment show no 401s. A 401 means
    `TELEMETRY_INGEST_TOKEN` does not match.
-3. **Prometheus** — through Grafana, run `up{job="telemetry-agent"}`. One series per
+6. **Prometheus** — through Grafana, run `up{job="telemetry-agent"}`. One series per
    environment.
-4. **`count(count by (environment) (job_last_success_timestamp_seconds))`** should equal
+7. **`count(count by (environment) (job_last_success_timestamp_seconds))`** should equal
    the number of environments reporting. This is also the check the `ScrapeAgentDown`
    alert automates.
-5. **Access control — test the refusal, not just the admission.** Confirming your own
+8. **Access control — test the refusal, not just the admission.** Confirming your own
    login works proves nothing about whether anyone else's does.
    - Sign in as `susmit.b1@gmail.com`. You should land on the dashboards as Admin.
    - In a private window, try any other Google account. Expect a refusal from Google's
@@ -296,21 +352,43 @@ In order, because each step depends on the one before:
      a non-matching user silently gets the default role.**
    - Confirm the password form is gone from `/login`. If it is there, OAuth did not
      configure — check the startup logs for the `GRAFANA_OAUTH_CLIENT_ID unset` warning.
-6. **Open every dashboard** and switch `$env` between `prod` and `dev`. A panel that is
+9. **Open every dashboard** and switch `$env` between `prod` and `dev`. A panel that is
    empty in both is a genuine gap; a panel empty in one is usually correct (staging is
    quiet).
-7. **Fire a synthetic alert** — see `docs/telemetry/RUNBOOKS.md`.
+10. **Fire a synthetic alert** — see `docs/telemetry/RUNBOOKS.md`.
 
 ## 8. What this costs
 
-Six small containers plus one agent per environment. On Railway's usage-based pricing
-that is roughly **$15–25/month** at the memory limits in `docker-compose.yml`
-(Prometheus 768M is the largest). Prometheus retention is capped at 15d/4GB and Tempo at
-72h, so storage does not grow without bound.
+One container at roughly 2 GB, plus one small agent per environment. On Railway's
+usage-based pricing that is roughly **$10–15/month** — less than the six-service layout,
+which paid a baseline per service.
 
-Cheaper alternative if that matters: the same compose file on a €6/month Hetzner box,
-with the agents pointing at it instead. The trade is that you then own the box —
-including patching it, and including the fact that it has no monitoring of its own.
+Storage is bounded by config, not by hope: Prometheus at 15d/4GB, Tempo at 72h. A
+cardinality mistake fills a capped volume instead of the disk.
 
-**Either way, the external ping in `docs/telemetry/RUNBOOKS.md` is not optional.** This
-stack cannot alert on its own death.
+**The external ping is not optional.** This stack cannot alert on its own death —
+Alertmanager is inside it — and that is more true now than with six services, because
+one container failing takes every component with it. A free external check on
+`https://telemetry.vectorbea.com/api/health` and on the API's `/health` closes it. See
+`docs/telemetry/RUNBOOKS.md`.
+
+---
+
+## Appendix: splitting back out
+
+The per-component Dockerfiles (`prometheus.Dockerfile`, `grafana.Dockerfile`, …) and
+their `.railway.json` files are still here. They deploy the same configs and the same
+dashboards as six separate Railway services, with per-component memory limits and
+independent restarts.
+
+**When that trade becomes worth it:** when one component's memory pressure starts
+restarting the others, when Prometheus needs materially more memory than Grafana, or
+when the stack's availability requirement stops matching "restart the container".
+
+**What changes:** each service gets its own Root Directory `/` and its own
+`RAILWAY_DOCKERFILE_PATH`; Grafana and the collector each take a domain, and the
+collector's `TELEMETRY_INGEST_ENDPOINT` becomes its own domain rather than the shared
+one. The datasource URLs move from loopback to `*.railway.internal` names via
+`PROMETHEUS_URL` / `LOKI_URL` / `TEMPO_URL`, and Prometheus uses `prometheus.yml`
+rather than `prometheus.allinone.yml`. Nothing about the dashboards, alerts, runbooks
+or agents changes.

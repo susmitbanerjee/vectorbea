@@ -6,5 +6,10 @@
 FROM otel/opentelemetry-collector-contrib:0.109.0
 
 COPY ops/monitoring/otel/config.yml /etc/otel/config.yml
+COPY ops/monitoring/railway/collector-entrypoint.sh /usr/local/bin/start-collector.sh
 
-CMD ["--config=/etc/otel/config.yml"]
+USER root
+RUN chmod +x /usr/local/bin/start-collector.sh
+
+ENTRYPOINT ["/usr/local/bin/start-collector.sh"]
+CMD []

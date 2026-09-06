@@ -24,32 +24,48 @@
 
 extensions:
   # Every agent presents this token. It is the only thing between the public ingest
-  # endpoint and anyone who wants to write series into our Prometheus, so it is a
-  # long random secret and it differs per environment ONLY in that rotating one
-  # should not require rotating the other — the check here accepts any of them.
+  # endpoint and anyone who wants to write series into our Prometheus, so make it a
+  # long random secret (`openssl rand -hex 32`).
+  #
+  # ONE token, shared by every environment's agent — `token`, not `tokens`. The plural
+  # form exists in later collector releases; on 0.109 it is rejected outright with
+  # "'' has invalid keys: tokens" and the collector refuses to start.
+  #
+  # The practical consequence is that rotating it means updating every agent in the
+  # same window. That is a real cost and it is accepted here: per-environment tokens
+  # would need the plural form and a version bump, for a threat model where the agents
+  # are all ours anyway.
   bearertokenauth/ingest:
     scheme: Bearer
-    tokens:
-      - ${env:TELEMETRY_INGEST_TOKEN}
+    token: ${env:TELEMETRY_INGEST_TOKEN}
 
 receivers:
   otlp:
     protocols:
-      # gRPC stays on its fixed port for private-network callers. It is NOT the
-      # path the agents use — see the exporter note in agent/config.yml.
-      grpc:
-        endpoint: 0.0.0.0:4317
-        auth:
-          authenticator: bearertokenauth/ingest
-      # ── Binds Railway's assigned port, not a fixed one ────────────────────
-      # Railway routes a public domain to whatever the container advertises in
-      # $PORT. A receiver hard-bound to 4318 is simply never reached: the domain
-      # resolves, TLS completes, and every agent's push times out against a port
-      # nothing is listening on.
+      # ── NO gRPC RECEIVER, DELIBERATELY ────────────────────────────────────
+      # It had no user. The application services export to their environment's
+      # AGENT, not here, and the agents push over OTLP/HTTP because that is what
+      # survives an HTTPS proxy without HTTP/2 negotiation.
       #
-      # The default keeps docker-compose and `docker run` working unchanged.
+      # It was also actively harmful: in the all-in-one container Tempo's own OTLP
+      # receiver owns 4317, so a gRPC receiver here loses the race and the whole
+      # collector fails with "address already in use" — taking the metrics pipeline
+      # down over a port nothing was going to connect to.
+      # ── The listen port is injected, never hardcoded ──────────────────────
+      # Where this binds differs by topology: behind nginx in the all-in-one
+      # container it is a fixed internal port, while as a standalone Railway service
+      # it must be the $PORT the platform assigns, or its public domain resolves,
+      # completes TLS, and times out against a port nothing is listening on.
+      #
+      # A dedicated variable rather than $PORT directly, because $PORT means
+      # "the one public port" to Railway and this is not always that.
+      #
+      # NO DEFAULT VALUE HERE. `${env:PORT:-4318}` looks like shell and is not:
+      # collector 0.109 reads the whole string `PORT:-4318` as the variable NAME and
+      # refuses to start — "environment variable \"PORT:-4318\" has invalid name".
+      # Every caller sets this explicitly instead.
       http:
-        endpoint: 0.0.0.0:${env:PORT:-4318}
+        endpoint: 0.0.0.0:${env:OTLP_HTTP_PORT}
         auth:
           authenticator: bearertokenauth/ingest
 

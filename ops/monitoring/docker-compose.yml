@@ -122,9 +122,9 @@ services:
       TELEMETRY_INGEST_TOKEN: ${TELEMETRY_INGEST_TOKEN:-local-dev-token}
       PROMETHEUS_REMOTE_WRITE_ENDPOINT: http://prometheus:9090/api/v1/write
       TEMPO_ENDPOINT: tempo:4317
-      # On Railway this is assigned by the platform and the public domain routes to
-      # it. Pinned here so the local endpoint stays the familiar 4318.
-      PORT: "4318"
+      # Where the OTLP/HTTP receiver binds. Explicit because the collector config
+      # deliberately carries no default — see the note in otel/config.yml.
+      OTLP_HTTP_PORT: "4318"
     volumes:
       - ./otel/config.yml:/etc/otel/config.yml:ro
     ports:
@@ -177,6 +177,11 @@ services:
       # Must match the public URL or every generated link — including the one in an
       # alert email — points at localhost.
       GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      # Service names here; the all-in-one container sets these to loopback. Same
+      # datasources.yml either way.
+      PROMETHEUS_URL: http://prometheus:9090
+      LOKI_URL: http://loki:3100
+      TEMPO_URL: http://tempo:3200
       # The Product and Workspace-support dashboards read analytics_events directly.
       # This MUST be a read-only role: Grafana accepts arbitrary SQL from anyone who
       # can edit a panel. See ops/monitoring/railway/README.md §6.

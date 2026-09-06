@@ -1,0 +1,35 @@
+# Line endings.
+#
+# ── WHY THIS FILE EXISTS ─────────────────────────────────────────────────────
+# Development happens on Windows; everything ships in a Linux container. A shell
+# script written with CRLF endings has a shebang of `#!/bin/sh\r`, and the kernel
+# looks for an interpreter literally named `sh\r`. The container then fails with:
+#
+#     exec /usr/local/bin/start-stack.sh: no such file or directory
+#
+# ...naming a file that plainly exists and is executable. It cost a build to find, and
+# it would have cost another the first time anyone edited one of these on Windows.
+#
+# Marking them `text eol=lf` makes git normalise on checkout regardless of platform,
+# so the fix is durable rather than a one-off conversion someone later undoes.
+
+*.sh        text eol=lf
+*.bash      text eol=lf
+Dockerfile  text eol=lf
+*.Dockerfile text eol=lf
+
+# Entrypoints and configs read by Linux tooling. Alertmanager, Prometheus and the
+# collector all tolerate CRLF in YAML, but nginx and supervisord do not always, and a
+# trailing \r inside a quoted value is invisible in review.
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.conf      text eol=lf
+*.template  text eol=lf
+
+# Binary — never touch.
+*.jar       binary
+*.png       binary
+*.jpg       binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
