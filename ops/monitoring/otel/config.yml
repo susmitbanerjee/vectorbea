@@ -35,12 +35,21 @@ extensions:
 receivers:
   otlp:
     protocols:
+      # gRPC stays on its fixed port for private-network callers. It is NOT the
+      # path the agents use — see the exporter note in agent/config.yml.
       grpc:
         endpoint: 0.0.0.0:4317
         auth:
           authenticator: bearertokenauth/ingest
+      # ── Binds Railway's assigned port, not a fixed one ────────────────────
+      # Railway routes a public domain to whatever the container advertises in
+      # $PORT. A receiver hard-bound to 4318 is simply never reached: the domain
+      # resolves, TLS completes, and every agent's push times out against a port
+      # nothing is listening on.
+      #
+      # The default keeps docker-compose and `docker run` working unchanged.
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: 0.0.0.0:${env:PORT:-4318}
         auth:
           authenticator: bearertokenauth/ingest
 

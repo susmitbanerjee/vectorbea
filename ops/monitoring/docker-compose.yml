@@ -122,6 +122,9 @@ services:
       TELEMETRY_INGEST_TOKEN: ${TELEMETRY_INGEST_TOKEN:-local-dev-token}
       PROMETHEUS_REMOTE_WRITE_ENDPOINT: http://prometheus:9090/api/v1/write
       TEMPO_ENDPOINT: tempo:4317
+      # On Railway this is assigned by the platform and the public domain routes to
+      # it. Pinned here so the local endpoint stays the familiar 4318.
+      PORT: "4318"
     volumes:
       - ./otel/config.yml:/etc/otel/config.yml:ro
     ports:
@@ -217,7 +220,7 @@ services:
     environment:
       VECTORBEA_ENV: ${VECTORBEA_ENV:-local}
       TELEMETRY_INGEST_TOKEN: ${TELEMETRY_INGEST_TOKEN:-local-dev-token}
-      TELEMETRY_INGEST_ENDPOINT: otel-collector:4317
+      TELEMETRY_INGEST_ENDPOINT: http://otel-collector:4318
       API_METRICS_TARGET: host.docker.internal:8080
       WORKER_DNS_NAME: host.docker.internal
     volumes:

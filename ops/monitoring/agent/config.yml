@@ -138,7 +138,11 @@ processors:
     send_batch_size: 512
 
 exporters:
-  otlp/central:
+  # HTTP, not gRPC. The agent reaches the central collector through Railway's
+  # public HTTPS proxy, and OTLP/HTTP over 443 is the path that needs no
+  # HTTP/2 end-to-end negotiation to work. gRPC can be made to work there and
+  # is one more thing to debug at the moment an environment goes dark.
+  otlphttp/central:
     endpoint: ${env:TELEMETRY_INGEST_ENDPOINT}
     auth:
       authenticator: bearertokenauth/egress
@@ -164,8 +168,8 @@ service:
     metrics:
       receivers: [prometheus]
       processors: [memory_limiter, resource, batch]
-      exporters: [otlp/central]
+      exporters: [otlphttp/central]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, resource, attributes/redact, batch]
-      exporters: [otlp/central]
+      exporters: [otlphttp/central]

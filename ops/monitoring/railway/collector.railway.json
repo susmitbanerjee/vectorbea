@@ -1,0 +1,15 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "ops/monitoring/railway/collector.Dockerfile",
+    "watchPatterns": [
+      "ops/monitoring/otel/**",
+      "ops/monitoring/railway/collector.Dockerfile"
+    ]
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
+  }
+}

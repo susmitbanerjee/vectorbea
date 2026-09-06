@@ -48,23 +48,50 @@ ingest can require a bearer token, so it is the only door in.
 Create a Railway project (suggested name `vectorbea-monitoring`) with a **single
 `production` environment** — this stack is not itself per-environment.
 
-Add six services, each **Dockerfile-deployed from this repo**:
+Add six services, each connected to this repo. **Per service, set exactly three
+things** in Settings:
 
-| Service | Dockerfile | Public? |
-|---|---|---|
-| `prometheus` | `ops/monitoring/railway/prometheus.Dockerfile` | no |
-| `alertmanager` | `ops/monitoring/railway/alertmanager.Dockerfile` | no |
-| `tempo` | `ops/monitoring/railway/tempo.Dockerfile` | no |
-| `loki` | `ops/monitoring/railway/loki.Dockerfile` | no |
-| `collector` | `ops/monitoring/railway/collector.Dockerfile` | **yes** |
-| `grafana` | `ops/monitoring/railway/grafana.Dockerfile` | **yes** |
+| Service | Root Directory | Config-as-code path | Public? |
+|---|---|---|---|
+| `prometheus` | `/` | `ops/monitoring/railway/prometheus.railway.json` | no |
+| `alertmanager` | `/` | `ops/monitoring/railway/alertmanager.railway.json` | no |
+| `tempo` | `/` | `ops/monitoring/railway/tempo.railway.json` | no |
+| `loki` | `/` | `ops/monitoring/railway/loki.railway.json` | no |
+| `collector` | `/` | `ops/monitoring/railway/collector.railway.json` | **yes** |
+| `grafana` | `/` | `ops/monitoring/railway/grafana.railway.json` | **yes** |
 
-Set each service's **root directory to the repo root** (the Dockerfiles copy from
-`ops/monitoring/…`, so a narrower root breaks the build context).
+**Root Directory must be `/` — the repo root — for every one of them.** This is the
+setting most likely to be got wrong, because `ops/monitoring/railway` looks like the
+obvious answer. It is not: Railway makes the root directory the Docker **build
+context**, and every Dockerfile here copies from `ops/monitoring/…`. Narrow the root
+and the build fails at the first `COPY` with a path that plainly exists in the repo,
+which is a confusing five minutes.
+
+The `.railway.json` file carries the Dockerfile path, the restart policy, the health
+check and — the part that matters day to day — `watchPatterns`. Without those, **one
+commit anywhere in the repo rebuilds and redeploys all six services**: six restarts and
+six gaps in collection, because someone edited the web app. With them, a dashboard edit
+rebuilds Grafana and nothing else.
+
+If you would rather not use config-as-code, the equivalent manual settings are Root
+Directory `/`, Builder `Dockerfile`, and Dockerfile Path
+`ops/monitoring/railway/<service>.Dockerfile` — but then set the watch paths by hand
+too, or accept the rebuild storm.
 
 Attach a **volume** to `prometheus` (`/prometheus`), `tempo` (`/var/tempo`), `loki`
 (`/loki`) and `grafana` (`/var/lib/grafana`). Without one, a redeploy loses history —
 and for Grafana, loses every user account.
+
+### Ports
+
+Leave `PORT` alone; Railway assigns it. What matters is which services *use* it:
+
+- **`collector`** binds its OTLP/HTTP receiver to `$PORT`, because its public domain
+  routes there. **`grafana`** does the same. Both are handled in config — nothing to
+  set.
+- **The private four** (`prometheus`, `alertmanager`, `tempo`, `loki`) listen on their
+  own fixed ports and are reached over the private network by explicit port, exactly as
+  the variables in §3 spell out. They need no domain and no `PORT`.
 
 ## 2. Domains
 
@@ -198,21 +225,26 @@ that same single address.
 ## 5. The agents
 
 In **each application environment** (Railway `staging` and `production` of the main
-project), add one more service:
+project), add one more service. Same three settings as above:
 
-| Service | Dockerfile |
-|---|---|
-| `telemetry-agent` | `ops/monitoring/railway/agent.Dockerfile` |
+| Service | Root Directory | Config-as-code path |
+|---|---|---|
+| `telemetry-agent` | `/` | `ops/monitoring/railway/agent.railway.json` |
 
 Variables:
 
 | Variable | staging | production |
 |---|---|---|
 | `VECTORBEA_ENV` | `dev` | `prod` |
-| `TELEMETRY_INGEST_ENDPOINT` | `https://<collector domain>:443` | same |
+| `TELEMETRY_INGEST_ENDPOINT` | `https://<collector domain>` | same |
 | `TELEMETRY_INGEST_TOKEN` | the secret from §3 | same |
 | `API_METRICS_TARGET` | `api.railway.internal:8080` | same |
 | `WORKER_DNS_NAME` | `worker.railway.internal` | same |
+
+`TELEMETRY_INGEST_ENDPOINT` is the collector's **public HTTPS domain, with no port and
+no path** — the agent exports OTLP over HTTP and appends `/v1/metrics` and `/v1/traces`
+itself. Appending `:4318` sends it to a port Railway's proxy does not serve, and the
+symptom is an environment that looks dark with no error on the receiving end.
 
 `VECTORBEA_ENV` is the label every dashboard's `$env` selector reads. **Getting it wrong
 mislabels an entire environment's data**, which is worse than having none — staging
