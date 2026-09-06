@@ -1,5 +1,6 @@
 package com.vectorbea.api.billing
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import org.slf4j.LoggerFactory
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -56,13 +57,18 @@ class BillingScheduler(
         Thread(r, "billing-scheduler").also { it.isDaemon = true }
     }
 
+    private companion object { const val JOB_NAME = "billing-scheduler" }
+
     fun start() {
         if (!enabled) {
             log.info("[billing] scheduled jobs disabled by BILLING_JOBS_ENABLED=false")
             return
         }
         if (!running.compareAndSet(false, true)) return
-        future = executor.scheduleWithFixedDelay(::tick, 90_000L, intervalMs, TimeUnit.MILLISECONDS)
+        ScheduledJobHealth.register(JOB_NAME, intervalMs)
+        future = executor.scheduleWithFixedDelay(
+            { ScheduledJobHealth.record(JOB_NAME) { tick() } },
+            90_000L, intervalMs, TimeUnit.MILLISECONDS)
         log.info("[billing] scheduler started (interval={}ms, liveProvider={})",
             intervalMs, providers.anyLive)
     }

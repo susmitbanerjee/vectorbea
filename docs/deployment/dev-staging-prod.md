@@ -248,8 +248,19 @@ the API already serves a different resource at `/api/dashboard/summary` (the pro
 dashboard on Home). See
 [`../architecture/OBSERVABILITY.md`](../architecture/OBSERVABILITY.md).
 
-The **operational** dashboards — fleet health, run health, cost — are in Grafana on the
-Hetzner box, not here. `ops/monitoring/docker-compose.yml` brings up the whole stack.
+The **operational** dashboards are in Grafana at **`telemetry.vectorbea.com`**, not here.
+Eight of them — fleet health, run health, provider capacity, trace pipeline, scheduled
+jobs, cost, product, and per-workspace support — with an `$env` selector at the top-left
+of each, so one Grafana serves both staging and production.
+
+That domain used to point at the standalone `apps/telemetry` service. It was reassigned
+when the service was folded into `api-kotlin`; the admin analytics console it used to
+serve is now at `api.vectorbea.com/admin/telemetry`.
+
+Deploying it: [`../../ops/monitoring/railway/README.md`](../../ops/monitoring/railway/README.md).
+Each application environment also runs one `telemetry-agent` service — that is what
+makes the `$env` separation work, and it is where `VECTORBEA_ENV` matters most: set it
+wrong and an entire environment's data is mislabelled.
 
 ### 4.3 Auth
 

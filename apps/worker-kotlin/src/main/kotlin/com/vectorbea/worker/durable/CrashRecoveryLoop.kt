@@ -1,5 +1,6 @@
 package com.vectorbea.worker.durable
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.worker.events.RunEventStore
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.queue.WorkflowRunJob
@@ -32,6 +33,8 @@ class CrashRecoveryLoop(
     private val enqueueJob: (WorkflowRunJob) -> Unit,
     private val pollIntervalMs: Long = (System.getenv("WORKER_CRASH_CHECK_INTERVAL_MS") ?: "60000").toLong(),
 ) {
+    private companion object { const val JOB_NAME = "crash-recovery" }
+
     private val log = logger()
     private val running = AtomicBoolean(false)
     private val executor = Executors.newSingleThreadScheduledExecutor { r ->
@@ -41,7 +44,10 @@ class CrashRecoveryLoop(
 
     fun start() {
         if (running.compareAndSet(false, true)) {
-            future = executor.scheduleWithFixedDelay(::tick, 30_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
+            ScheduledJobHealth.register(JOB_NAME, pollIntervalMs)
+            future = executor.scheduleWithFixedDelay(
+                { ScheduledJobHealth.record(JOB_NAME) { tick() } },
+                30_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
             log.info("[recovery-loop] started (interval={}ms)", pollIntervalMs)
         }
     }
@@ -63,6 +69,7 @@ class CrashRecoveryLoop(
             stale.forEach { recover(it) }
         } catch (e: Exception) {
             log.error("[recovery-loop] tick failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
         }
     }
 

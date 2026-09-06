@@ -1,22 +1,27 @@
-# THREE ALERTS. NOT FOUR.
+# THREE PAGES. FOUR TICKETS. THE DISTINCTION IS THE DESIGN.
 #
-# §5.4: "Three alerts only (more and you'll ignore them)." That is the whole design
-# constraint and it is the correct one. An alert you have learned to dismiss is worse
-# than no alert, because it trains you to dismiss the next one too — and it occupies
-# the budget of attention that the real page needs.
+# This file used to open "THREE ALERTS. NOT FOUR." and that constraint was right about
+# the thing it was protecting: an alert you have learned to dismiss is worse than no
+# alert, because it trains you to dismiss the next one too.
 #
-# Each of these means "a human should look now". Everything else worth knowing is on a
-# dashboard, where it is looked at deliberately rather than at 3am.
+# What it got wrong was assuming every alert competes for the same attention. It set
+# the test as "would you get out of bed for it?" and then, having answered no, threw
+# the signal away entirely. But "I would not get out of bed, and I would be angry to
+# find this on Monday having started on Friday" is a real category, and a dashboard
+# does not cover it — nobody opens a dashboard on Saturday.
 #
-# THE TEST FOR ADDING A FOURTH
-# ----------------------------
-# Would you get out of bed for it? If the honest answer is "I'd look in the morning",
-# it is a dashboard panel. If it is "I'd want to know but there's nothing I could do",
-# it is a dashboard panel with a note. Only "I would act immediately, and the action is
-# obvious" earns an alert.
+# So there are two severities and they route differently (see alertmanager.yml):
 #
-# Each alert carries the action in its annotation, because the person reading it at 3am
-# is not going to reconstruct the reasoning.
+#   severity: page    — a human acts NOW. Wakes someone. Three of these. Unchanged.
+#   severity: ticket  — a human acts THIS WORKING DAY. Notification, no wake-up.
+#
+# The budget of attention the original comment protects is the PAGE budget, and it is
+# still three. A ticket does not spend it.
+#
+# Each alert carries its action in an annotation, because the person reading it at 3am
+# is not going to reconstruct the reasoning. Every alert here has a matching section in
+# docs/telemetry/RUNBOOKS.md, and CI fails if one does not — an alert without a runbook
+# is noise with extra steps.
 
 groups:
   - name: vectorbea-fleet
@@ -36,63 +41,272 @@ groups:
         expr: |
           histogram_quantile(
             0.95,
-            sum by (le) (rate(job_claim_latency_seconds_bucket[5m]))
+            sum by (le, environment) (rate(job_claim_latency_seconds_bucket[5m]))
           ) > 30
         for: 5m
         labels:
           severity: page
+          runbook: SystemSaturated
         annotations:
-          summary: "Runs are waiting over 30s to start (p95, 5m)"
+          summary: "[{{ $labels.environment }}] Runs are waiting over 30s to start (p95, 5m)"
           description: >-
             Claim latency p95 is {{ $value | humanizeDuration }}. Runs are queued and
             no worker is free to take them.
           action: >-
             Check worker_slots_available across the fleet. If it is at zero, the fleet
-            is full — scale replicas. If slots are free while latency is high, the
-            claim query itself is slow: check db_pool_wait_seconds.
+            is undersized — scale the worker replica count. If it is not zero, workers
+            are alive but not claiming: check job_claim_latency_seconds for a slow
+            query and confirm the plan still walks agent_runs_claim_idx.
 
-      # ── 2. Workers are dying or overloaded ────────────────────────────────
+      # ── 2. Workers are dying or cannot keep up ────────────────────────────
       #
-      # A lease expires when a worker stops heartbeating while holding a run. That is
-      # never normal. It means the process died, or it was so overloaded that it could
-      # not renew a lease every 10 seconds — and either way another worker has now
-      # picked up the run, so the work is duplicated in effect if not in result.
-      #
-      # Rate over 5 minutes rather than a raw count, and >1/min, because a single
-      # expiry during a deploy is expected and should not page.
+      # A lease expires when a worker holding a run stops heartbeating. That is a
+      # crash, an OOM kill, or a machine so loaded it cannot renew every 10s. All
+      # three mean runs are being executed twice up to the point of the fence.
       - alert: WorkersDyingOrOverloaded
-        expr: sum(rate(lease_expiry_total[5m])) * 60 > 1
+        expr: sum by (environment) (rate(lease_expiry_total[5m])) * 60 > 1
         for: 5m
         labels:
           severity: page
+          runbook: WorkersDyingOrOverloaded
         annotations:
-          summary: "Run leases are expiring at {{ $value | printf \"%.1f\" }}/min"
+          summary: "[{{ $labels.environment }}] Run leases are expiring at {{ $value | printf \"%.1f\" }}/min"
           description: >-
             A lease expires when a worker holding a run stops heartbeating. Workers are
             crashing, being OOM-killed, or are too loaded to renew every 10s.
           action: >-
             Check jvm_heap_used_bytes against jvm_heap_max_bytes for OOM, and
-            thread_blocked_seconds for a worker stuck on outbound I/O. Container restart
-            counts will confirm crashes.
+            thread_blocked_seconds per pool for a fleet that is waiting rather than
+            working. Restarting workers does not fix an undersized heap.
 
       # ── 3. A poison job needs a person ────────────────────────────────────
       #
-      # Dead letters should be zero. A job lands here only after exhausting its
-      # attempts, which means retrying did not help and never will — the fix is a
-      # human reading the payload.
-      #
-      # `> 0` on an increase over 15m rather than on the raw total, because the total
-      # never decreases and would keep the alert firing forever after one bad job.
+      # Dead-lettering means retries were exhausted. Retrying did not help and will
+      # not; something about this specific job is broken and no amount of waiting
+      # fixes it.
       - alert: DeadLetterNeedsAttention
         expr: increase(dead_letter_total[15m]) > 0
         for: 0m
         labels:
           severity: page
+          runbook: DeadLetterNeedsAttention
         annotations:
-          summary: "{{ $value | printf \"%.0f\" }} job(s) dead-lettered in the last 15m"
+          summary: "[{{ $labels.environment }}] {{ $value | printf \"%.0f\" }} job(s) dead-lettered in the last 15m"
           description: >-
             A job exhausted its retries and was parked. Retrying did not help and will
             not; something about this specific job is broken.
           action: >-
             Open GET /api/dead-letters, read the payload and the failure reason. Fix or
-            discard. This does not resolve itself.
+            discard deliberately — a dead letter never resolves itself.
+
+  # ── Tickets — act this working day, do not wake anyone ────────────────────
+  - name: vectorbea-tickets
+    rules:
+
+      # ── 4. A scheduled job has stopped ────────────────────────────────────
+      #
+      # THE SYSTEMIC ONE. Eight background loops run on fixed delays and, until this
+      # existed, a loop that stopped was invisible until its consequence surfaced —
+      # weeks or months later, as partitions that were never created or retention that
+      # was never applied. That is the failure mode that produced the uncalled
+      # functions in V028 and V046.
+      #
+      # The gauge is published by every loop through one shared wrapper
+      # (ScheduledJobHealth), so a NEW job is covered the day it is written rather
+      # than the day someone remembers to add an alert for it.
+      #
+      # The threshold is per-job and comes from the metric itself: each job publishes
+      # its own expected interval, and this fires at three missed runs. A job that runs
+      # hourly and a job that runs every 30s cannot share one constant, and hard-coding
+      # the slowest of them makes the alert useless for the fastest.
+      - alert: ScheduledJobStale
+        expr: |
+          (time() - job_last_success_timestamp_seconds)
+            > (3 * job_expected_interval_seconds)
+        for: 5m
+        labels:
+          severity: ticket
+          runbook: ScheduledJobStale
+        annotations:
+          summary: "[{{ $labels.environment }}] Scheduled job '{{ $labels.job_name }}' has not succeeded in {{ $value | humanizeDuration }}"
+          description: >-
+            {{ $labels.job_name }} last completed successfully {{ $value | humanizeDuration }}
+            ago, which is more than three of its own intervals. It is not running, or it
+            is running and failing every time.
+          action: >-
+            Check job_runs_total{job_name="{{ $labels.job_name }}",outcome="failed"} for
+            a failing loop versus a stopped one. A stopped loop means the scheduler
+            thread died — check the service logs at startup for the "[jobs] registered"
+            line to confirm it was ever started.
+
+      # ── 5. Partition maintenance is failing ───────────────────────────────
+      #
+      # Its own alert rather than a case of the one above, because the consequence is
+      # specific and delayed: partitions stop being created, inserts land in the
+      # default partition, and nothing looks wrong until a query that assumed
+      # partition pruning starts scanning everything. By then the default partition is
+      # large enough that fixing it is an outage.
+      - alert: PartitionMaintenanceFailing
+        expr: |
+          increase(job_runs_total{job_name="partition-maintenance",outcome="failed"}[1h]) > 0
+            or increase(worker_partition_drops_gated_total[1h]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          runbook: PartitionMaintenanceFailing
+        annotations:
+          summary: "[{{ $labels.environment }}] Partition maintenance is not completing cleanly"
+          description: >-
+            Either the maintenance pass threw, or the drop gate refused to drop expired
+            partitions because it could not confirm they had been exported.
+          action: >-
+            Check the reason label on worker_partition_drops_gated_total. `gate_unavailable`
+            means the export state could not be read at all and is more urgent than
+            `work_outstanding`, which means the gate is correctly holding.
+
+      # ── 6. Telemetry is losing data ───────────────────────────────────────
+      #
+      # Any drop is worth knowing about, but the two halves are NOT equally bad and
+      # the runbook says so. A dropped span is a degraded trace. A dropped event is a
+      # hole in a timeline that pages on ?afterSequence=, and a lost RUN_FAILED is an
+      # outage reported as a success.
+      #
+      # Deliberately one alert with a `signal` label rather than two rules: they have
+      # the same response — find out why the buffer filled — and splitting them would
+      # spend two lines of attention on one question.
+      - alert: TelemetryDropsNonZero
+        expr: |
+          sum by (environment, signal) (
+            label_replace(increase(worker_run_events_dropped_total[15m]), "signal", "event", "", "")
+            or
+            label_replace(increase(worker_trace_spans_dropped_total[15m]), "signal", "span", "", "")
+            or
+            label_replace(increase(worker_trace_exports_dropped_total[15m]), "signal", "export", "", "")
+          ) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          runbook: TelemetryDropsNonZero
+        annotations:
+          summary: "[{{ $labels.environment }}] Telemetry is dropping {{ $labels.signal }}s ({{ $value | printf \"%.0f\" }} in 15m)"
+          description: >-
+            A bounded buffer filled and started discarding. signal=event is the serious
+            one — an event hole breaks timeline paging and can hide a terminal state.
+            signal=span degrades a trace. signal=export means a customer's OTLP
+            destination is not accepting.
+          action: >-
+            For events: the store applies back-pressure before dropping, so a drop means
+            it blocked past AGENT_EVENT_BACKPRESSURE_TIMEOUT_MS — the database is not
+            answering. Check db_pool_wait_seconds. For exports: check
+            workspace_otel_exports.last_error, it is the customer's endpoint failing.
+
+      # ── 7. The capacity bucket is not in control ──────────────────────────
+      #
+      # Two conditions, one alert, because the runbook question is the same: is the
+      # bucket set correctly?
+      #
+      # A 429 AFTER the bucket admitted the call is a bug in the bucket and any
+      # non-zero value earns attention. A high raw 429 rate is the provider refusing
+      # us often enough that runs are being suspended. Refusals alone are NOT alerted:
+      # a refusal is the bucket working, and alerting on it would punish the mechanism
+      # for doing its job.
+      - alert: ProviderThrottlingHigh
+        expr: |
+          sum by (environment, provider) (rate(provider_429_received_total[10m])) * 60 > 5
+            or sum by (environment, provider) (increase(provider_429_after_admit_total[15m])) > 0
+        for: 5m
+        labels:
+          severity: ticket
+          runbook: ProviderThrottlingHigh
+        annotations:
+          summary: "[{{ $labels.environment }}] Provider {{ $labels.provider }} is throttling us"
+          description: >-
+            Either 429s are arriving faster than 5/min, or one arrived on a call the
+            local capacity bucket had already admitted — which means the configured
+            limit is above the provider's real one.
+          action: >-
+            Compare provider_429_received_total against provider_capacity_exhausted_total.
+            Refusals flat while 429s climb means our bucket is set too high — lower it.
+            Both climbing means we are genuinely at the provider's ceiling and need a
+            quota increase. Any provider_429_after_admit is a bucket bug, not a
+            provider problem.
+
+      # ── 8. One workspace's spend has changed shape ────────────────────────
+      #
+      # Compares the last hour against the same workspace's own trailing day, not
+      # against a global constant. A fixed dollar threshold is wrong in both
+      # directions: it never fires for a small customer whose spend has gone insane,
+      # and it fires constantly for a large one behaving normally.
+      #
+      # The floor of 1 USD/hour exists because a ratio is meaningless at the bottom —
+      # a workspace going from $0.001 to $0.02 is a 20x increase and is nothing.
+      - alert: WorkspaceCostAnomaly
+        expr: |
+          (
+            sum by (environment, workspace) (rate(llm_cost_usd_micros_total[1h])) / 1e6 * 3600
+          ) > 1
+          and
+          (
+            sum by (environment, workspace) (rate(llm_cost_usd_micros_total[1h]))
+              /
+            (sum by (environment, workspace) (rate(llm_cost_usd_micros_total[24h])) > 0)
+          ) > 5
+        for: 15m
+        labels:
+          severity: ticket
+          runbook: WorkspaceCostAnomaly
+        annotations:
+          summary: "[{{ $labels.environment }}] Workspace {{ $labels.workspace }} is spending {{ $value | printf \"%.1f\" }}x its daily rate"
+          description: >-
+            This workspace's hourly spend is more than five times its own 24h average,
+            and is above the $1/hour floor where the ratio starts to mean something.
+          action: >-
+            Open the Workspace support dashboard and filter to this workspace. A runaway
+            agent loop shows as iterations climbing with no completions; a legitimate
+            batch shows as run count climbing with normal per-run cost. If it is a loop,
+            the run ceiling should have caught it — check run_ceiling_breach_total.
+
+  # ── The stack watching itself ──────────────────────────────────────────────
+  #
+  # With per-environment agents, "no data" has two causes that look identical on every
+  # dashboard: nothing is happening, or nothing is being collected. These separate
+  # them. Without them, an environment going dark is indistinguishable from an
+  # environment being quiet — and the quiet one is the one you stop checking.
+  - name: vectorbea-telemetry-pipeline
+    rules:
+
+      - alert: ScrapeAgentDown
+        expr: |
+          up{job="telemetry-agent"} == 0
+            or (time() - max by (environment) (timestamp(up{service="worker"}))) > 300
+        for: 5m
+        labels:
+          severity: page
+          runbook: ScrapeAgentDown
+        annotations:
+          summary: "[{{ $labels.environment }}] No metrics received from this environment for 5 minutes"
+          description: >-
+            The per-environment agent has stopped reporting. Every dashboard for this
+            environment is now showing stale data that looks like calm.
+          action: >-
+            Check the telemetry-agent service in that Railway environment. If it is
+            running, the likely cause is TELEMETRY_INGEST_TOKEN having been rotated
+            centrally without updating the agent — the collector logs will show 401s.
+
+      - alert: CentralIngestFailing
+        expr: |
+          rate(otelcol_exporter_send_failed_metric_points[10m]) > 0
+            or rate(otelcol_exporter_send_failed_spans[10m]) > 0
+        for: 10m
+        labels:
+          severity: ticket
+          runbook: CentralIngestFailing
+        annotations:
+          summary: "Central collector cannot write to {{ $labels.exporter }}"
+          description: >-
+            The collector is receiving telemetry but failing to hand it on. Its sending
+            queue is finite; once full, this becomes data loss.
+          action: >-
+            Check whether Prometheus or Tempo is up and reachable on the monitoring
+            project's private network. The collector retries for 120s, so a short
+            restart is absorbed — a sustained failure is not.

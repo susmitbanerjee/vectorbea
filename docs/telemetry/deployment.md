@@ -3,10 +3,18 @@
 > **This document describes a service that no longer exists.**
 >
 > `apps/telemetry` was folded into `packages/observability-kotlin` and is served by
-> `api-kotlin` in-process. There is nothing to deploy to Railway, and
-> `telemetry.vectorbea.com` can be retired.
+> `api-kotlin` in-process. There is nothing to deploy to Railway.
 >
-> **Current documentation: [`../architecture/OBSERVABILITY.md`](../architecture/OBSERVABILITY.md)**
+> **`telemetry.vectorbea.com` has been REASSIGNED, not retired.** It now serves
+> Grafana — the operational dashboards for both environments. The admin analytics
+> console that used to live at that domain is at
+> `api.vectorbea.com/admin/telemetry`.
+>
+> **Current documentation:**
+> - Deploying the monitoring stack: [`../../ops/monitoring/railway/README.md`](../../ops/monitoring/railway/README.md)
+> - Alert responses: [`RUNBOOKS.md`](RUNBOOKS.md)
+> - Architecture and rationale: [`../architecture/OBSERVABILITY.md`](../architecture/OBSERVABILITY.md)
+> - What existed before any of this: [`../TELEMETRY-AUDIT.md`](../TELEMETRY-AUDIT.md)
 >
 > Kept rather than deleted for two reasons: the environment-variable reference below is
 > still accurate for the variables that survived, and the conditions under which the

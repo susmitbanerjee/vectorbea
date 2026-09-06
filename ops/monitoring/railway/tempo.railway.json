@@ -1,0 +1,15 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "ops/monitoring/railway/tempo.Dockerfile",
+    "watchPatterns": [
+      "ops/monitoring/tempo/**",
+      "ops/monitoring/railway/tempo.Dockerfile"
+    ]
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5
+  }
+}

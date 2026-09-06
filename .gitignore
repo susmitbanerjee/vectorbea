@@ -33,8 +33,18 @@ vectorbea-proxy/.gradle/
 *.war
 *.ear
 # Exclude compiled JARs but keep Gradle wrapper JARs (required for CI)
+#
+# The exception below used to name `vectorbea-proxy/`, a directory that no longer
+# exists. So the rule read as "exclude every jar", and all three wrapper jars were
+# silently untracked — present on every developer's disk, absent from every clone.
+#
+# That is invisible until something runs `./gradlew` on a fresh checkout, and then it
+# fails with `Unable to access jarfile .../gradle-wrapper.jar`. It bit a Railway build
+# (which had auto-detected Gradle) and it applies equally to the `bash ./gradlew build`
+# steps in CI. The service Dockerfiles were unaffected only because they invoke the
+# `gradle` binary directly rather than the wrapper.
 *.jar
-!vectorbea-proxy/gradle/wrapper/gradle-wrapper.jar
+!**/gradle/wrapper/gradle-wrapper.jar
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/

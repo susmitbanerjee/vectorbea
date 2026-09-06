@@ -1,0 +1,299 @@
+{
+  "uid": "vb-product",
+  "title": "Product",
+  "description": "What people are actually doing with the platform, from the analytics event stream in Postgres. Distinct from the technical dashboards: nothing here comes from Prometheus, because adoption is discrete events, not time series.",
+  "tags": [
+    "vectorbea",
+    "product"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "5m",
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "postgres",
+          "uid": "analytics"
+        },
+        "query": "SELECT DISTINCT environment FROM analytics_events ORDER BY 1",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "prod",
+          "value": "prod"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Activity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Daily events by category",
+      "description": "The shape of platform use over time. A category dropping to zero is usually a client that stopped emitting, not users who stopped acting — check against a deploy before reading it as a product signal.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "analytics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('day', occurred_at) AS time,\n       event_category AS metric,\n       count(*) AS value\n  FROM analytics_events\n WHERE environment = '$env' AND $__timeFilter(occurred_at)\n GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Active workspaces (7d)",
+      "description": "",
+      "datasource": {
+        "type": "postgres",
+        "uid": "analytics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT count(DISTINCT workspace_id) AS \"Active workspaces\"\n  FROM analytics_events\n WHERE environment = '$env' AND occurred_at > now() - interval '7 days'",
+          "format": "table",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "type": "row",
+      "title": "Onboarding funnel",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      }
+    },
+    {
+      "id": 5,
+      "type": "barchart",
+      "title": "First-time milestones (30d)",
+      "description": "NOTE: the `first_*` events in this funnel are defined in the event whitelist but are not yet emitted by the application, so those steps read zero. That is a known instrumentation gap, not a conversion cliff.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "analytics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT event_name AS \"Step\", count(DISTINCT workspace_id) AS \"Workspaces\"\n  FROM analytics_events\n WHERE environment = '$env'\n   AND event_category = 'onboarding'\n   AND occurred_at > now() - interval '30 days'\n GROUP BY 1 ORDER BY 2 DESC",
+          "format": "table",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "type": "barchart",
+      "title": "Architect funnel (30d)",
+      "description": "",
+      "datasource": {
+        "type": "postgres",
+        "uid": "analytics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT event_name AS \"Step\", count(*) AS \"Events\"\n  FROM analytics_events\n WHERE environment = '$env'\n   AND event_category = 'architect'\n   AND occurred_at > now() - interval '30 days'\n GROUP BY 1 ORDER BY 2 DESC",
+          "format": "table",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Feature adoption",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      }
+    },
+    {
+      "id": 8,
+      "type": "table",
+      "title": "Top events (7d)",
+      "description": "Count AND distinct workspaces, deliberately. A high count from one workspace is one enthusiastic customer; the same count spread across thirty is adoption.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "analytics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 19
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT event_name AS \"Event\", event_category AS \"Category\",\n       count(*) AS \"Count\", count(DISTINCT workspace_id) AS \"Workspaces\"\n  FROM analytics_events\n WHERE environment = '$env' AND occurred_at > now() - interval '7 days'\n GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 40",
+          "format": "table",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Run outcomes (7d)",
+      "description": "",
+      "datasource": {
+        "type": "postgres",
+        "uid": "analytics"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 19
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('hour', occurred_at) AS time,\n       event_name AS metric, count(*) AS value\n  FROM analytics_events\n WHERE environment = '$env'\n   AND event_name IN ('workflow_run_succeeded','workflow_run_failed','workflow_run_cancelled')\n   AND $__timeFilter(occurred_at)\n GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true,
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        }
+      }
+    }
+  ]
+}

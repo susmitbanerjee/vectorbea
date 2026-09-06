@@ -1,5 +1,6 @@
 package com.vectorbea.worker.durable
 
+import com.vectorbea.observability.metrics.ScheduledJobHealth
 import com.vectorbea.worker.logging.logger
 import com.vectorbea.worker.metrics.WorkerMetrics
 import io.lettuce.core.api.sync.RedisCommands
@@ -90,6 +91,8 @@ class PartitionMaintenance(
 
     private companion object {
         const val LOCK_KEY = "vectorbea:partition-maintenance:lock"
+        /** Must match the job_name the PartitionMaintenanceFailing alert selects on. */
+        const val JOB_NAME = "partition-maintenance"
         /** Tables this job maintains. Adding one is a line here plus its functions. */
         val TABLES = listOf("run_events", "run_spans")
     }
@@ -99,8 +102,10 @@ class PartitionMaintenance(
             /* Runs once shortly after boot, not only on the hour: if a worker starts
                on the 1st with the month's partition missing, waiting an hour to find
                out is an hour of failed writes. */
+            ScheduledJobHealth.register(JOB_NAME, pollIntervalMs)
             future = executor.scheduleWithFixedDelay(
-                ::tick, 20_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
+                { ScheduledJobHealth.record(JOB_NAME) { tick() } },
+                20_000L, pollIntervalMs, TimeUnit.MILLISECONDS)
             log.info("[partitions] maintenance started (interval={}ms, dropEnabled={})",
                 pollIntervalMs, dropEnabled)
         }
@@ -143,6 +148,7 @@ class PartitionMaintenance(
             reconcileUsageLedger()
         } catch (e: Exception) {
             log.error("[partitions] maintenance tick failed: {}", e.message)
+            ScheduledJobHealth.markPassFailed()
         }
     }
 

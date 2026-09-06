@@ -1,9 +1,9 @@
-# The OpenTelemetry Collector — the single endpoint both services export traces to.
+# The CENTRAL collector — the one public ingest endpoint for the whole platform.
 #
 # WHY A COLLECTOR AND NOT DIRECT EXPORT TO TEMPO
 # ----------------------------------------------
 # The services could export straight to Tempo and skip a hop. The collector earns its
-# place for two reasons:
+# place for three reasons:
 #
 #  1. Sampling and redaction happen HERE, in config, not in application code. Changing
 #     the sample rate is a collector restart rather than a service deploy — which is
@@ -11,14 +11,63 @@
 #  2. The services are configured with one endpoint that never changes. Swapping Tempo
 #     for something else later is a collector edit, not a change to two services and
 #     their environment variables in three deployments.
+#  3. It is the only component in the stack whose ingest can be AUTHENTICATED.
+#     Prometheus' remote-write receiver and Tempo's OTLP port have no auth at all, so
+#     neither can face the internet. This can, so it does, and they stay private.
+#
+# WHAT CHANGED WHEN THE STACK MOVED TO RAILWAY
+# --------------------------------------------
+# It gained a metrics pipeline. Per-environment agents scrape Prometheus text inside
+# their own private network and ship it here as OTLP; this converts it back to
+# remote-write and hands it to Prometheus over the private network. See
+# ops/monitoring/agent/config.yml for why the conversion exists.
+
+extensions:
+  # Every agent presents this token. It is the only thing between the public ingest
+  # endpoint and anyone who wants to write series into our Prometheus, so make it a
+  # long random secret (`openssl rand -hex 32`).
+  #
+  # ONE token, shared by every environment's agent — `token`, not `tokens`. The plural
+  # form exists in later collector releases; on 0.109 it is rejected outright with
+  # "'' has invalid keys: tokens" and the collector refuses to start.
+  #
+  # The practical consequence is that rotating it means updating every agent in the
+  # same window. That is a real cost and it is accepted here: per-environment tokens
+  # would need the plural form and a version bump, for a threat model where the agents
+  # are all ours anyway.
+  bearertokenauth/ingest:
+    scheme: Bearer
+    token: ${env:TELEMETRY_INGEST_TOKEN}
 
 receivers:
   otlp:
     protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
+      # ── NO gRPC RECEIVER, DELIBERATELY ────────────────────────────────────
+      # It had no user. The application services export to their environment's
+      # AGENT, not here, and the agents push over OTLP/HTTP because that is what
+      # survives an HTTPS proxy without HTTP/2 negotiation.
+      #
+      # It was also actively harmful: in the all-in-one container Tempo's own OTLP
+      # receiver owns 4317, so a gRPC receiver here loses the race and the whole
+      # collector fails with "address already in use" — taking the metrics pipeline
+      # down over a port nothing was going to connect to.
+      # ── The listen port is injected, never hardcoded ──────────────────────
+      # Where this binds differs by topology: behind nginx in the all-in-one
+      # container it is a fixed internal port, while as a standalone Railway service
+      # it must be the $PORT the platform assigns, or its public domain resolves,
+      # completes TLS, and times out against a port nothing is listening on.
+      #
+      # A dedicated variable rather than $PORT directly, because $PORT means
+      # "the one public port" to Railway and this is not always that.
+      #
+      # NO DEFAULT VALUE HERE. `${env:PORT:-4318}` looks like shell and is not:
+      # collector 0.109 reads the whole string `PORT:-4318` as the variable NAME and
+      # refuses to start — "environment variable \"PORT:-4318\" has invalid name".
+      # Every caller sets this explicitly instead.
       http:
-        endpoint: 0.0.0.0:4318
+        endpoint: 0.0.0.0:${env:OTLP_HTTP_PORT}
+        auth:
+          authenticator: bearertokenauth/ingest
 
 processors:
   # Bounded queue. Without this the collector will happily accept spans until it is
@@ -61,7 +110,7 @@ processors:
 
 exporters:
   otlp/tempo:
-    endpoint: tempo:4317
+    endpoint: ${env:TEMPO_ENDPOINT}
     tls:
       insecure: true
     retry_on_failure:
@@ -71,11 +120,29 @@ exporters:
       enabled: true
       queue_size: 1000
 
+  prometheusremotewrite:
+    endpoint: ${env:PROMETHEUS_REMOTE_WRITE_ENDPOINT}
+    tls:
+      insecure: true
+    # Resource attributes — `environment` and `service.name` above all — must become
+    # real labels, or the whole per-environment model collapses into one undifferentiated
+    # series set and every dashboard's $env selector matches everything.
+    resource_to_telemetry_conversion:
+      enabled: true
+    retry_on_failure:
+      enabled: true
+      max_elapsed_time: 120s
+
 service:
+  extensions: [bearertokenauth/ingest]
   telemetry:
     logs:
       level: warn
   pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheusremotewrite]
     traces:
       receivers: [otlp]
       processors: [memory_limiter, attributes/redact, probabilistic_sampler, batch]

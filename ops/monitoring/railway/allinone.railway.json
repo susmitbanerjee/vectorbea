@@ -1,0 +1,25 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "ops/monitoring/railway/allinone.Dockerfile",
+    "watchPatterns": [
+      "ops/monitoring/prometheus/**",
+      "ops/monitoring/alertmanager/**",
+      "ops/monitoring/tempo/**",
+      "ops/monitoring/loki/**",
+      "ops/monitoring/otel/**",
+      "ops/monitoring/grafana/**",
+      "ops/monitoring/railway/allinone/**",
+      "ops/monitoring/railway/lib/**",
+      "ops/monitoring/railway/allinone.Dockerfile",
+      "ops/monitoring/railway/allinone-entrypoint.sh"
+    ]
+  },
+  "deploy": {
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 5,
+    "healthcheckPath": "/api/health",
+    "healthcheckTimeout": 60
+  }
+}

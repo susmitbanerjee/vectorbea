@@ -23,6 +23,7 @@ jobs:
       api: ${{ steps.filter.outputs.api }}
       worker: ${{ steps.filter.outputs.worker }}
       observability: ${{ steps.filter.outputs.observability }}
+      monitoring: ${{ steps.filter.outputs.monitoring }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -46,6 +47,17 @@ jobs:
               - 'packages/observability-kotlin/**'
             observability:
               - 'packages/observability-kotlin/**'
+            monitoring:
+              - 'ops/monitoring/**'
+              - 'scripts/monitoring/**'
+              - 'docs/telemetry/RUNBOOKS.md'
+              # The dashboards and alerts are checked against the metric names in
+              # these files. Renaming a metric here without updating a panel is the
+              # exact break this job exists to catch, and it touches no file under
+              # ops/ — so a path filter on ops/ alone would sail straight past it.
+              - 'apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/metrics/WorkerMetrics.kt'
+              - 'apps/api-kotlin/src/main/kotlin/com/vectorbea/api/metrics/AppMetrics.kt'
+              - 'packages/observability-kotlin/src/main/kotlin/com/vectorbea/observability/metrics/**'
 
   # ── Closed-source boundary guards (cheap, always run) ───────────────────────
   guards:
@@ -223,6 +235,96 @@ jobs:
         run: gradle test --no-daemon --console=plain
         env:
           GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx512m -Dkotlin.compiler.execution.strategy=in-process"
+
+  # ── Monitoring stack (config only, no containers of ours) ───────────────────
+  #
+  # WHY THIS JOB EXISTS
+  # The whole ops/monitoring stack was written, reviewed, committed — and had never
+  # worked. Dashboards rendered nothing, alerts routed nowhere, and the scrape config
+  # named hosts that do not exist in this deployment. None of it failed, because none
+  # of it was checked. Config that is never executed rots like code that is never run,
+  # and it rots more quietly: a broken dashboard renders as an empty graph, which is
+  # visually identical to a healthy system with nothing happening.
+  #
+  # Cheap — three container pulls and a Node script, no build, no services of ours.
+  monitoring:
+    name: Monitoring stack (config validation)
+    needs: changes
+    if: needs.changes.outputs.monitoring == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Dashboards, alerts, runbook coverage, and — the one that matters — that every
+      # metric a panel references actually exists in the Kotlin source.
+      - name: Validate dashboards, alerts and runbooks
+        run: node scripts/monitoring/validate.mjs
+
+      # promtool is the only thing that actually parses PromQL. The check above knows
+      # which identifiers are metrics; this knows whether the expression is valid at
+      # all. Both are needed: a syntactically perfect query against a metric that does
+      # not exist passes here and returns nothing forever.
+      # Every config below interpolates ${VAR} placeholders that only exist at
+      # runtime, so each is checked with a substituted copy rather than not checked
+      # at all. Substituting is safe here: these tools validate STRUCTURE, and no
+      # structural rule depends on the value of a token or a hostname.
+      - name: Stage configs with placeholders substituted
+        run: |
+          mkdir -p /tmp/promcheck /tmp/amcheck/templates
+          sed 's/\${[A-Z_]*}/ci/g' ops/monitoring/prometheus/prometheus.yml > /tmp/promcheck/prometheus.yml
+          cp ops/monitoring/prometheus/alerts.yml /tmp/promcheck/alerts.yml
+          # Plausible values, not the generic "ci" placeholder: amtool validates that
+          # a receiver's `to` parses as an email and that a webhook url parses as a
+          # URL, so a placeholder would fail the check for the wrong reason.
+          sed -e 's|${ALERT_EMAIL}|ci@example.com|g' \
+              -e 's|${ALERT_WEBHOOK_URL}|https://example.com/hook|g' \
+              -e 's|${SMTP_HOST}|smtp.example.com|g' \
+              -e 's|${SMTP_USER}|ci|g' \
+              -e 's|${SMTP_PASSWORD}|ci|g' \
+              ops/monitoring/alertmanager/alertmanager.yml > /tmp/amcheck/alertmanager.yml
+          cp ops/monitoring/alertmanager/templates/*.tmpl /tmp/amcheck/templates/
+
+      # promtool is the only thing that actually parses PromQL. The Node check above
+      # knows which identifiers are metrics; this knows whether the expression is
+      # valid at all. Both are needed — a syntactically perfect query against a
+      # metric that does not exist passes promtool and returns nothing forever.
+      - name: promtool — alert rules
+        run: docker run --rm -v /tmp/promcheck:/cfg --entrypoint promtool prom/prometheus:v2.54.1 check rules /cfg/alerts.yml
+
+      - name: promtool — scrape config
+        run: docker run --rm -v /tmp/promcheck:/cfg --entrypoint promtool prom/prometheus:v2.54.1 check config /cfg/prometheus.yml
+
+      # Catches an unroutable alert: a receiver that does not exist, a matcher that
+      # parses but matches nothing, a template that references a missing field.
+      - name: amtool — alertmanager routing
+        run: docker run --rm -v /tmp/amcheck:/cfg --entrypoint amtool prom/alertmanager:v0.27.0 check-config /cfg/alertmanager.yml
+
+      # The agent config is the piece with no other coverage. It runs in every
+      # environment, and nothing else would notice it being malformed until that
+      # environment silently stopped reporting — which looks like calm.
+      # Env vars the collector config requires. `validate` resolves them, so an
+      # unset one fails the check for the wrong reason.
+      - name: otelcol — central collector config
+        env:
+          TELEMETRY_INGEST_TOKEN: ci
+          OTLP_HTTP_PORT: "4318"
+          PROMETHEUS_REMOTE_WRITE_ENDPOINT: http://127.0.0.1:9090/api/v1/write
+          TEMPO_ENDPOINT: 127.0.0.1:4317
+        run: |
+          docker run --rm -v "$PWD/ops/monitoring/otel:/cfg"             -e TELEMETRY_INGEST_TOKEN -e OTLP_HTTP_PORT             -e PROMETHEUS_REMOTE_WRITE_ENDPOINT -e TEMPO_ENDPOINT             otel/opentelemetry-collector-contrib:0.109.0 validate --config=/cfg/config.yml
+
+      # The all-in-one image is the deployed artefact. Building it in CI is the only
+      # thing that catches a bad COPY path, a missing binary in an upstream image, or
+      # a shell script that picked up CRLF endings on a Windows checkout — all three
+      # of which have already happened once.
+      - name: Build the all-in-one image
+        run: docker build -f ops/monitoring/railway/allinone.Dockerfile -t vb-monitoring:ci .
+
+      - name: otelcol — per-environment agent config
+        run: docker run --rm -v "$PWD/ops/monitoring/agent:/cfg" otel/opentelemetry-collector-contrib:0.109.0 validate --config=/cfg/config.yml
 
   # ── Integration tier (containers required) ──────────────────────────────────
   #

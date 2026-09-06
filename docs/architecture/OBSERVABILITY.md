@@ -69,21 +69,42 @@ which would have doubled the envelope forever to save one search-and-replace.
 
 ## 2. What to deploy
 
+> **Updated 2026-09-06.** This section described a single Hetzner box and a scrape
+> config that named `host.docker.internal`. The platform deploys on Railway, so none
+> of it ever worked: 110 metrics were emitted into nothing and three dashboards
+> rendered nothing for the whole life of the stack. See
+> [`../TELEMETRY-AUDIT.md`](../TELEMETRY-AUDIT.md) §8 for how that happened.
+
+**Deployment: [`../../ops/monitoring/railway/README.md`](../../ops/monitoring/railway/README.md).**
+
+The shape, briefly:
+
+- **One monitoring project**, six services, of which only Grafana
+  (`telemetry.vectorbea.com`) and the central collector face the internet. Prometheus
+  and Tempo have no authentication of their own and stay on the private network.
+- **One agent per application environment.** Railway's private network is scoped per
+  environment, so a central Prometheus genuinely cannot scrape staging's worker. The
+  agent scrapes locally, stamps `environment`, and pushes out over one authenticated
+  connection. The alternative — public `/metrics` — would serve
+  `llm_cost_usd_micros{workspace}` to anyone who asked.
+- **One Grafana for both environments**, separated by the `environment` label and an
+  `$env` selector on every dashboard. Two Grafanas would mean two sets of dashboards
+  to keep in step, and the question asked during an incident is "does staging look
+  like this too?"
+
+Local development:
+
 ```bash
-# Remove the telemetry service from Railway. Its domain can go too.
-# Then, on the Hetzner box:
 cd ops/monitoring
 export GRAFANA_ADMIN_PASSWORD='…'
-export ALERT_EMAIL='you@example.com'
 docker compose up -d
 ```
 
-Point the services at the collector:
+Point the services at their environment's agent — **not** at the central stack:
 
 ```
 OTEL_ENABLED=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://<box>:4317
-TELEMETRY_INTERNAL_TOKEN=<the same secret the web app sends>
+OTEL_EXPORTER_OTLP_ENDPOINT=http://telemetry-agent.railway.internal:4317   # localhost:4319 locally
 ```
 
 `OTEL_ENABLED` unset means spans are created and discarded with no exporter, no
@@ -112,16 +133,44 @@ run slow two weeks ago" is not, and the metric and log records survive either wa
 
 ---
 
-## 3. The three alerts
+## 3. The alerts — three pages, seven tickets
+
+> **Updated 2026-09-06.** Was "three alerts, not four". The constraint was right about
+> what it protected and wrong about the assumption underneath it: that every alert
+> competes for the same attention. "I would not get out of bed, and I would be angry
+> to find this on Monday having started on Friday" is a real category, and a dashboard
+> does not cover it — nobody opens a dashboard on Saturday.
+>
+> So there are two severities. **The page budget is still three.** A ticket does not
+> spend it.
+
+**Pages** — production only, wake someone:
 
 | Alert | Condition | What it means |
 |---|---|---|
 | `SystemSaturated` | claim latency p95 > 30s for 5m | Runs are queued and no worker is free |
 | `WorkersDyingOrOverloaded` | lease expiry > 1/min for 5m | A worker died or cannot renew every 10s |
 | `DeadLetterNeedsAttention` | dead letters increase over 15m | A poison job needs a person |
+| `ScrapeAgentDown` | no metrics from an environment for 5m | Every dashboard is now stale data that looks like calm |
 
-Three, not four. An alert you have learned to dismiss is worse than no alert — it trains
-you to dismiss the next one too.
+**Tickets** — email, act during the working day:
+
+| Alert | What it means |
+|---|---|
+| `ScheduledJobStale` | A background loop has not succeeded in 3 of its own intervals |
+| `PartitionMaintenanceFailing` | Partitions are not being created, or the drop gate cannot evaluate |
+| `TelemetryDropsNonZero` | A bounded buffer filled; the `signal` label says how bad |
+| `ProviderThrottlingHigh` | 429s above threshold, or one arrived post-admit |
+| `WorkspaceCostAnomaly` | One workspace at 5x its own daily rate |
+| `CentralIngestFailing` | The collector cannot write to Prometheus or Tempo |
+
+`ScrapeAgentDown` is a page rather than a ticket for one reason: with no data, every
+other dashboard shows stale numbers that are indistinguishable from a quiet, healthy
+system. It also **inhibits** every other alert for that environment.
+
+Every alert has a section in [`../telemetry/RUNBOOKS.md`](../telemetry/RUNBOOKS.md), and
+CI fails if one does not — an alert with no documented response is noise that wakes
+someone up.
 
 **The test for adding a fourth:** would you get out of bed for it? "I'd look in the
 morning" means it is a dashboard panel. "I'd want to know but there is nothing I could
@@ -289,10 +338,32 @@ API".
 
 ## 7. Known gaps
 
+*Reviewed 2026-09-06. Gaps closed by the Railway migration are struck through; the rest
+stand, and two are new.*
+
 - **`provider_429_total` labels are unconfirmed.** The series exists and is scraped; the
   `provider` label only materialises when a provider actually returns a 429, which has
   not happened under test. Verified by inspection of the call site, not by observation.
-- **The monitoring box has no monitoring.** See §3. Needs an external ping.
+- **The monitoring stack has no monitoring.** Still true, and still the most important
+  gap here. `ScrapeAgentDown` covers an environment going dark, and `CentralIngestFailing`
+  covers the backends refusing writes — but neither can fire if the stack itself is
+  down, because Alertmanager is in it. **This needs a free external ping on the API's
+  `/health` and on Grafana's port, and that is not part of any config in this repo.**
+- **NEW — logs are not shipped on Railway.** Promtail reads the Docker socket and
+  Railway does not expose one, so Loki receives nothing in staging or production. It
+  works locally, which is the worst shape for a gap to have. The Run health "Recent
+  failures" panel is empty as a result, and its description says so. Closing it means a
+  Railway log drain into a Loki push endpoint.
+- **NEW — the agents layer emits no metrics at all.** `worker/agents/**` — brain,
+  budget, context, orchestration, tools — contains zero metric call sites, so iterations
+  to completion, delegation depth, handoff loops, budget clamps, context truncations and
+  approval wait times are all unmeasured. This is the largest remaining instrumentation
+  gap and the layer the product is named after. See
+  [`../TELEMETRY-AUDIT.md`](../TELEMETRY-AUDIT.md) §6.
+- **Run failures are not labelled by class.** `FailureTaxonomy` defines ten classes each
+  with a named owner, and it is already computed on every failure — but no metric
+  carries it, so "root-cause distribution by owner" cannot be asked. This is the
+  cheapest remaining win in the audit.
 - **The API still has two metric registries** — its own, predating this library, and the
   shared one. Both are rendered by `/metrics`. Migrating the rest is D35.
 - **Some `toJson` calls may still write stored payloads.** D33 fixed the confidence

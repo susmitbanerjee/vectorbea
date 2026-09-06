@@ -1,0 +1,175 @@
+# The PER-ENVIRONMENT agent. One of these runs in each Railway environment.
+#
+# ── WHY AN AGENT EXISTS AT ALL ───────────────────────────────────────────────
+# Railway's private network is scoped to one project AND one environment. A
+# Prometheus sitting in the monitoring project cannot reach `worker.railway.internal`
+# in the staging environment — there is no route, and there is deliberately no route.
+#
+# The alternative would be giving the API and the worker public `/metrics` endpoints.
+# That is not acceptable: `llm_cost_usd_micros{workspace,workflow,model}` and
+# `job_queue_depth{workspace}` are customer data, and Prometheus exposition has no
+# authentication of any kind. A public /metrics is a public customer-cost report.
+#
+# So each environment runs one small collector INSIDE its own private network. It
+# scrapes locally, stamps the environment, and pushes out over one authenticated
+# connection. Nothing about the application services changes.
+#
+# ── WHY IT CONVERTS TO OTLP ──────────────────────────────────────────────────
+# The services speak Prometheus text exposition (see docs/TELEMETRY-AUDIT.md §5 —
+# we emit no OTel metrics, on purpose). Prometheus' own remote-write receiver has no
+# authentication, so exposing it publicly for the agents to push into would recreate
+# the problem this file exists to avoid.
+#
+# The collector's OTLP receiver DOES have authentication. So the agent scrapes
+# Prometheus text, ships it as OTLP over a bearer-authenticated connection, and the
+# central collector turns it back into remote-write on the far side, inside the
+# private network where Prometheus lives. One public ingest endpoint, authenticated,
+# for both signals.
+
+extensions:
+  bearertokenauth/egress:
+    scheme: Bearer
+    token: ${env:TELEMETRY_INGEST_TOKEN}
+
+receivers:
+  # Spans from api-kotlin and worker-kotlin. They set OTEL_EXPORTER_OTLP_ENDPOINT to
+  # this agent, not to the central stack — same as before, one hop nearer.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      global:
+        # 15s, matching what the central Prometheus expects. The claim-latency alert
+        # evaluates a p95 over 5 minutes; at a 1m interval that is five samples, which
+        # is not a percentile, it is a rumour.
+        scrape_interval: 15s
+        scrape_timeout: 10s
+
+      scrape_configs:
+        - job_name: vectorbea-api
+          metrics_path: /metrics
+          static_configs:
+            - targets: ['${env:API_METRICS_TARGET}']
+              labels:
+                service: api
+
+        # ── The worker, and why this is DNS service discovery ─────────────────
+        #
+        # `worker_in_flight{worker_id}` exists to tell one replica from another. A
+        # single load-balanced target would round-robin between replicas and produce
+        # a series that jumps between machines every scrape — worse than no series,
+        # because it looks like data.
+        #
+        # Railway's internal DNS returns ONE AAAA ANSWER PER REPLICA, so an AAAA
+        # lookup enumerates the fleet. Scaling the worker up or down is picked up on
+        # the next refresh with no config change, which a static target list can
+        # never do.
+        - job_name: vectorbea-worker
+          metrics_path: /metrics
+          dns_sd_configs:
+            - names: ['${env:WORKER_DNS_NAME}']
+              type: AAAA
+              port: 9090
+              refresh_interval: 30s
+          relabel_configs:
+            - target_label: service
+              replacement: worker
+            # The instance label defaults to the raw IPv6 address, which changes on
+            # every redeploy and would orphan every series. `worker_id` is carried in
+            # the metric itself and is the stable identity; this keeps `instance`
+            # readable without pretending it is stable.
+            - source_labels: [__address__]
+              target_label: instance
+
+        # The agent's own health. If this is missing from the central Prometheus,
+        # the environment is dark and the ScrapeAgentDown alert fires.
+        - job_name: telemetry-agent
+          static_configs:
+            - targets: ['127.0.0.1:8888']
+              labels:
+                service: telemetry-agent
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 192
+    spike_limit_mib: 48
+
+  # ── The label that makes one Grafana serve every environment ────────────────
+  #
+  # `environment` is stamped HERE, by the agent, from the deployment's own
+  # VECTORBEA_ENV. It is not set by the services and not inferred centrally, because
+  # both of those can be wrong in the direction that matters: staging data rendered
+  # as production is how someone reads a staging incident as a customer-facing one.
+  #
+  # `upsert` and not `insert`: if a service ever sets this attribute itself, the
+  # deployment's own view of which environment it is wins.
+  resource:
+    attributes:
+      - key: environment
+        value: ${env:VECTORBEA_ENV}
+        action: upsert
+      - key: deployment.environment
+        value: ${env:VECTORBEA_ENV}
+        action: upsert
+
+  # Second line of defence on customer content, identical to the central rule.
+  # Applied at BOTH ends deliberately: the agent is closer to the source and catches
+  # it before it crosses the network, the central one catches anything an agent
+  # running an older config let through.
+  attributes/redact:
+    actions:
+      - key: vectorbea.input
+        action: delete
+      - key: vectorbea.output
+        action: delete
+      - key: db.statement
+        action: delete
+      - key: http.request.body
+        action: delete
+
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  # HTTP, not gRPC. The agent reaches the central collector through Railway's
+  # public HTTPS proxy, and OTLP/HTTP over 443 is the path that needs no
+  # HTTP/2 end-to-end negotiation to work. gRPC can be made to work there and
+  # is one more thing to debug at the moment an environment goes dark.
+  otlphttp/central:
+    endpoint: ${env:TELEMETRY_INGEST_ENDPOINT}
+    auth:
+      authenticator: bearertokenauth/egress
+    retry_on_failure:
+      enabled: true
+      # Two minutes of retry covers a central-stack restart without the agent giving
+      # up. Longer than the sending queue can hold is pointless — see below.
+      max_elapsed_time: 120s
+    sending_queue:
+      enabled: true
+      queue_size: 2000
+
+service:
+  extensions: [bearertokenauth/egress]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      # Scraped by this same collector's `telemetry-agent` job above, so agent health
+      # reaches the central Prometheus through the same path as everything else.
+      address: 127.0.0.1:8888
+  pipelines:
+    metrics:
+      receivers: [prometheus]
+      processors: [memory_limiter, resource, batch]
+      exporters: [otlphttp/central]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, attributes/redact, batch]
+      exporters: [otlphttp/central]

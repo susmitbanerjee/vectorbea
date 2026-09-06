@@ -1,62 +1,100 @@
-# Where the three alerts go.
+# Where alerts go, and — just as important — where they do NOT.
 #
-# §6 says "route to a channel you actually read". For a solo developer that is email
-# and a phone-capable channel, not a #alerts Slack room that fills with noise and gets
-# muted in week two.
+# Two things changed here from the version that never shipped.
 #
-# CONFIGURE ONE OF THESE AND DELETE THE OTHERS. A receiver list with three half-filled
-# entries is a config that silently drops alerts.
+# 1. IT HAS A CONFIGURED RECEIVER. The previous file carried three half-filled
+#    options and an instruction to pick one, which nobody did. A receiver list that
+#    was never completed is a config that silently drops every alert, and that is
+#    what it did for the entire life of the stack.
+#
+# 2. IT KNOWS WHICH ENVIRONMENT AN ALERT CAME FROM. One monitoring stack now watches
+#    both staging and production. Without the route below, a staging deploy that
+#    kills workers pages someone at 3am for a fleet nobody is using. That happens
+#    once before the alert is muted, and then the production one is muted too.
+#
+# ── THE ROUTING RULE, IN ONE SENTENCE ────────────────────────────────────────
+# Only production pages. Everything else is a notification you read during the day.
 
 global:
   resolve_timeout: 5m
+  smtp_from: 'alerts@vectorbea.com'
+  smtp_smarthost: '${SMTP_HOST}:587'
+  smtp_auth_username: '${SMTP_USER}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+
+templates:
+  - /etc/alertmanager/templates/*.tmpl
 
 route:
-  receiver: primary
-  # Group all three together: if the box is in trouble, more than one will fire, and
-  # three separate notifications about one incident is how you learn to ignore them.
-  group_by: ['alertname']
+  receiver: tickets
+  # Group by alert AND environment. Not by alertname alone: a lease-expiry storm in
+  # staging and one in production are two incidents, and collapsing them into one
+  # notification is how the production half gets missed.
+  group_by: ['alertname', 'environment']
   group_wait: 30s
   group_interval: 5m
-  # Re-notify every 4 hours while still firing. Long, deliberately — these three alerts
-  # all describe conditions that persist until someone acts, and a 30-minute repeat
-  # would turn an unfixed problem into a reason to silence the alert.
   repeat_interval: 4h
 
+  routes:
+    # ── Production pages ────────────────────────────────────────────────────
+    # The only branch that is allowed to wake a person. Short repeat because these
+    # describe conditions that persist until someone acts.
+    - receiver: pages
+      matchers:
+        - severity = "page"
+        - environment = "prod"
+      group_wait: 15s
+      repeat_interval: 2h
+      continue: false
+
+    # ── A page from anywhere else is a ticket ───────────────────────────────
+    # Staging saturation is real information — it usually means a change is about to
+    # do the same thing in production — but it is Monday information.
+    - receiver: tickets
+      matchers:
+        - severity = "page"
+      repeat_interval: 12h
+
+    # ── Everything explicitly filed as a ticket ─────────────────────────────
+    # 12h repeat, deliberately long. These persist until someone acts, and a 30-minute
+    # reminder about a known problem is how an alert channel becomes background noise.
+    - receiver: tickets
+      matchers:
+        - severity = "ticket"
+      repeat_interval: 12h
+
 receivers:
-  - name: primary
-    # ── Option A: email ───────────────────────────────────────────────────
-    # Works with any SMTP provider. Resend and Postmark both have free tiers that
-    # cover three alerts.
+  # ── Pages: email plus a phone-capable webhook ───────────────────────────────
+  #
+  # Both, not either. Email alone does not wake anyone reliably, and a webhook alone
+  # has no archive to read the next morning. If ALERT_WEBHOOK_URL is unset the webhook
+  # is simply never delivered and the email still is — a missing optional channel must
+  # not take the required one down with it.
+  - name: pages
     email_configs:
-      - to: '${ALERT_EMAIL:-}'
-        from: 'alerts@vectorbea.com'
-        smarthost: '${SMTP_HOST:-smtp.resend.com}:587'
-        auth_username: '${SMTP_USER:-resend}'
-        auth_password: '${SMTP_PASSWORD:-}'
+      - to: '${ALERT_EMAIL}'
         send_resolved: true
         headers:
-          Subject: '[vectorbea] {{ .CommonAnnotations.summary }}'
-        # The action is in the body, not just the subject. The subject tells you
-        # something is wrong; the body has to tell you what to do about it.
+          Subject: '[PAGE][{{ .CommonLabels.environment }}] {{ .CommonAnnotations.summary }}'
         text: |
-          {{ range .Alerts }}
-          {{ .Annotations.summary }}
+          {{ template "vectorbea.body" . }}
 
-          {{ .Annotations.description }}
+    webhook_configs:
+      # ntfy.sh, a Telegram bot, or anything else that reaches a lock screen.
+      # Free, and does not require a paid paging vendor at this size.
+      - url: '${ALERT_WEBHOOK_URL}'
+        send_resolved: true
+        max_alerts: 5
 
-          WHAT TO DO:
-          {{ .Annotations.action }}
-
-          Started: {{ .StartsAt }}
-          {{ end }}
-
-    # ── Option B: a webhook you own ───────────────────────────────────────
-    # Uncomment to POST to a Telegram bot, ntfy topic, or anything else that reaches
-    # a phone. Delete the email_configs block above if you use this instead.
-    #
-    # webhook_configs:
-    #   - url: '${ALERT_WEBHOOK_URL}'
-    #     send_resolved: true
+  # ── Tickets: email only ─────────────────────────────────────────────────────
+  - name: tickets
+    email_configs:
+      - to: '${ALERT_EMAIL}'
+        send_resolved: true
+        headers:
+          Subject: '[{{ .CommonLabels.environment }}] {{ .CommonAnnotations.summary }}'
+        text: |
+          {{ template "vectorbea.body" . }}
 
 inhibit_rules:
   # A dying fleet makes everything slow, so the saturation alert is redundant while
@@ -64,3 +102,16 @@ inhibit_rules:
   - source_matchers: [alertname = "WorkersDyingOrOverloaded"]
     target_matchers: [alertname = "SystemSaturated"]
     equal: ['environment']
+
+  # If an environment's agent is down, every other alert for that environment is
+  # either stale or an artefact of the gap. ScrapeAgentDown is the one to act on;
+  # the rest would send someone chasing a fleet problem that is really a collector
+  # problem.
+  - source_matchers: [alertname = "ScrapeAgentDown"]
+    target_matchers: [severity =~ "page|ticket"]
+    equal: ['environment']
+
+  # A page and a ticket about the same condition is one condition.
+  - source_matchers: [severity = "page"]
+    target_matchers: [severity = "ticket"]
+    equal: ['alertname', 'environment']

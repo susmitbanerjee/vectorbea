@@ -37,6 +37,39 @@ const REQUIRED = [
   { name: 'db_pool_wait_seconds',          source: 'either', histogram: true },
   { name: 'provider_429_total',            source: 'worker', labels: ['provider'] },
   { name: 'run_suspended_total',           source: 'worker' },
+
+  // ── Scheduled-job health ───────────────────────────────────────────────────
+  //
+  // These are checked on BOTH services because the loops are split across them —
+  // five in the worker, two in the API — and a registry that renders on one but not
+  // the other is exactly the bug this harness exists for. The worker in particular
+  // did not render the shared `observability.metrics` registry at all until the job
+  // work landed: a metric could be registered, incremented on every pass, and never
+  // appear on the wire.
+  //
+  // `job_last_success_timestamp_seconds` is the series the ScheduledJobStale alert
+  // evaluates. If it is absent the alert cannot fire, and a job that stops is silent
+  // again — which is the failure the whole exercise was meant to close.
+  { name: 'job_last_success_timestamp_seconds', source: 'either', labels: ['job_name'] },
+  { name: 'job_expected_interval_seconds',      source: 'either', labels: ['job_name'] },
+  { name: 'job_runs_total',                     source: 'either', labels: ['job_name', 'outcome'] },
+  { name: 'job_duration_seconds',               source: 'either', histogram: true, labels: ['job_name'] },
+
+  // ── Provider capacity ──────────────────────────────────────────────────────
+  //
+  // The Provider capacity dashboard is built entirely on these. They were emitted
+  // long before anything rendered them, so their presence has never actually been
+  // confirmed against a live scrape.
+  { name: 'provider_429_received_total',        source: 'worker', labels: ['provider'] },
+  { name: 'provider_429_after_admit_total',     source: 'worker', labels: ['provider'] },
+  { name: 'provider_capacity_exhausted_total',  source: 'worker', labels: ['provider'] },
+  { name: 'provider_capacity_utilisation',      source: 'worker', histogram: true },
+  { name: 'provider_estimate_error_ratio',      source: 'worker', histogram: true },
+
+  // ── Trace pipeline ─────────────────────────────────────────────────────────
+  { name: 'worker_run_events_dropped_total',    source: 'worker' },
+  { name: 'worker_trace_spans_dropped_total',   source: 'worker' },
+  { name: 'worker_trace_exports_dropped_total', source: 'worker' },
 ];
 
 async function scrape(url) {
