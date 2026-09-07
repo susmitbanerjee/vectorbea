@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import {
-  MarketingPageShell, Section, P, Lead, H3, Bullets, KeyPoints, Callout, Faq, Term,
+  MarketingPageShell, Section, P, Lead, Availability, H3, Bullets, KeyPoints, Callout, Faq, Term,
 } from "@/components/marketing/content";
 import { createMetadata, articleSchema, faqSchema } from "@/lib/seo";
 import { getUseCase, pageBySlug, pathForSlug, getUseCasePath } from "@/lib/marketing/pages";
@@ -134,9 +134,30 @@ export default function Page() {
             <><Term>Per-node retries with backoff.</Term> Transient failures are retried under a policy instead of failing the run.</>,
             <><Term>Resume from the last checkpoint.</Term> After a crash, restart or deploy, a run continues where it stopped.</>,
             <><Term>Immutable history.</Term> Retries and resumes are recorded, so you can see exactly how a run recovered.</>,
-            <><Term>Replay for debugging.</Term> Reproduce a failed run from its event history to find the root cause.</>,
+            <><Term>Replay for debugging.</Term> Reproduce a failed run from its recording to find the root cause — a paid feature; see below.</>,
           ]}
         />
+      </Section>
+
+      {/* AUDIT: the claims above are worded strongly because they are
+          true of the product. Some of them are not true of every PLAN, and
+          two are not true of a deployment that has not switched them on.
+          Qualifying each mention inline would be accurate and unreadable —
+          and an unreadable qualification gets skimmed, which leaves the
+          reader exactly as misinformed as none at all. One strip, in the
+          same place on every page, is read once and believed. */}
+      <Section title="What these claims require">
+        <Availability tone="plan" items={[
+            <>
+              <Term>Replay</Term> — re-executing a run against its recording, with no provider calls
+              and no cost — is on Pro and above, not on Free. It also needs a run whose model calls
+              were recorded; the API refuses rather than quietly executing it live and billing for it.
+            </>,
+            <>
+              There is no <Term>SLA</Term> and no published uptime figure, and we hold no SOC 2 or
+              ISO 27001 certification. If any of those decides your purchase, the answer today is no.
+            </>,
+        ]} />
       </Section>
 
       <Section eyebrow="FAQ" title="AI workflow failure recovery — FAQ">

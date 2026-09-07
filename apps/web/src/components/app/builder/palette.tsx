@@ -5,6 +5,8 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Input } from "~/components/ui/input";
 import { NODE_MARKS } from "~/components/icons/nodes";
+import { gateForKind, type Gate } from "./gates";
+import { useEntitlements } from "~/lib/entitlements/use-entitlements";
 import type { NodeKind } from "~/mocks/domain";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -38,6 +40,7 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
     group: "AI",
     items: [
       { kind: "agent", label: "Agent", description: "Reason, plan, and call tools to reach a goal" },
+      { kind: "agent_team", label: "Agent team", description: "Several agents, and the delegation between them" },
       { kind: "llm", label: "Model call", description: "One model call — summarise, extract, classify" },
     ],
   },
@@ -94,6 +97,12 @@ export const QUICK_TEMPLATES: QuickTemplate[] = [
     kinds: ["parallel", "tool", "merge"],
   },
   {
+    id: "supervisor-team",
+    name: "Supervisor and workers",
+    description: "A team node, gated, with a checkpoint after",
+    kinds: ["agent_team", "checkpoint"],
+  },
+  {
     id: "classify-route",
     name: "Classify and route",
     description: "A model call feeding a branch",
@@ -111,6 +120,22 @@ export function Palette({
 }) {
   const [query, setQuery] = React.useState("");
   const needle = query.trim().toLowerCase();
+  const plan = useEntitlements();
+
+  /* One gate lookup per kind, not one per render of each row: `gateForKind`
+     walks the plan's entitlement list, and the palette redraws on every
+     keystroke in the search box. */
+  const gates = React.useMemo(() => {
+    const out = new Map<NodeKind, Gate>();
+    for (const group of PALETTE) {
+      for (const item of group.items) out.set(item.kind, gateForKind(item.kind, plan));
+    }
+    return out;
+  }, [plan]);
+  const gateOf = React.useCallback(
+    (kind: NodeKind): Gate => gates.get(kind) ?? gateForKind(kind, plan),
+    [gates, plan],
+  );
 
   const groups = React.useMemo(() => {
     if (!needle) return PALETTE;
@@ -131,27 +156,35 @@ export function Palette({
       <aside className="border-subtle bg-surface-base flex w-11 shrink-0 flex-col items-center gap-1 border-r py-2">
         <CollapseButton collapsed onClick={onToggle} />
         <div className="border-subtle mt-1 w-6 border-t" />
-        {PALETTE.flatMap((g) => g.items).map((item) => (
-          <button
-            key={item.kind}
-            type="button"
-            onClick={() => onAdd(item.kind, item.label)}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData("application/vectorbea-node", item.kind);
-              e.dataTransfer.effectAllowed = "copy";
-            }}
-            title={`${item.label} — ${item.description}`}
-            aria-label={`Add ${item.label}`}
-            className={cn(
-              "grid size-7 shrink-0 cursor-grab place-items-center rounded-sm",
-              "text-fg-muted hover:bg-surface-hover hover:text-fg-primary",
-              "transition-colors duration-fast outline-none focus-visible:focus-ring active:cursor-grabbing",
-            )}
-          >
-            <Mark kind={item.kind} size={15} />
-          </button>
-        ))}
+        {PALETTE.flatMap((g) => g.items).map((item) => {
+          const gate = gateOf(item.kind);
+          return (
+            <button
+              key={item.kind}
+              type="button"
+              disabled={!gate.available}
+              onClick={() => onAdd(item.kind, item.label)}
+              draggable={gate.available}
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/vectorbea-node", item.kind);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+              title={gate.available
+                ? `${item.label} — ${item.description}`
+                : `${item.label} — ${gate.message}`}
+              aria-label={gate.available ? `Add ${item.label}` : `${item.label}, unavailable`}
+              className={cn(
+                "grid size-7 shrink-0 place-items-center rounded-sm",
+                "text-fg-muted transition-colors duration-fast outline-none focus-visible:focus-ring",
+                gate.available
+                  ? "cursor-grab hover:bg-surface-hover hover:text-fg-primary active:cursor-grabbing"
+                  : "cursor-not-allowed opacity-40",
+              )}
+            >
+              <Mark kind={item.kind} size={15} />
+            </button>
+          );
+        })}
       </aside>
     );
   }
@@ -180,32 +213,62 @@ export function Palette({
             <section key={group.group} className="mb-3">
               <Text variant="eyebrow" tone="muted" className="mb-1 block px-1">{group.group}</Text>
               <ul className="grid gap-px">
-                {group.items.map((item) => (
-                  <li key={item.kind}>
-                    <button
-                      type="button"
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData("application/vectorbea-node", item.kind);
-                        e.dataTransfer.effectAllowed = "copy";
-                      }}
-                      onClick={() => onAdd(item.kind, item.label)}
-                      className={cn(
-                        "flex w-full cursor-grab items-start gap-2 rounded-sm px-1.5 py-1.5 text-left",
-                        "hover:bg-surface-hover transition-colors duration-fast",
-                        "outline-none focus-visible:focus-ring active:cursor-grabbing",
-                      )}
-                    >
-                      <span className="border-subtle bg-surface-hover text-fg-secondary mt-px grid size-6 shrink-0 place-items-center rounded-xs border">
-                        <Mark kind={item.kind} size={13} />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="font-ui text-body-sm text-fg-primary block truncate">{item.label}</span>
-                        <span className="font-ui text-caption text-fg-muted block leading-snug">{item.description}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
+                {group.items.map((item) => {
+                  const gate = gateOf(item.kind);
+                  return (
+                    <li key={item.kind}>
+                      <button
+                        type="button"
+                        disabled={!gate.available}
+                        draggable={gate.available}
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("application/vectorbea-node", item.kind);
+                          e.dataTransfer.effectAllowed = "copy";
+                        }}
+                        onClick={() => onAdd(item.kind, item.label)}
+                        className={cn(
+                          "flex w-full items-start gap-2 rounded-sm px-1.5 py-1.5 text-left",
+                          "transition-colors duration-fast outline-none focus-visible:focus-ring",
+                          gate.available
+                            ? "cursor-grab hover:bg-surface-hover active:cursor-grabbing"
+                            : "cursor-not-allowed",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "border-subtle bg-surface-hover text-fg-secondary mt-px grid size-6 shrink-0 place-items-center rounded-xs border",
+                            !gate.available && "opacity-50",
+                          )}
+                        >
+                          <Mark kind={item.kind} size={13} />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              "font-ui text-body-sm block truncate",
+                              gate.available ? "text-fg-primary" : "text-fg-muted",
+                            )}
+                          >
+                            {item.label}
+                          </span>
+                          {/* The reason REPLACES the description rather than
+                              sitting under it. Somebody who cannot use a step
+                              needs to know why, not what it would have done —
+                              and three lines of small text where two were is how
+                              a palette stops being scannable. */}
+                          <span className="font-ui text-caption text-fg-muted block leading-snug">
+                            {gate.available ? item.description : gate.message}
+                          </span>
+                          {!gate.available && gate.reason === "plan" && (
+                            <span className="font-ui text-caption text-accent mt-0.5 block leading-snug">
+                              {gate.action}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           ))

@@ -80,6 +80,12 @@ function Hero() {
             Docs
           </Link>
           <Link
+            href={"/pricing" as never}
+            className="font-ui text-body-sm text-fg-secondary hover:text-fg-primary rounded-sm px-2 py-1 transition-colors duration-fast outline-none focus-visible:focus-ring"
+          >
+            Pricing
+          </Link>
+          <Link
             href={"/compare" as never}
             className="font-ui text-body-sm text-fg-secondary hover:text-fg-primary hidden rounded-sm px-2 py-1 transition-colors duration-fast outline-none focus-visible:focus-ring sm:block"
           >
@@ -122,9 +128,14 @@ function Hero() {
               </Button>
             </div>
 
+            {/* AUDIT: this said "on our workers or inside your VPC". There is no
+                shipped private runner — `SsrfGuard.privateRunnerMode` is a switch
+                the API would need if one existed, and nothing else does. Offering
+                a deployment model that cannot be bought is the kind of claim a
+                security reviewer checks first and finds untrue first. */}
             <Text variant="caption" tone="muted" className="mt-6 block max-w-[46ch]">
-              Bring your own model keys. Runs execute on our workers or inside your VPC. No training
-              on your data, ever.
+              Bring your own model keys. Runs execute on our workers. No training on your data,
+              ever.
             </Text>
           </div>
 
@@ -281,7 +292,11 @@ const ANATOMY: { icon: IconComponent; term: string; body: string; detail: string
     icon: ApprovalGateIcon,
     term: "Gate",
     body: "The run suspends and its state is persisted. Nothing is held in memory waiting for a person; the run can wait four hours or four days at no cost.",
-    detail: "suspended · SLA timer running",
+    /* AUDIT: "SLA timer" is the approval node's own vocabulary — the field is
+       `slaMinutes` and it is the deadline before the gate escalates. On a
+       marketing page beside a durability pitch it reads as a service level
+       agreement, and we offer none. Same fact, unambiguous words. */
+    detail: "suspended · escalation timer running",
   },
   {
     icon: ResumeFromCheckpointIcon,
@@ -487,7 +502,7 @@ function Approvals() {
             <div className="border-status-waiting-border bg-status-waiting-subtle flex items-center gap-2 border-b px-4 py-2.5">
               <ApprovalGateIcon size={16} aria-hidden="true" className="text-status-waiting" />
               <Text variant="body-sm" className="text-status-waiting">Awaiting approval</Text>
-              <Text variant="caption" tone="muted" className="tabular ml-auto">SLA 26m remaining</Text>
+              <Text variant="caption" tone="muted" className="tabular ml-auto">escalates in 26m</Text>
             </div>
 
             <dl className="divide-subtle divide-y">
@@ -559,8 +574,28 @@ const COMPARISON: { capability: string; cells: [Verdict, Verdict, Verdict, Verdi
   { capability: "Resumes from the last committed step", cells: ["no", "no", "partial", "yes"], note: "Workflow tools resume the task graph, not the agent's own mid-step state." },
   { capability: "Per-step idempotency keys", cells: ["no", "no", "partial", "yes"] },
   { capability: "Suspends for human approval, at no cost while waiting", cells: ["no", "partial", "partial", "yes"] },
-  { capability: "Per-node token and cost accounting", cells: ["no", "no", "no", "yes"] },
-  { capability: "Failure clustering by signature", cells: ["no", "no", "partial", "yes"] },
+  {
+    capability: "Per-node token and cost accounting",
+    cells: ["no", "no", "no", "yes"],
+    /* AUDIT: tokens are COUNTED and the claim is sound. Cost is DERIVED from a
+       model-price table, and docs/COST-ATTRIBUTION-FINDINGS.md measures that
+       derivation as wrong by 1.8x-29x depending on the model string — which is
+       why V062 caps a member's usage in tokens rather than in cents. Selling
+       the cost figure without that sentence is selling a number we know to be
+       unreliable. */
+    note: "Tokens are counted. Cost is derived from a model-price table and is an estimate — usage caps are enforced in tokens for that reason.",
+  },
+  /* AUDIT: this claimed a clean "yes". Incidents carry a signature and the
+     screen groups on it, but the SERVER-SIDE group-by does not exist (GAP-04)
+     and the clustering band is behind `failureClustering`, which defaults to
+     off. Grouping client-side over a capped page silently UNDER-COUNTS, which
+     is the one thing a cluster count must not do — so the honest cell is
+     partial, and the note says which half is missing. */
+  {
+    capability: "Failure clustering by signature",
+    cells: ["no", "no", "partial", "partial"],
+    note: "Incidents carry a signature and the screen groups on it. The server-side group-by is not shipped yet, so we do not show a cluster count that could under-report.",
+  },
   { capability: "Runs agents you already wrote", cells: ["yes", "yes", "no", "yes"] },
   { capability: "Mature scheduling and backfill", cells: ["partial", "no", "yes", "partial"], note: "Airflow has a decade of scheduling behaviour we do not match yet." },
   { capability: "Huge connector library", cells: ["no", "no", "yes", "partial"], note: "Zapier's directory is far larger. We cover the integrations agentic workflows actually reach for." },
@@ -656,8 +691,14 @@ const SECURITY: { icon: IconComponent; title: string; body: string }[] = [
   },
   {
     icon: LeaseIcon,
-    title: "Encrypted at rest and in transit",
-    body: "TLS 1.3 on every hop. Run payloads, node inputs and outputs are encrypted at rest; secrets are stored separately from run data.",
+    title: "Encrypted in transit, and at rest by the platform",
+    /* AUDIT: this said "TLS 1.3 on every hop" and "run payloads … are encrypted
+       at rest". Neither is ours to assert. The TLS version is negotiated per hop
+       with providers we do not control, and nothing in our code encrypts a run
+       payload — it sits in managed Postgres, whose disk encryption is the
+       provider's. Both are close enough to true to be tempting and specific
+       enough to be checkable, which is the worst combination. */
+    body: "TLS on every hop. Run payloads sit in managed Postgres with the provider's disk encryption, and are deleted — not hidden — when their retention window expires.",
   },
   {
     icon: CommitBoundaryIcon,
@@ -666,8 +707,14 @@ const SECURITY: { icon: IconComponent; title: string; body: string }[] = [
   },
   {
     icon: AgentBrainIcon,
-    title: "Private runners",
-    body: "Run workers inside your VPC so payloads never leave your network. The control plane sees run metadata; it does not need to see the data.",
+    /* AUDIT: this card sold private runners in a customer VPC. That does not
+       exist — there is no runner artifact, no deployment path and no
+       documentation, only an SSRF switch the API would need if one did. It has
+       been replaced with a security property that IS implemented and is worth
+       more to the reader anyway, because it is the one every multi-tenant
+       buyer asks about. */
+    title: "One workspace cannot reach another",
+    body: "Agent, tool, roster and run lookups are workspace-scoped at the same boundary and fail closed if the check itself errors. A secret is sealed with its workspace id as authenticated data, so a ciphertext moved between tenants fails to decrypt rather than decrypting for the wrong one.",
   },
 ];
 
@@ -693,8 +740,15 @@ function Security() {
 
       <Reveal className="mt-8 block">
         <Text variant="caption" tone="muted" className="block max-w-[62ch]">
+          {/* AUDIT: this said "SOC 2 is in progress". No audit has been
+              commissioned, no auditor engaged and no readiness work started —
+              "in progress" was aspiration written in the present tense. A
+              compliance claim is the first thing a serious buyer verifies, and
+              the first one found untrue is the last claim of ours they believe. */}
           We do not train on your data and we do not share it with model providers beyond the call
-          you asked for. SOC 2 is in progress; we will say so here when it is done and not before.
+          you asked for. We hold no SOC 2 or ISO 27001 certification and no third-party security
+          audit has been performed. If a certification decides your purchase, the answer today is
+          no, and we would rather you heard it here than after a procurement review.
         </Text>
       </Reveal>
     </Section>
@@ -739,10 +793,18 @@ function Footer() {
           © {new Date().getFullYear()} Vectorbea
         </Text>
         <nav className="flex flex-wrap gap-4">
+          {/* Legal is in the footer of the page people actually land on. A DPA
+              a procurement reviewer cannot find is a DPA that does not exist for
+              the purpose it was written for. */}
           {[
+            { href: "/pricing", label: "Pricing" },
             { href: "/docs", label: "Docs" },
             { href: "/compare", label: "Compare" },
             { href: "/use-cases", label: "Use cases" },
+            { href: "/legal/terms", label: "Terms" },
+            { href: "/legal/privacy", label: "Privacy" },
+            { href: "/legal/dpa", label: "DPA" },
+            { href: "/legal/subprocessors", label: "Subprocessors" },
             { href: "/support", label: "Support" },
           ].map((l) => (
             <Link

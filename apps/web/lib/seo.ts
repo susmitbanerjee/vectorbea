@@ -44,6 +44,20 @@ export const SITE = {
   /** Separate deployment — the engineering blog. */
   blogUrl: "https://engineering.vectorbea.com",
   organizationName: "Vectorbea",
+  /**
+   * The address the legal pages point at.
+   *
+   * ── WHY THIS IS A PERSON AND NOT legal@ ─────────────────────────────────
+   * It is the address that actually receives mail today — it is one of
+   * `DEFAULT_SUPPORT_ADMINS` in lib/server/support.ts. Printing `legal@` or
+   * `privacy@` on a Privacy Policy would be a false statement in the one
+   * document set whose entire value is that it can be relied on: a data
+   * subject exercising a right would write to a mailbox that bounces, and the
+   * obligation to answer them would still be ours.
+   *
+   * Replace this with a role address the moment one exists and is monitored.
+   */
+  contactEmail: "susmit@vectorbea.com",
 } as const;
 
 /** Absolute URL for a site-relative path, collapsing duplicate slashes. */

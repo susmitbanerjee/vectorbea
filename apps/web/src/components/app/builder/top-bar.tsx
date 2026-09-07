@@ -51,12 +51,22 @@ export interface TopBarProps {
    * inert and gets pressed again, which is how one click becomes three runs.
    */
   triggering?: "test" | "run" | "debug" | null;
+  /**
+   * The newest run of this workflow, if there is one.
+   *
+   * Drawn as one link to that run's DEBUG tab rather than to the run overview:
+   * somebody leaving the canvas mid-edit is going to look at what a node did,
+   * and the overview is one more click away from that. Null hides the link
+   * entirely — a disabled control saying "no runs yet" is a row of chrome that
+   * teaches nothing.
+   */
+  lastRun?: { id: string; status: string } | null;
 }
 
 export function TopBar({
   workflow, versionNumber, isDraft, summary, saveState, lastSavedAt,
   presentation, onTogglePresentation, onToggleFullscreen, fullscreen,
-  onSave, onTest, onSimulate, onRun, onDebugRun, triggering = null,
+  onSave, onTest, onSimulate, onRun, onDebugRun, triggering = null, lastRun = null,
 }: TopBarProps) {
   if (presentation) {
     return (
@@ -154,6 +164,27 @@ export function TopBar({
         <Button asChild size="sm" variant="ghost">
           <Link href={`/workflows/${workflow.id}/versions` as Route}>History</Link>
         </Button>
+
+        {/* BUILD AND DEBUG ARE ONE LOOP. Straight to the Debug tab of the last
+            run, not to the Runs list — the list is where you go when you do not
+            know which run you mean, and from inside the builder you always do. */}
+        {lastRun ? (
+          <Button asChild size="sm" variant="ghost">
+            <Link href={`/runs/${lastRun.id}/debug` as Route} title={`Debug the last run — ${lastRun.status}`}>
+              <span
+                className={cn(
+                  "mr-1.5 size-1.5 shrink-0 rounded-full",
+                  lastRun.status === "failed" ? "bg-status-failed"
+                    : lastRun.status === "running" ? "bg-status-live"
+                      : lastRun.status === "succeeded" ? "bg-status-success"
+                        : "bg-status-queued",
+                )}
+                aria-hidden="true"
+              />
+              Debug last run
+            </Link>
+          </Button>
+        ) : null}
 
         <Button size="sm" variant="secondary" onClick={onSave} disabled={saveState === "saved" || saveState === "saving"}>
           {saveState === "saving" ? "Saving…" : "Save"}

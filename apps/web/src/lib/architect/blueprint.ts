@@ -32,7 +32,7 @@ import type { ArchitectPlan, PlanStep } from "./types";
  * fixture's. TypeScript is structural, so the canvas accepts either.
  */
 export type NodeKind =
-  | "trigger" | "agent" | "llm" | "tool" | "branch" | "parallel"
+  | "trigger" | "agent" | "agent_team" | "llm" | "tool" | "branch" | "parallel"
   | "merge" | "wait" | "approval" | "checkpoint" | "output" | "end";
 
 /** One node on the blueprint canvas. */
@@ -61,7 +61,7 @@ export interface Blueprint {
 }
 
 const KNOWN_KINDS: NodeKind[] = [
-  "trigger", "agent", "llm", "tool", "branch", "parallel",
+  "trigger", "agent", "agent_team", "llm", "tool", "branch", "parallel",
   "merge", "wait", "approval", "checkpoint", "output", "end",
 ];
 
@@ -74,6 +74,12 @@ const KNOWN_KINDS: NodeKind[] = [
  * rather than dropping it out of the plan the user is being asked to approve.
  */
 const KIND_ALIASES: Record<string, NodeKind> = {
+  /* `team` is `WorkflowGraph.NodeType.fromString`'s own alias for AGENT_TEAM.
+     Mapping it here rather than to `agent` matters: a plan that says "team"
+     and is drawn as a single agent loses the roster, and the roster is the
+     configuration. */
+  team: "agent_team",
+  crew: "agent_team",
   start: "trigger",
   schedule: "trigger",
   cron: "trigger",

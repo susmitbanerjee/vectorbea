@@ -242,6 +242,83 @@ export interface SchemaPreviewResult {
  * SERVER-SIDE, so omitting it is safe but never obvious — every caller here
  * states it.
  */
+/**
+ * One resolved entitlement, exactly as `Entitlement.toMap()` writes it.
+ *
+ * ── ONE `value`, NOT FOUR TYPED FIELDS ──────────────────────────────────────
+ * The Kotlin record carries `intValue`, `boolValue`, `numValue` and `textValue`
+ * and serialises exactly ONE of them, under the name `value`, chosen by `kind`.
+ * Mirroring the record rather than the wire here would have produced a client
+ * where every field is permanently null and every gate therefore permanently
+ * open — the failure mode that looks like a working feature flag right up until
+ * somebody on Free uses a Pro feature.
+ *
+ * `unlimited` is present for quota and limit rows only, and is the catalogue's
+ * `-1`. It is NOT the same as a value of zero: zero is a real ceiling of zero,
+ * and collapsing the two turns a seeding mistake into a free upgrade.
+ */
+export interface Entitlement {
+  key: string;
+  kind: "quota" | "limit" | "feature" | "setting";
+  scope: "account" | "workspace";
+  period?: string;
+  /** "plan" or "override" — why this workspace has this value. */
+  source: string;
+  value: number | boolean | string | null;
+  /** Quota and limit rows only. True when the catalogue says `-1`. */
+  unlimited?: boolean;
+}
+
+/** The plan a workspace's account is on, as `PlanSummary.toMap()` writes it. */
+export interface ResolvedPlan {
+  code: string;
+  name: string;
+  priceCents: number | null;
+  currency: string;
+  billingInterval: string;
+  priceModel: string;
+  status: string;
+  upgradeTo: string | null;
+  upgradeToName: string | null;
+  upgradeUrl: string;
+}
+
+export interface EntitlementsResponse {
+  workspaceId?: string;
+  accountId?: string;
+  plan?: ResolvedPlan;
+  seatsPurchased?: number;
+  graceUntil?: string | null;
+  entitlements?: Entitlement[];
+  usage?: { periodStart?: string; periodEnd?: string; metrics?: Record<string, number> };
+  counts?: Record<string, number>;
+  seats?: { purchased?: number | null; used?: number | null; max?: number | null };
+  [key: string]: unknown;
+}
+
+/** A row from `GET /api/plans` — the public catalogue, read straight from `plans`. */
+export interface PlanSummary {
+  code: string;
+  name: string;
+  description: string | null;
+  priceCents: number | null;
+  currency: string | null;
+  billingInterval: string | null;
+  priceModel: string | null;
+  upgradeTo: string | null;
+  upgradeUrl: string | null;
+  sortOrder: number;
+  entitlements: {
+    key: string;
+    kind: string;
+    scope: string;
+    period: string | null;
+    /** Already humanised by `EntitlementKeys.label` on the server. */
+    label: string;
+    value: number | boolean | string | null;
+  }[];
+}
+
 export interface TriggerRunBody {
   input?: Record<string, unknown>;
   mode?: "simulation" | "real";
@@ -543,6 +620,22 @@ export interface VectorbeaClient {
     remove(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     /** `POST /api/failure-incidents/delete-resolved` — clears what is closed. */
     deleteResolved(scope?: Scope, options?: RequestOptions): Promise<{ deleted: number }>;
+  };
+
+  /**
+   * What this WORKSPACE is entitled to.
+   *
+   * The subject is the workspace, never the reader — a Pro member inside a Free
+   * workspace gets Free, which is the same answer every enforcement point in the
+   * API gives. That is the whole reason the UI reads this instead of keeping its
+   * own table of what each plan includes: a gate built from a local table
+   * disagrees with the API the first time somebody raises a limit in the
+   * database, and it disagrees by PROMISING something the API then refuses.
+   */
+  entitlements: {
+    get(scope?: Scope, options?: RequestOptions): Promise<EntitlementsResponse>;
+    /** The public catalogue, for the upgrade path on a disabled control. */
+    plans(options?: RequestOptions): Promise<PlanSummary[]>;
   };
 
   debug: {
@@ -1006,6 +1099,18 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           body: { enabled },
           ...req(scope, undefined, options),
         }),
+    },
+
+    entitlements: {
+      get: (scope, options) =>
+        call<EntitlementsResponse>("/api/entitlements", req(scope, undefined, options)),
+      /* Not workspace-scoped: the catalogue is the same for everybody, and
+         scoping it would make the upgrade path a caller cannot see unless it
+         already has a workspace — which is the one case where it matters most. */
+      plans: async (options) => {
+        const payload = await call<{ plans?: PlanSummary[] }>("/api/plans", { ...options });
+        return payload?.plans ?? [];
+      },
     },
 
     debug: {

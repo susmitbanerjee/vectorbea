@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import {
-  MarketingPageShell, Section, P, Lead, H3, KeyPoints, Callout, CompareTable, Faq, Term,
+  MarketingPageShell, Section, P, Lead, Availability, H3, KeyPoints, Callout, CompareTable, Faq, Term,
 } from "@/components/marketing/content";
 import { createMetadata, articleSchema, faqSchema } from "@/lib/seo";
 import { comparisonBySlug, pageBySlug, pathForSlug, comparisonPath } from "@/lib/marketing/pages";
@@ -135,6 +135,36 @@ export default function Page() {
           Vectorbea isn&apos;t a claim that AI-native beats general-purpose. It&apos;s that matching the abstraction to
           the workload saves work. For agentic AI, that abstraction is a good fit.
         </Callout>
+      </Section>
+
+      {/* AUDIT: the claims above are worded strongly because they are
+          true of the product. Some of them are not true of every PLAN, and
+          two are not true of a deployment that has not switched them on.
+          Qualifying each mention inline would be accurate and unreadable —
+          and an unreadable qualification gets skimmed, which leaves the
+          reader exactly as misinformed as none at all. One strip, in the
+          same place on every page, is read once and believed. */}
+      <Section title="Before you compare on our word">
+        <Availability tone="plan" items={[
+            <>
+              <Term>Replay</Term> — re-executing a run against its recording, with no provider calls
+              and no cost — is on Pro and above, not on Free. It also needs a run whose model calls
+              were recorded; the API refuses rather than quietly executing it live and billing for it.
+            </>,
+            <>
+              <Term>Agent teams</Term> — a roster whose members delegate to each other under a depth
+              limit — are built and ship behind a runtime switch that is off by default. Several
+              agents as independent steps in one workflow is a different thing, and it works today.
+            </>,
+            <>
+              <Term>OpenTelemetry export</Term> to your own collector is behind a runtime switch that
+              is off by default. Traces are recorded and readable in the product either way.
+            </>,
+            <>
+              There is no <Term>SLA</Term> and no published uptime figure, and we hold no SOC 2 or
+              ISO 27001 certification. If any of those decides your purchase, the answer today is no.
+            </>,
+        ]} />
       </Section>
 
       <Section eyebrow="FAQ" title="Vectorbea and Temporal — FAQ">

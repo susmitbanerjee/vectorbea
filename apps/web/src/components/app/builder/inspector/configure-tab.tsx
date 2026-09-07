@@ -10,6 +10,8 @@ import { Button } from "~/components/ui/button";
 import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
 import { TYPE_LABEL } from "~/mocks/io-schema";
 import { nodeInputs } from "./node-inputs";
+import { Section, Field } from "./fields";
+import { TeamConfigPanel } from "./team-config";
 import {
   useBuilderRegistry, resolveTool, resolveAgent, resolveConnection,
 } from "../use-builder-registry";
@@ -80,6 +82,11 @@ export function ConfigureTab({
       {/* ── Resource binding ─────────────────────────────────────────────── */}
       {node.kind === "tool" ? <ToolConfig node={node} set={set} setMany={setMany} /> : null}
       {node.kind === "agent" ? <AgentConfig node={node} set={set} setMany={setMany} /> : null}
+      {/* A team's whole config is a graph, so its panel owns several sections
+          rather than one. It writes through `writeTeamConfig`, not `set`: the
+          alias a grant names is a cross-reference, and patching single keys
+          leaves grants pointing at members that no longer exist. */}
+      {node.kind === "agent_team" ? <TeamConfigPanel node={node} onChange={onChange} /> : null}
       {node.kind === "llm" ? <LlmConfig node={node} set={set} /> : null}
       {node.kind === "branch" ? <BranchConfig node={node} set={set} /> : null}
       {node.kind === "parallel" ? <ParallelConfig node={node} set={set} /> : null}
@@ -964,24 +971,6 @@ function OutputConfig({ node, set }: { node: VersionNode; set: (k: string, v: un
   );
 }
 
-/* ── Chrome ───────────────────────────────────────────────────────────────── */
-
-function Section({ title, help, children }: { title: string; help: string; children: React.ReactNode }) {
-  return (
-    <section className="border-subtle bg-surface-raised rounded-md border p-2.5">
-      <Text variant="label" tone="primary" className="block">{title}</Text>
-      <Text variant="caption" tone="muted" className="mb-2 mt-0.5 block leading-snug">{help}</Text>
-      {children}
-    </section>
-  );
-}
-
-function Field({ label, help, children }: { label: string; help: string; children: React.ReactNode }) {
-  return (
-    <label className="grid min-w-0 gap-1">
-      <Text variant="caption" tone="secondary">{label}</Text>
-      {children}
-      <Text variant="caption" tone="muted" className="leading-snug">{help}</Text>
-    </label>
-  );
-}
+/* `Section` and `Field` moved to ./fields when the team editor became its own
+   file. Shared rather than copied because `help` is required on both, and two
+   copies of the wrapper is how half of those sentences quietly stop existing. */

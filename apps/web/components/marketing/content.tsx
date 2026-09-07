@@ -172,6 +172,72 @@ export function Callout({ title, children }: { title?: string; children: React.R
   );
 }
 
+/**
+ * WHAT A CLAIM ON THIS PAGE ACTUALLY REQUIRES.
+ *
+ * ══════════════════════════════════════════════════════════════════════════════
+ * THE RULE THIS COMPONENT EXISTS TO ENFORCE
+ * ══════════════════════════════════════════════════════════════════════════════
+ * A feature behind a default-off flag is not shipped, and a feature only some
+ * plans include is not "in the product" for everyone reading. Both are still
+ * worth describing — hidden features do not sell — but an unqualified sentence
+ * about either is a false claim, and the ones about RELIABILITY are the worst
+ * kind, because reliability is precisely what a buyer is evaluating.
+ *
+ * ── WHY ONE STRIP RATHER THAN QUALIFYING EVERY SENTENCE ─────────────────────
+ * These pages mention replay a dozen times between them. Appending "(on Pro and
+ * above)" to each would be accurate and unreadable, and unreadable qualifications
+ * get skimmed past, which leaves the reader exactly as misinformed as no
+ * qualification at all. One strip, in the same place on every page, stating what
+ * the page's claims require, is read once and believed.
+ *
+ * ── IT SAYS WHICH KIND OF UNAVAILABLE ───────────────────────────────────────
+ * "Needs a paid plan" and "not switched on in this deployment" look identical in
+ * a footnote and are completely different to a buyer: the first is solved with a
+ * credit card, the second is not solved at all. `tone` keeps them apart.
+ */
+export function Availability({
+  tone = "plan",
+  items,
+}: {
+  /** `plan` — included on some plans. `flag` — built, shipped dark. */
+  tone?: "plan" | "flag";
+  items: React.ReactNode[];
+}) {
+  const flag = tone === "flag";
+  return (
+    <div
+      className="rounded-[12px] border px-4 py-3.5"
+      style={
+        flag
+          ? { borderColor: "#FDE68A", background: "#FFFBEB" }
+          : { borderColor: "#E0E3E6", background: "#FAFBFB" }
+      }
+    >
+      <p
+        className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em]"
+        style={{ color: flag ? "#92400E" : "#6B7280" }}
+      >
+        {flag ? "Built, not switched on" : "What this needs"}
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2">
+            <span
+              className="mt-[8px] h-1 w-1 shrink-0 rounded-full"
+              style={{ background: flag ? "#D97706" : "#C9CED4" }}
+              aria-hidden="true"
+            />
+            <span className="text-[13.5px] leading-[1.6]" style={{ color: flag ? "#78350F" : "#4B5563" }}>
+              {item}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** Definitional two-column table for comparisons/concepts. */
 export function CompareTable({ head, rows }: { head: [string, string, string]; rows: [string, React.ReactNode, React.ReactNode][] }) {
   return (

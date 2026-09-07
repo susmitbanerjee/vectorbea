@@ -554,7 +554,93 @@ function match(pattern: string, path: string): Record<string, string> | null {
 
 type Handler = (params: Record<string, string>, init: RequestOptions) => unknown;
 
+/* ── Entitlements ─────────────────────────────────────────────────────────────
+   Mock mode is on the FREE plan, deliberately.
+
+   The plan gates are the one piece of UI whose interesting state is the
+   restricted one, and a mock that answers "everything allowed" would leave the
+   disabled-with-an-upgrade-path treatment untestable without a live billing
+   account. On Free: no teams, no delegation, no MCP, no replay, no API — and a
+   `max_team_size` of zero, which is a real ceiling of zero and NOT the
+   catalogue's `-1` unlimited.
+
+   The keys and shapes mirror `EntitlementRoutes.entitlements` exactly: a single
+   `value` per row chosen by `kind`, and `unlimited` only on quota and limit
+   rows. Getting that wrong here would make the mock the only place the gates
+   appear to work. */
+const MOCK_ENTITLEMENTS = [
+  { key: "teams", kind: "feature", scope: "account", source: "plan", value: false },
+  { key: "delegation", kind: "feature", scope: "account", source: "plan", value: false },
+  { key: "mcp_tools", kind: "feature", scope: "account", source: "plan", value: false },
+  { key: "replay", kind: "feature", scope: "account", source: "plan", value: false },
+  { key: "otel_export", kind: "feature", scope: "account", source: "plan", value: false },
+  { key: "api_access", kind: "feature", scope: "account", source: "plan", value: false },
+  { key: "max_team_size", kind: "limit", scope: "account", source: "plan", value: 0, unlimited: false },
+  { key: "max_delegation_depth", kind: "limit", scope: "account", source: "plan", value: 0, unlimited: false },
+  { key: "max_agents", kind: "limit", scope: "workspace", source: "plan", value: 3, unlimited: false },
+  { key: "max_concurrent_runs", kind: "limit", scope: "account", source: "plan", value: 1, unlimited: false },
+  { key: "runs_per_month", kind: "quota", scope: "account", period: "month", source: "plan", value: 100, unlimited: false },
+];
+
+const MOCK_PLAN_ROWS = (allowed: boolean, teamSize: number, depth: number) => [
+  { key: "teams", kind: "feature", scope: "account", period: null, label: "agent teams", value: allowed },
+  { key: "delegation", kind: "feature", scope: "account", period: null, label: "delegation", value: allowed },
+  { key: "mcp_tools", kind: "feature", scope: "account", period: null, label: "MCP tools", value: allowed },
+  { key: "replay", kind: "feature", scope: "account", period: null, label: "replay", value: allowed },
+  { key: "otel_export", kind: "feature", scope: "account", period: null, label: "OpenTelemetry export", value: allowed },
+  { key: "api_access", kind: "feature", scope: "account", period: null, label: "API access", value: allowed },
+  { key: "max_team_size", kind: "limit", scope: "account", period: null, label: "agents in a team", value: teamSize },
+  { key: "max_delegation_depth", kind: "limit", scope: "account", period: null, label: "levels of delegation", value: depth },
+];
+
 const ROUTES: [method: string, pattern: string, handler: Handler][] = [
+  [
+    "GET",
+    "/api/entitlements",
+    () => ({
+      workspaceId: uuidFrom("ws-mock"),
+      accountId: uuidFrom("acct-mock"),
+      plan: {
+        code: "free", name: "Free", priceCents: 0, currency: "usd",
+        billingInterval: "month", priceModel: "flat", status: "active",
+        upgradeTo: "pro", upgradeToName: "Pro", upgradeUrl: "/settings/billing",
+      },
+      seatsPurchased: 1,
+      graceUntil: null,
+      entitlements: MOCK_ENTITLEMENTS,
+      usage: { periodStart: null, periodEnd: null, metrics: { runs: 12 } },
+      counts: { max_agents: 2 },
+      seats: { purchased: 1, used: 1, max: 1 },
+    }),
+  ],
+
+  [
+    "GET",
+    "/api/plans",
+    () => ({
+      plans: [
+        {
+          code: "free", name: "Free", description: "One workspace, one run at a time.",
+          priceCents: 0, currency: "usd", billingInterval: "month", priceModel: "flat",
+          upgradeTo: "pro", upgradeUrl: "/settings/billing", sortOrder: 0,
+          entitlements: MOCK_PLAN_ROWS(false, 0, 0),
+        },
+        {
+          code: "pro", name: "Pro", description: "Teams, delegation and replay.",
+          priceCents: 4900, currency: "usd", billingInterval: "month", priceModel: "seat",
+          upgradeTo: "scale", upgradeUrl: "/settings/billing", sortOrder: 1,
+          entitlements: MOCK_PLAN_ROWS(true, 8, 3),
+        },
+        {
+          code: "scale", name: "Scale", description: "Larger teams and deeper delegation.",
+          priceCents: 24900, currency: "usd", billingInterval: "month", priceModel: "seat",
+          upgradeTo: null, upgradeUrl: "/settings/billing", sortOrder: 2,
+          entitlements: MOCK_PLAN_ROWS(true, 20, 5),
+        },
+      ],
+    }),
+  ],
+
   /* Workspace ids are hashed to UUIDs like every other fixture id, because the
      contract types them as UUIDs and because `useEnvironmentUuid` compares the
      active workspace against bootstrap's to refuse another tenant's environment

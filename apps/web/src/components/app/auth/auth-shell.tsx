@@ -37,7 +37,7 @@ export function AuthShell({
           </Link>
           <AmbientRun className="my-auto pt-12" />
           <Text variant="caption" tone="muted" className="block max-w-[46ch]">
-            Bring your own model keys. Runs execute on our workers or inside your VPC. We do not train
+            Bring your own model keys. Runs execute on our workers. We do not train
             on your data.
           </Text>
         </section>

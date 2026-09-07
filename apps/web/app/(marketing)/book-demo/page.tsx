@@ -22,7 +22,7 @@ const benefits = [
   {
     icon: GitBranch,
     title: "Trace production AI failures clearly",
-    body: "Replay every request with full prompt model and output lineage — no guessing required",
+    body: "Inspect every request with full prompt, model and output lineage — no guessing required",
   },
   {
     icon: FlaskConical,
@@ -213,7 +213,7 @@ export default function BookDemoPage() {
                 See how VectorBea controls production LLM risk
               </h1>
               <p className="max-w-xl text-base leading-7 text-[#4B5563]">
-                Walk through agent workflows, approval gates, rollout controls, run replay, and multi-agent orchestration with your own use case in mind
+                Walk through agent workflows, approval gates, rollout controls, run replay (a Pro and above feature) and multi-agent orchestration, with your own use case in mind
               </p>
             </div>
 

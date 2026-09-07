@@ -140,25 +140,55 @@ applies to Alertmanager's silence API and Tempo's span store.
 
 ## 3. Environment variables
 
-All on the one service. **The container refuses to start if any of the first three is
-missing** — each produces a stack that looks healthy and is quietly wrong, which is the
-failure this whole exercise exists to remove.
+All on the one service.
 
-| Variable | Value | If unset |
+### The four that get it running
+
+Set these and it boots. Verified by running it with nothing else set: all seven
+programs start, all six Prometheus-backed dashboards work, and the rest can be added
+incrementally without a redeploy loop.
+
+```
+TELEMETRY_INGEST_TOKEN=<openssl rand -hex 32>
+ALERT_EMAIL=susmit.b1@gmail.com
+GRAFANA_ALLOWED_EMAILS=susmit.b1@gmail.com
+GF_SECURITY_ADMIN_PASSWORD=<openssl rand -base64 32>
+```
+
+**The container refuses to start without the first three.** That is deliberate: each
+one missing produces a stack that looks healthy and is quietly wrong — open ingest,
+alerts delivered nowhere, dashboards readable by anyone who signs in. The restart loop
+you see in the logs is the guard working, not a crash.
+
+### What each remaining variable buys, and what breaks without it
+
+Nothing below stops the stack booting. Each one turns on a capability that is otherwise
+visibly absent rather than silently broken.
+
+| Variable | Value | Without it |
 |---|---|---|
-| `TELEMETRY_INGEST_TOKEN` | `openssl rand -hex 32` | refuses to start — ingest would be open to anyone who found the domain |
-| `ALERT_EMAIL` | where pages and tickets go | refuses to start — Alertmanager would deliver every alert nowhere |
-| `GRAFANA_ALLOWED_EMAILS` | `susmit.b1@gmail.com` | refuses to start — see §4 |
-| `GF_SECURITY_ADMIN_PASSWORD` | `openssl rand -base64 32` | Grafana will not start |
-| `GF_SERVER_ROOT_URL` | `https://telemetry.vectorbea.com` | alert-email links point at localhost |
-| `GRAFANA_OAUTH_CLIENT_ID` / `_SECRET` | from Google, §4 | falls back to password login and warns loudly |
-| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` | any SMTP provider; Resend and Postmark have adequate free tiers | delivery fails |
-| `ALERT_WEBHOOK_URL` | optional — ntfy or a Telegram bot, so a page reaches a lock screen | webhook simply not used |
-| `ANALYTICS_DB_HOST` … `ANALYTICS_DB_PASSWORD` | the **read-only** Neon role, §6 | Product and Workspace dashboards show a datasource error |
+| `GF_SERVER_ROOT_URL` | `https://telemetry.vectorbea.com` | links in alert emails point at localhost |
+| `GRAFANA_OAUTH_CLIENT_ID` | from Google, §4 | password login only, with a loud startup warning — **not acceptable on a public domain** |
+| `GRAFANA_OAUTH_CLIENT_SECRET` | from Google, §4 | as above |
+| `SMTP_HOST` | e.g. `smtp.resend.com` | defaults to Resend's host |
+| `SMTP_USER` | e.g. `resend` | defaults to `resend` |
+| `SMTP_PASSWORD` | your provider's API key | Alertmanager starts healthy and **every delivery fails at SMTP** |
+| `ALERT_WEBHOOK_URL` | optional — ntfy topic or Telegram bot | pages arrive by email only |
+| `ANALYTICS_DB_HOST` | Neon host | the Product and Workspace-support dashboards show a datasource error. The other six are unaffected — this is a Postgres datasource, not Prometheus. |
+| `ANALYTICS_DB_PORT` | `5432` | as above |
+| `ANALYTICS_DB_NAME` | `vectorbea` | as above |
+| `ANALYTICS_DB_USER` | `grafana_ro` | as above |
+| `ANALYTICS_DB_PASSWORD` | the read-only role's password, §6 | as above |
+| `GRAFANA_BREAK_GLASS` | `true` only to recover from a broken OAuth config | password form stays disabled |
 
-Everything else — the collector's endpoints, the OTLP port, the datasource URLs — is
-set by the entrypoint to loopback addresses. Do not override them unless you are
-splitting the stack back out.
+### Do not set these
+
+`PROMETHEUS_URL`, `LOKI_URL`, `TEMPO_URL`, `PROMETHEUS_REMOTE_WRITE_ENDPOINT`,
+`TEMPO_ENDPOINT`, `OTLP_HTTP_PORT` and every `GF_AUTH_*` are set by the image and the
+entrypoint to the loopback addresses this topology uses. `PORT` is Railway's.
+
+Overriding any of them is only correct when splitting the stack back out — see the
+appendix.
 
 ## 4. Who can open telemetry.vectorbea.com
 
@@ -206,6 +236,40 @@ This is the one step that cannot be done from the repo.
 4. On the OAuth **consent screen**, leave the publishing status as **Testing** and add
    `susmit.b1@gmail.com` as a test user. This is a second, independent layer: Google
    itself then refuses everyone else before Grafana is ever reached.
+
+### Before OAuth is configured: which password is it asking for?
+
+If you have not set `GRAFANA_OAUTH_CLIENT_ID` yet, `telemetry.vectorbea.com` shows a
+plain **username and password form**. That form is **Grafana's own local login**. It is
+not Google, there is no "Sign in with Google" button yet, and a Google password will
+never work in it.
+
+| | |
+|---|---|
+| Username | `admin` |
+| Password | the value you set for `GF_SECURITY_ADMIN_PASSWORD` |
+
+**Do not type your Google password there.** It would be sent to your own Grafana
+container, which has no business receiving it — and it will fail anyway, which is how
+people end up trying it several times.
+
+The startup log says which mode you are in, in as many words:
+
+```
+[grafana] GRAFANA_OAUTH_CLIENT_ID unset — local admin login only.
+[grafana] Sign in with username 'admin' and the value of GF_SECURITY_ADMIN_PASSWORD.
+[grafana] This form is Grafana's own — it is NOT Google, and a Google password will
+[grafana] never work here.
+```
+
+Once the OAuth variables are set, **the password form disappears entirely** and is
+replaced by a Google button — that is `GF_AUTH_DISABLE_LOGIN_FORM`, set automatically.
+From then on the only way in is the allow-list.
+
+> Labelling the form itself would be better than a log line, and is not possible:
+> `[auth] login_hint` / `password_hint` are still in Grafana 11.2's `defaults.ini` but
+> are not read by the login page. Verified — the variables reach the process and
+> `/api/admin/settings` reports both as null.
 
 ### What each failure looks like
 
@@ -291,19 +355,49 @@ on **both** `api-kotlin` and `worker-kotlin`, in **both** environments.
 
 ## 6. The read-only analytics role
 
-The Product and Workspace-support dashboards query `analytics_events` directly. Grafana
-accepts arbitrary SQL from anyone who can edit a panel, so this connection must not be
-able to write.
+### No tables to create
+
+**Nothing in this work adds a table, a column or a migration.** The Product and
+Workspace-support dashboards read `analytics_events`, which has existed since
+`V032__telemetry_schema.sql`; every column they use — `occurred_at`,
+`event_category`, `event_name`, `environment`, `workspace_id`, `run_id`,
+`workflow_id` — is already there.
+
+Nor does the scheduled-job work: `job_last_success_timestamp_seconds` and its
+companions are in-process Prometheus series, not rows. There is deliberately no
+`job_runs` table, because a job that stops running also stops writing its own status
+row, and a table that only proves health while the thing is healthy proves nothing.
+
+So the whole database step is **one role**, and the database is the Flyway Postgres the
+API uses — not the Supabase `vectorbea` schema, which is dead in every environment.
+
+### The role
+
+Grafana accepts arbitrary SQL from anyone who can edit a panel, so this connection must
+not be able to write.
 
 ```sql
 CREATE ROLE grafana_ro LOGIN PASSWORD '…';
 GRANT CONNECT ON DATABASE vectorbea TO grafana_ro;
 GRANT USAGE ON SCHEMA public TO grafana_ro;
-GRANT SELECT ON analytics_events, analytics_daily_rollups TO grafana_ro;
--- Deliberately NOT `GRANT SELECT ON ALL TABLES`: the dashboards need two tables, and
--- a role that can read `connections` or `workspace_otel_exports` puts customer
--- credentials one panel away from anyone with Grafana edit rights.
+GRANT SELECT ON analytics_events TO grafana_ro;
+-- Deliberately NOT `GRANT SELECT ON ALL TABLES`. One table is all the dashboards
+-- read; a role that can also read `connections` or `workspace_otel_exports` puts
+-- customer credentials one panel away from anyone with Grafana edit rights.
+--
+-- `analytics_daily_rollups` is NOT granted, because nothing queries it today. Add it
+-- the day a panel needs it, rather than pre-granting against a use that may never
+-- arrive.
 ```
+
+### One thing to keep aligned
+
+The Product dashboard's `$env` values come from `SELECT DISTINCT environment FROM
+analytics_events`; every other dashboard's come from the `environment` label the agents
+stamp from `VECTORBEA_ENV`. Both use `dev` and `prod`, so they line up — but they are
+two independent sources, and a third value appearing in one will not appear in the
+other. `analytics_events.environment` also permits `stage`, which the metric side has
+no equivalent for.
 
 ## 7. Verify
 

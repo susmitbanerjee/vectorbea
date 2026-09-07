@@ -509,6 +509,54 @@ export function useBuilderStore(graph: BuilderGraph) {
 
 export const NODE_SIZE = { width: NODE_W, height: NODE_H };
 
+/* ── A TEAM NODE IS BIGGER, AND ITS SIZE IS NOT FREE ──────────────────────────
+   A team draws its roster and the delegation between members ON THE NODE, which
+   needs room a 200x76 cell does not have. Both dimensions are constrained,
+   though, and not by taste:
+
+   The lattice invariant (see layout.ts and __tests__/builder-layout.test.ts) is
+   that the PITCH — a node's size plus dagre's separation — must be a multiple of
+   LATTICE, or consecutive nodes round in opposite directions and a laid-out row
+   develops a visible 16px sawtooth. The separations are fixed at
+   `ranksep = 16*19 - 200 = 104` and `nodesep = 16*8 - 76 = 52`, so any other
+   node size has to satisfy:
+
+     (width  + 104) % 16 == 0   →  width  ≡ 200 (mod 16), i.e. 8 mod 16
+     (height +  52) % 16 == 0   →  height ≡  76 (mod 16), i.e. 12 mod 16
+
+   296 = 200 + 96 and 204 = 76 + 128 both hold, and so does 332 = 76 + 256. They
+   are the reason those particular numbers appear below rather than round ones.
+   Changing them means re-deriving against those two congruences. */
+const TEAM_W = 296;
+const TEAM_H_SMALL = 204;
+const TEAM_H_LARGE = 332;
+
+/** Roster size past which the team node needs a second band of member chips. */
+const TEAM_COMPACT_ROSTER = 3;
+
+/**
+ * The drawn size of one node.
+ *
+ * Read by the renderer, by dagre, by the alignment tools and by the drag guides,
+ * so that all four agree. They did not have to before, because every node was
+ * the same size — which is exactly why a second size has to be threaded through
+ * rather than special-cased in the one place it is drawn: an alignment tool that
+ * still believed every node was 76px tall would align a team's bottom edge to a
+ * line 128px above where the bottom edge actually is.
+ */
+export function nodeSize(node: { kind?: string; config?: Record<string, unknown> }): {
+  width: number;
+  height: number;
+} {
+  if (node.kind !== "agent_team") return NODE_SIZE;
+  const roster = node.config?.roster;
+  const members = Array.isArray(roster) ? roster.length : 0;
+  return {
+    width: TEAM_W,
+    height: members > TEAM_COMPACT_ROSTER ? TEAM_H_LARGE : TEAM_H_SMALL,
+  };
+}
+
 /** Every node reachable downstream of the given ids, including them. */
 export function downstreamOf(ids: string[], edges: BuilderEdge[]): string[] {
   const seen = new Set(ids);

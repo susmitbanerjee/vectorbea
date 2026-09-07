@@ -9,8 +9,16 @@ package com.vectorbea.worker.agents.orchestration
  * prompt, because a prompt is documentation and not enforcement.
  *
  * Defaults come from the environment so an operator can tighten them without a
- * deploy, and are overridable per node. There is no `agent_team` node until P10,
- * so node config is the only per-team source that exists today.
+ * deploy, and are overridable per node.
+ *
+ * The `agent_team` node now exists on the canvas (P10), and the builder writes
+ * these keys directly — see `apps/web/src/lib/workflows/team.ts`, which mirrors
+ * [TeamConfig.parse] field for field. The canvas ALSO checks the statically
+ * checkable §9 guards at design time: a delegation cycle, a chain deeper than
+ * [maxDepth], a member the entry cannot reach, and a roster larger than the
+ * plan allows. None of that replaces anything here — a graph can be saved under
+ * one plan and run under another, so these ceilings remain the enforcement and
+ * the canvas is only the chance to say no while the author is still in the room.
  */
 data class TeamLimits(
     /** Depth of the delegation chain. A root activation is depth 0. */

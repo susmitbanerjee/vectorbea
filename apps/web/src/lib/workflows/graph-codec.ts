@@ -63,7 +63,7 @@ export interface StoredGraph {
 }
 
 const KNOWN_KINDS = new Set<NodeKind>([
-  "trigger", "agent", "llm", "tool", "branch", "parallel",
+  "trigger", "agent", "agent_team", "llm", "tool", "branch", "parallel",
   "merge", "wait", "approval", "checkpoint", "output", "end",
 ]);
 
@@ -84,6 +84,12 @@ const KIND_ALIASES: Record<string, NodeKind> = {
   mcp_tool: "tool", grpc_tool: "tool", slack: "tool", builtin_email: "tool",
   email: "tool", crm: "tool", action: "tool", transform: "tool",
   iterative_agent: "agent", model: "llm", generate: "llm",
+  /* The worker accepts both spellings (`NodeType.fromString`), so the canvas
+     must read both. Falling through to `tool` — the default for an unknown
+     type — would have drawn somebody's team as a tool call and then SAVED it
+     as one, because the next `toStoredGraph` writes whatever kind is on the
+     node. An unrecognised team is a destroyed team, not a mislabelled one. */
+  team: "agent_team", crew: "agent_team", multi_agent: "agent_team",
   condition: "branch", decision: "branch", if: "branch", switch: "branch",
   fan_out: "parallel", split: "parallel",
   join: "merge", fan_in: "merge",

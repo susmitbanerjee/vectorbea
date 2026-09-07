@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import {
-  MarketingPageShell, Section, P, Lead, H3, Bullets, KeyPoints, Callout, Faq, Term,
+  MarketingPageShell, Section, P, Lead, Availability, H3, Bullets, KeyPoints, Callout, Faq, Term,
 } from "@/components/marketing/content";
 import { createMetadata, articleSchema, faqSchema } from "@/lib/seo";
 import { getUseCase, pageBySlug, pathForSlug, getUseCasePath } from "@/lib/marketing/pages";
@@ -111,7 +111,7 @@ export default function Page() {
         <KeyPoints
           items={[
             <><Term>Immutable event history.</Term> Every tool call, LLM response, retry and approval is recorded and inspectable.</>,
-            <><Term>Replay any run.</Term> Reproduce a run from its history to debug a failure deterministically.</>,
+            <><Term>Replay a run.</Term> Reproduce it from its recording to debug a failure without calling providers again.</>,
             <><Term>Live tokens and cost.</Term> Usage is tracked as the run executes, so spend is visible per run — not a monthly surprise.</>,
             <><Term>Retry visibility.</Term> See where a node backed off and retried, and how it eventually resolved.</>,
           ]}
@@ -120,6 +120,23 @@ export default function Page() {
           The event history that lets a run resume after failure is the same history you read to debug it. One durable
           record does double duty: recovery and observability.
         </Callout>
+      </Section>
+
+      <Section title="What these claims require">
+        {/* AUDIT: this page says "replay" six times. Qualifying each mention
+            would be accurate and unreadable, and an unreadable qualification is
+            skimmed past — which leaves the reader as misinformed as none at
+            all. One strip, stated once, is read. */}
+        <Availability items={[            <>
+              <Term>Replay</Term> — re-executing a run against its recording, with no provider calls
+              and no cost — is included on Pro and above, not on Free. It also needs a run whose
+              model calls were recorded; the API refuses rather than quietly executing it live.
+            </>,
+          <>
+            The run timeline, the per-node inputs and outputs, root-cause attribution and the token
+            and cost figures are on every plan, including Free. Only the re-execution is gated.
+          </>,
+        ]} />
       </Section>
 
       <Section eyebrow="FAQ" title="AI workflow observability — FAQ">

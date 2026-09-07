@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import {
-  MarketingPageShell, Section, P, Lead, H3, KeyPoints, Callout, CompareTable, Faq, Term,
+  MarketingPageShell, Section, P, Lead, Availability, H3, KeyPoints, Callout, CompareTable, Faq, Term,
 } from "@/components/marketing/content";
 import { createMetadata, articleSchema, faqSchema } from "@/lib/seo";
 import { comparisonBySlug, pageBySlug, pathForSlug, comparisonPath } from "@/lib/marketing/pages";
@@ -93,14 +93,14 @@ export default function Page() {
         <P>
           Vectorbea is a managed control plane for long-running, agentic workflows. Rather than a library you assemble
           and host, it operates the durable execution layer for you: every node checkpoints, failures retry and resume,
-          approvals suspend and continue, and every run has an immutable, replayable history with token and cost
-          visibility.
+          approvals suspend and continue, and every run has an immutable history with token and cost visibility that
+          can be re-executed against its own recording on the paid plans.
         </P>
         <KeyPoints
           items={[
             "Durable execution and resume-from-checkpoint as the default, operated for you.",
             "Per-node retries with backoff, and human approval gates that don't pin a worker.",
-            "Immutable event history you can replay, plus live tokens and cost per run.",
+            "An immutable event history, plus live tokens and cost per run. Replaying one against the recording is a paid feature.",
             "A visual canvas to compose and observe multi-step workflows.",
           ]}
         />
@@ -115,7 +115,7 @@ export default function Page() {
             ["Where it runs", "In your own process/runtime", "Operated platform with its own workers"],
             ["Durability", "Via checkpointer backends you configure", "Built-in: every node checkpoints; runs resume automatically"],
             ["Failure handling", "You implement retry/resume around the graph", "Per-node retries, backoff and resume as defaults"],
-            ["Observability", "Bring your own / LangChain tooling", "Built-in run timeline, replay, tokens and cost"],
+            ["Observability", "Bring your own / LangChain tooling", "Built-in run timeline, tokens and cost on every plan; replay on Pro and above"],
             ["Best when", "You want full control of agent logic in code", "You want managed durability + operational visibility"],
           ]}
         />
@@ -132,6 +132,32 @@ export default function Page() {
           LangGraph is a strong way to build agent logic. Vectorbea is a way to run agent workflows durably in
           production. Choosing one doesn&apos;t rule out the other — many teams will want both.
         </Callout>
+      </Section>
+
+      {/* AUDIT: the claims above are worded strongly because they are
+          true of the product. Some of them are not true of every PLAN, and
+          two are not true of a deployment that has not switched them on.
+          Qualifying each mention inline would be accurate and unreadable —
+          and an unreadable qualification gets skimmed, which leaves the
+          reader exactly as misinformed as none at all. One strip, in the
+          same place on every page, is read once and believed. */}
+      <Section title="Before you compare on our word">
+        <Availability tone="plan" items={[
+            <>
+              <Term>Replay</Term> — re-executing a run against its recording, with no provider calls
+              and no cost — is on Pro and above, not on Free. It also needs a run whose model calls
+              were recorded; the API refuses rather than quietly executing it live and billing for it.
+            </>,
+            <>
+              <Term>Agent teams</Term> — a roster whose members delegate to each other under a depth
+              limit — are built and ship behind a runtime switch that is off by default. Several
+              agents as independent steps in one workflow is a different thing, and it works today.
+            </>,
+            <>
+              There is no <Term>SLA</Term> and no published uptime figure, and we hold no SOC 2 or
+              ISO 27001 certification. If any of those decides your purchase, the answer today is no.
+            </>,
+        ]} />
       </Section>
 
       <Section eyebrow="FAQ" title="Vectorbea and LangGraph — FAQ">

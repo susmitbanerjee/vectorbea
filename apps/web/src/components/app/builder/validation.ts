@@ -2,6 +2,8 @@ import {
   resolveTool, resolveConnection, type BuilderRegistry,
 } from "./use-builder-registry";
 import { downstreamOf } from "./store";
+import { validateTeams } from "./team-validation";
+import type { Entitlements } from "~/lib/entitlements/use-entitlements";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -90,6 +92,14 @@ export function validateGraph(
    * registry; resource rules are then skipped rather than answered wrongly.
    */
   registry?: BuilderRegistry,
+  /**
+   * What the WORKSPACE's plan allows.
+   *
+   * Optional for the same reason [registry] is: "your plan does not include
+   * this" is a claim about the workspace, and answering it from an unresolved
+   * fetch would condemn a correctly-sized team while the request was in flight.
+   */
+  plan?: Entitlements,
 ): Issue[] {
   const issues: Issue[] = [];
   const off = new Set(disabled);
@@ -318,6 +328,12 @@ export function validateGraph(
     }
   }
 
+  /* Teams are validated in their own module: the rules are about a graph INSIDE
+     a node — a roster and the delegation relation over it — and folding twenty
+     of them into this loop would bury the ten that are about the canvas graph.
+     They produce the same `Issue` shape and land in the same sorted list. */
+  issues.push(...validateTeams(live, disabled, registry, plan));
+
   // Errors first, then by category, so the list is read top-down as a work queue.
   const order: Record<IssueCategory, number> = { structural: 0, binding: 1, resource: 2, policy: 3 };
   return issues.sort((a, b) =>
@@ -389,6 +405,34 @@ export interface ValiditySummary {
   warnings: number;
   /** Publishable: no errors. Warnings never block. */
   valid: boolean;
+}
+
+/**
+ * Issues that REFUSE A SAVE, as opposed to the ones that only warn.
+ *
+ * ── WHY ALMOST NOTHING BLOCKS ───────────────────────────────────────────────
+ * Continuous validation is deliberately non-blocking: a workflow mid-
+ * construction is invalid by definition, and a builder that refuses to save
+ * while you are still building gets worked around within a day — usually by
+ * somebody keeping a second tab open with the last version that saved.
+ *
+ * A CYCLE IS THE EXCEPTION, and it is the only one. Every other error describes
+ * a graph that is incomplete: an unbound tool, a missing approver, a node
+ * nothing reaches. Save those and the run fails at that node with a clear
+ * message, which is a normal working loop. A cycle is different in kind — it
+ * describes a graph that does not TERMINATE, and the version that gets written
+ * is one the engine will accept, schedule, and then spend a budget discovering
+ * is unbounded. The cost of the mistake is not a failed node, it is a run that
+ * burns its ceiling and a bill nobody authorised.
+ *
+ * So: cycles are refused with the loop named. Everything else saves, and says
+ * so in the issue list.
+ */
+export function blockingIssues(issues: Issue[]): Issue[] {
+  return issues.filter(
+    (i) => i.severity === "error"
+      && (i.id === "cycle" || i.id.startsWith("team-cycle-")),
+  );
 }
 
 export function summarise(issues: Issue[]): ValiditySummary {

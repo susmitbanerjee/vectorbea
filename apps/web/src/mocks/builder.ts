@@ -234,6 +234,37 @@ export function makeNode(kind: NodeKind, name?: string): VersionNode {
     kind === "tool" ? { tool: "", connection: null, timeoutMs: 30_000, retry: { attempts: 3, backoff: "exponential", maxDelayMs: 8_000 } }
       : kind === "llm" ? { model: "claude-haiku-4", provider: "anthropic", temperature: 0, maxTokens: 2_048 }
         : kind === "agent" ? { model: "claude-sonnet-4", provider: "anthropic", maxSteps: 8, toolGrants: [] }
+          /*
+           * A team's default is a SHAPE, not an empty object.
+           *
+           * `TeamConfig.parse` refuses a node with no recognisable policy and a
+           * node with an empty roster — the two cases where a default would be
+           * a guess about somebody's design. So a freshly dropped team node
+           * arrives as the smallest legal shape that is also the commonest one:
+           * a supervisor, one worker, and the grant between them. Both members
+           * still need an agent picked, which the canvas says as an error.
+           *
+           * The key names and their nesting are `TeamConfig.parse`'s, not this
+           * file's taste — see `~/lib/workflows/team` for why `maxIterations`
+           * lives under `limits` while `maxTotalTokens` lives under `budget`.
+           */
+          : kind === "agent_team" ? {
+            policy: "supervisor",
+            entryAgentId: "supervisor",
+            objective: "",
+            joinPolicy: "wait_all",
+            onChildFailure: "continue",
+            roster: [
+              { agentId: "", alias: "supervisor", role: "supervisor", canDelegateTo: ["worker"] },
+              { agentId: "", alias: "worker", role: "worker", canDelegateTo: [] },
+            ],
+            limits: {
+              maxDepth: 3, maxActivations: 12, maxHandoffsPerPair: 2,
+              maxTeamDurationMs: 600_000, maxRounds: 4,
+              maxIterations: 0, maxToolCalls: 0,
+            },
+            budget: { maxTotalTokens: 0, maxCostCents: 0 },
+          }
           : kind === "trigger" ? { cron: "0 9 * * *", timezone: "UTC", overlapPolicy: "skip" }
             : kind === "branch" ? { condition: "", otherwise: "skip" }
               : kind === "parallel" ? { over: "", maxConcurrency: 8 }
@@ -250,6 +281,7 @@ export function makeNode(kind: NodeKind, name?: string): VersionNode {
 const DEFAULT_LABEL: Record<NodeKind, string> = {
   trigger: "Trigger",
   agent: "Agent",
+  agent_team: "Agent team",
   llm: "Model call",
   tool: "Tool call",
   branch: "Branch",

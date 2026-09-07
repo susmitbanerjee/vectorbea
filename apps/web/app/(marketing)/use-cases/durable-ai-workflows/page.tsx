@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import {
-  MarketingPageShell, Section, P, Lead, H3, Bullets, KeyPoints, Callout, Faq, Term,
+  MarketingPageShell, Section, P, Lead, Availability, H3, Bullets, KeyPoints, Callout, Faq, Term,
 } from "@/components/marketing/content";
 import { createMetadata, articleSchema, faqSchema } from "@/lib/seo";
 import { getUseCase, pageBySlug, pathForSlug, getUseCasePath } from "@/lib/marketing/pages";
@@ -151,7 +151,7 @@ export default function Page() {
             <><Term>Every node checkpoints as it runs.</Term> Each step&apos;s completion and output are recorded durably, so a run always has a known-good point to resume from.</>,
             <><Term>Resume from the last checkpoint.</Term> A failed tool call, a rate limit, or a worker restart picks up exactly where it left off — no work lost, no tokens re-spent.</>,
             <><Term>Automatic retries with per-node backoff.</Term> Transient failures are retried on top of persisted state instead of failing the whole workflow.</>,
-            <><Term>Immutable event history.</Term> Every tool call, LLM response, retry and approval is recorded as an event you can inspect — and replay a whole run to debug it.</>,
+            <><Term>Immutable event history.</Term> Every tool call, LLM response, retry and approval is recorded as an event you can inspect. Re-executing a whole run against that recording is available on Pro and above.</>,
             <><Term>Human approval gates.</Term> A run can suspend on a decision and resume when it&apos;s approved, without a process sitting idle in between.</>,
             <><Term>Token and cost visibility.</Term> Usage is tracked per run so durability doesn&apos;t come at the price of a black box.</>,
           ]}
@@ -173,6 +173,27 @@ export default function Page() {
           If the worker had crashed during the approval wait — or a deploy had shipped — the run would resume from the
           approval checkpoint on the next available worker. The earlier triage and pricing work is never repeated.
         </Callout>
+      </Section>
+
+      {/* AUDIT: the claims above are worded strongly because they are
+          true of the product. Some of them are not true of every PLAN, and
+          two are not true of a deployment that has not switched them on.
+          Qualifying each mention inline would be accurate and unreadable —
+          and an unreadable qualification gets skimmed, which leaves the
+          reader exactly as misinformed as none at all. One strip, in the
+          same place on every page, is read once and believed. */}
+      <Section title="What these claims require">
+        <Availability tone="plan" items={[
+            <>
+              <Term>Replay</Term> — re-executing a run against its recording, with no provider calls
+              and no cost — is on Pro and above, not on Free. It also needs a run whose model calls
+              were recorded; the API refuses rather than quietly executing it live and billing for it.
+            </>,
+            <>
+              There is no <Term>SLA</Term> and no published uptime figure, and we hold no SOC 2 or
+              ISO 27001 certification. If any of those decides your purchase, the answer today is no.
+            </>,
+        ]} />
       </Section>
 
       <Section eyebrow="FAQ" title="Durable AI workflows — FAQ">

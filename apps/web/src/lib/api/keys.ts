@@ -90,6 +90,21 @@ export const queryKeys = {
       [...queryKeys.incidents.all(s), "list", filters ?? {}] as const,
   },
 
+  /**
+   * Entitlements are WORKSPACE-scoped and environment-agnostic.
+   *
+   * Keyed off `workspace()` rather than `env()` on purpose: a plan does not
+   * change when you switch from staging to production, and keying it under the
+   * environment would refetch it on every environment switch and, worse, let
+   * two environments hold two different answers to a question that has one.
+   */
+  entitlements: {
+    all: (workspaceId: string | null) =>
+      [...queryKeys.workspace(workspaceId), "entitlements"] as const,
+    /** The public plan catalogue. Not scoped to anything — it is the same list for everyone. */
+    plans: () => ["plans"] as const,
+  },
+
   dashboard: {
     summary: (s: ScopeIds) =>
       [...queryKeys.env(s.workspaceId, s.environmentId), "dashboard", "summary"] as const,
