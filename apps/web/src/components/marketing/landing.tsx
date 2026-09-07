@@ -79,18 +79,6 @@ function Hero() {
           >
             Docs
           </Link>
-          <Link
-            href={"/pricing" as never}
-            className="font-ui text-body-sm text-fg-secondary hover:text-fg-primary rounded-sm px-2 py-1 transition-colors duration-fast outline-none focus-visible:focus-ring"
-          >
-            Pricing
-          </Link>
-          <Link
-            href={"/compare" as never}
-            className="font-ui text-body-sm text-fg-secondary hover:text-fg-primary hidden rounded-sm px-2 py-1 transition-colors duration-fast outline-none focus-visible:focus-ring sm:block"
-          >
-            Compare
-          </Link>
           {/* The ONLY visitor-dependent element on the page. Anonymous, it is
               Sign in and Start free, exactly as it has always been — the first
               landing is the same page it was. A live session swaps it for the
@@ -797,9 +785,7 @@ function Footer() {
               a procurement reviewer cannot find is a DPA that does not exist for
               the purpose it was written for. */}
           {[
-            { href: "/pricing", label: "Pricing" },
             { href: "/docs", label: "Docs" },
-            { href: "/compare", label: "Compare" },
             { href: "/use-cases", label: "Use cases" },
             { href: "/legal/terms", label: "Terms" },
             { href: "/legal/privacy", label: "Privacy" },
