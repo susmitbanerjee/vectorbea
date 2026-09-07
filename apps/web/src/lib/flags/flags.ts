@@ -93,6 +93,47 @@ const REGISTRY = {
     description: "Worker fleet health and capacity.",
     blockedBy: "None — /api/workers and /api/control/metrics both serve this.",
   },
+  /*
+   * ── THE THREE TEAM FLAGS MIRROR WORKER ENV VARS, NOT AN API GAP ───────────
+   *
+   * Every other flag here is blocked by a missing endpoint. These three are
+   * blocked by a RUNTIME SWITCH: `AgentTeamNodeExecutor` reads
+   * AGENT_TEAMS_ENABLED, `AgentNodeExecutor` reads AGENT_ACTIVATIONS_ENABLED,
+   * and both default to false. The endpoints exist; the executor refuses.
+   *
+   * The web app cannot read a worker's environment, so this is a MIRROR and not
+   * a source of truth — an operator who turns the worker's flag on must turn
+   * this one on too. That duplication is deliberate and is the cheaper of two
+   * bad options: the alternative is a canvas that offers a team node, saves it,
+   * schedules it, and fails the run with "agent teams are not enabled in this
+   * deployment" — which is a correct message arriving several minutes and one
+   * production incident too late.
+   *
+   * While these are off, the team node is VISIBLE AND DISABLED, with the reason
+   * named. Hiding it would make the product look like it does not have teams,
+   * which is a different and worse lie than "not switched on here".
+   */
+  agentTeams: {
+    default: false,
+    description: "The agent_team node — a roster, a policy, and delegation between members.",
+    blockedBy:
+      "AGENT_TEAMS_ENABLED=false in the worker. `AgentTeamNodeExecutor` fails an " +
+      "agent_team node with 'teams are switched off here' until it is true.",
+  },
+  agentDelegation: {
+    default: false,
+    description: "Per-member delegation inside a team, and the activation tree it produces.",
+    blockedBy:
+      "AGENT_ACTIVATIONS_ENABLED=false in the worker. Without activations there " +
+      "is no child to delegate TO, so a grant list is accepted and never used.",
+  },
+  otelExport: {
+    default: false,
+    description: "OpenTelemetry span export to a customer's collector.",
+    blockedBy:
+      "OTEL_TRACE_EXPORT_ENABLED=false. Spans are recorded internally either " +
+      "way; only the export to a third-party collector is behind this.",
+  },
 } as const satisfies Record<string, FlagDefinition>;
 
 interface FlagDefinition {
@@ -126,6 +167,9 @@ const ENV_OVERRIDES: Record<FlagName, string | undefined> = {
   usageForecasting: process.env.NEXT_PUBLIC_FLAG_USAGE_FORECASTING,
   nodeDebugSnapshots: process.env.NEXT_PUBLIC_FLAG_NODE_DEBUG_SNAPSHOTS,
   fleetHealth: process.env.NEXT_PUBLIC_FLAG_FLEET_HEALTH,
+  agentTeams: process.env.NEXT_PUBLIC_FLAG_AGENT_TEAMS,
+  agentDelegation: process.env.NEXT_PUBLIC_FLAG_AGENT_DELEGATION,
+  otelExport: process.env.NEXT_PUBLIC_FLAG_OTEL_EXPORT,
 };
 
 /**

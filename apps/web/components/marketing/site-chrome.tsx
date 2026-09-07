@@ -13,6 +13,7 @@ import { USE_CASES, COMPARISONS, getUseCasePath, comparisonPath } from "@/lib/ma
 
 const NAV: { href: string; label: string; external?: boolean }[] = [
   { href: "/#product", label: "Product" },
+  { href: "/pricing", label: "Pricing" },
   { href: "/use-cases", label: "Use cases" },
   { href: "/compare", label: "Compare" },
   { href: "/docs", label: "Docs" },
@@ -77,7 +78,7 @@ export function SiteFooter() {
   return (
     <footer className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#F7F8F9" }}>
       <div className="mx-auto w-full max-w-[1180px] px-4 py-14 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-2 gap-8 md:grid-cols-4 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-8 md:grid-cols-4 lg:grid-cols-6">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2.5">
               <LogoCube size={22} />
@@ -90,6 +91,7 @@ export function SiteFooter() {
 
           <FooterCol title="Product">
             <FooterLink href="/">Overview</FooterLink>
+            <FooterLink href="/pricing">Pricing</FooterLink>
             <FooterLink href="/docs">Documentation</FooterLink>
             <FooterLink href="/use-cases">Use cases</FooterLink>
             <FooterLink href="/compare">Compare</FooterLink>
@@ -111,6 +113,16 @@ export function SiteFooter() {
             <FooterLink href={SITE.blogUrl} external>Engineering blog</FooterLink>
             <FooterLink href={SITE.githubUrl} external>GitHub</FooterLink>
             <FooterLink href="/docs">Concepts</FooterLink>
+          </FooterCol>
+
+          {/* Legal is in the footer of every marketing page, not tucked behind a
+              "Company" menu. A DPA that a procurement reviewer cannot find is a
+              DPA that does not exist for the purpose it was written for. */}
+          <FooterCol title="Legal">
+            <FooterLink href="/legal/terms">Terms</FooterLink>
+            <FooterLink href="/legal/privacy">Privacy</FooterLink>
+            <FooterLink href="/legal/dpa">DPA</FooterLink>
+            <FooterLink href="/legal/subprocessors">Subprocessors</FooterLink>
           </FooterCol>
         </div>
 

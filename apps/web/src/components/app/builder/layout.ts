@@ -1,6 +1,6 @@
 import dagre from "@dagrejs/dagre";
 import type { BuilderEdge, BuilderGraph, BuilderNode } from "~/mocks/builder";
-import { NODE_SIZE } from "./store";
+import { NODE_SIZE, nodeSize } from "./store";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AUTO-LAYOUT AND ALIGNMENT
@@ -53,7 +53,10 @@ export function autoLayout(nodes: BuilderNode[], edges: BuilderEdge[]): BuilderG
   });
 
   for (const n of nodes) {
-    g.setNode(n.node.id, { width: NODE_SIZE.width, height: NODE_SIZE.height });
+    // Per node, not the constant: a team node is taller, and telling dagre
+    // otherwise packs the rank below it into the space the team occupies.
+    const size = nodeSize(n.node);
+    g.setNode(n.node.id, { width: size.width, height: size.height });
   }
   for (const e of edges) {
     // Dagre cannot rank a cycle. Skipping the back-edge lays the rest out
@@ -75,11 +78,12 @@ export function autoLayout(nodes: BuilderNode[], edges: BuilderEdge[]): BuilderG
     nodes: nodes.map((n) => {
       const laid = g.node(n.node.id);
       if (!laid) return n;
+      const size = nodeSize(n.node);
       return {
         ...n,
         // Dagre centres nodes; the canvas positions by top-left corner.
-        x: snap(laid.x - NODE_SIZE.width / 2),
-        y: snap(laid.y - NODE_SIZE.height / 2),
+        x: snap(laid.x - size.width / 2),
+        y: snap(laid.y - size.height / 2),
       };
     }),
     edges,
@@ -104,8 +108,8 @@ export function align(nodes: BuilderNode[], ids: string[], axis: AlignAxis): Bui
 
   const lefts = picked.map((n) => n.x);
   const tops = picked.map((n) => n.y);
-  const rights = picked.map((n) => n.x + NODE_SIZE.width);
-  const bottoms = picked.map((n) => n.y + NODE_SIZE.height);
+  const rights = picked.map((n) => n.x + nodeSize(n.node).width);
+  const bottoms = picked.map((n) => n.y + nodeSize(n.node).height);
 
   const target = {
     left: Math.min(...lefts),
@@ -118,13 +122,17 @@ export function align(nodes: BuilderNode[], ids: string[], axis: AlignAxis): Bui
 
   return nodes.map((n) => {
     if (!ids.includes(n.node.id)) return n;
+    // Each node's OWN size, so aligning a team's right edge to a row of
+    // ordinary nodes puts its right edge on the line rather than a point
+    // 96px past it.
+    const size = nodeSize(n.node);
     switch (axis) {
       case "left": return { ...n, x: snap(target.left) };
-      case "right": return { ...n, x: snap(target.right - NODE_SIZE.width) };
-      case "centre-x": return { ...n, x: snap(target.centreX - NODE_SIZE.width / 2) };
+      case "right": return { ...n, x: snap(target.right - size.width) };
+      case "centre-x": return { ...n, x: snap(target.centreX - size.width / 2) };
       case "top": return { ...n, y: snap(target.top) };
-      case "bottom": return { ...n, y: snap(target.bottom - NODE_SIZE.height) };
-      case "centre-y": return { ...n, y: snap(target.centreY - NODE_SIZE.height / 2) };
+      case "bottom": return { ...n, y: snap(target.bottom - size.height) };
+      case "centre-y": return { ...n, y: snap(target.centreY - size.height / 2) };
     }
   });
 }
@@ -179,13 +187,15 @@ export function guidesFor(
 ): Guide[] {
   const guides: Guide[] = [];
 
-  const mx = [moving.x, moving.x + NODE_SIZE.width / 2, moving.x + NODE_SIZE.width];
-  const my = [moving.y, moving.y + NODE_SIZE.height / 2, moving.y + NODE_SIZE.height];
+  const ms = nodeSize(moving.node);
+  const mx = [moving.x, moving.x + ms.width / 2, moving.x + ms.width];
+  const my = [moving.y, moving.y + ms.height / 2, moving.y + ms.height];
 
   for (const other of others) {
     if (other.node.id === moving.node.id) continue;
-    const ox = [other.x, other.x + NODE_SIZE.width / 2, other.x + NODE_SIZE.width];
-    const oy = [other.y, other.y + NODE_SIZE.height / 2, other.y + NODE_SIZE.height];
+    const os = nodeSize(other.node);
+    const ox = [other.x, other.x + os.width / 2, other.x + os.width];
+    const oy = [other.y, other.y + os.height / 2, other.y + os.height];
 
     for (const a of mx) {
       for (const b of ox) {
@@ -194,7 +204,7 @@ export function guidesFor(
             axis: "x",
             at: b,
             from: Math.min(moving.y, other.y) - 16,
-            to: Math.max(moving.y, other.y) + NODE_SIZE.height + 16,
+            to: Math.max(moving.y + ms.height, other.y + os.height) + 16,
           });
         }
       }
@@ -207,7 +217,7 @@ export function guidesFor(
             axis: "y",
             at: b,
             from: Math.min(moving.x, other.x) - 16,
-            to: Math.max(moving.x, other.x) + NODE_SIZE.width + 16,
+            to: Math.max(moving.x + ms.width, other.x + os.width) + 16,
           });
         }
       }

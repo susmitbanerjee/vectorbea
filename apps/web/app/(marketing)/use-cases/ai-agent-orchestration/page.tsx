@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import {
-  MarketingPageShell, Section, P, Lead, H3, Bullets, KeyPoints, Callout, Faq, Term,
+  MarketingPageShell, Section, P, Lead, Availability, H3, Bullets, KeyPoints, Callout, Faq, Term,
 } from "@/components/marketing/content";
 import { createMetadata, articleSchema, faqSchema } from "@/lib/seo";
 import { getUseCase, pageBySlug, pathForSlug, getUseCasePath } from "@/lib/marketing/pages";
@@ -116,13 +116,48 @@ export default function Page() {
             <><Term>Tools as steps.</Term> Call your own APIs and databases as nodes, with keys and secrets encrypted at rest.</>,
             <><Term>Durable underneath every step.</Term> Each node checkpoints, so a coordinated run is also a recoverable one.</>,
             <><Term>Approvals and retries in the graph.</Term> Insert human gates and per-node retry/backoff where they belong.</>,
-            <><Term>One run history.</Term> The whole orchestration — every agent, tool and branch — is one replayable timeline.</>,
+            <><Term>One run history.</Term> The whole orchestration — every agent, tool and branch — is one timeline. Replaying it against the recording is available on Pro and above.</>,
           ]}
         />
         <Callout title="Orchestration and durability go together">
           Coordinating many steps only pays off if the coordination survives failure. A durable execution layer is what
           keeps a multi-agent run from unraveling when one step goes wrong.
         </Callout>
+
+        {/* AUDIT: "multi-agent" above means several agent STEPS in one workflow,
+            which ships and runs today. It does not mean a team of agents that
+            delegate to each other — that is behind a runtime switch which is
+            off by default. A reader who assumes the second meaning has been
+            misled by the first, so the distinction is stated rather than left
+            to the demo. */}
+        <Callout title="What &ldquo;multi-agent&rdquo; means here, precisely">
+          Several agents as steps in one workflow — running in order or in parallel, passing state, each with its own
+          model, tools and budget — works today. Agent <Term>teams</Term>, where members delegate work to each other
+          under a roster and a depth limit, are built but ship behind a runtime switch that is off by default. If you
+          are evaluating us for delegation specifically, ask us where that stands before you decide.
+        </Callout>
+      </Section>
+
+      {/* AUDIT: the claims above are worded strongly because they are
+          true of the product. Some of them are not true of every PLAN, and
+          two are not true of a deployment that has not switched them on.
+          Qualifying each mention inline would be accurate and unreadable —
+          and an unreadable qualification gets skimmed, which leaves the
+          reader exactly as misinformed as none at all. One strip, in the
+          same place on every page, is read once and believed. */}
+      <Section title="What these claims require">
+        <Availability tone="flag" items={[
+            <>
+              <Term>Agent teams</Term> — a roster whose members delegate to each other under a depth
+              limit — are built and ship behind a runtime switch that is off by default. Several
+              agents as independent steps in one workflow is a different thing, and it works today.
+            </>,
+            <>
+              <Term>Replay</Term> — re-executing a run against its recording, with no provider calls
+              and no cost — is on Pro and above, not on Free. It also needs a run whose model calls
+              were recorded; the API refuses rather than quietly executing it live and billing for it.
+            </>,
+        ]} />
       </Section>
 
       <Section eyebrow="FAQ" title="AI agent orchestration — FAQ">

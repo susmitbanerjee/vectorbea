@@ -413,3 +413,43 @@ carries price, currency, interval and price model. S4 wires a provider to them:
 `plan_status` deliberately does **not** change what resolves today. Downgrading on
 a failed payment is a policy decision for S4; guessing it here would delete a
 customer's concurrency because a card expired.
+
+---
+
+## 12. Two grid entries that read as contradictions, and are not
+
+Found during the marketing claim audit (`docs/audit/MARKETING-CLAIMS-AUDIT.md`).
+Neither is a bug; both are confusing enough on a feature matrix to be worth
+writing down before somebody "fixes" one of them.
+
+### `pro` grants `max_team_size = 3` while `teams = false`
+
+The size limit is dead configuration on that plan. `GraphPlanCheck` calls
+`requireFeature(TEAMS)` *before* it compares the roster size, so a Pro workspace
+is refused at the feature and never reaches the number. The row exists because
+`EntitlementKeys.ALL` is asserted to be seeded for every plan — absence means
+"off" everywhere else, and a missing row is how a forgotten seed becomes a free
+upgrade.
+
+Raising `teams` to true for Pro is therefore a one-row change with a limit
+already sitting behind it. Lowering `max_team_size` to 0 for symmetry would
+change nothing enforced today and would remove that.
+
+### `pro` grants `delegation = true` while `teams = false`
+
+Coherent, and not obvious. Delegation is not only a team-node feature:
+`AgentNodeExecutor` opens a budget ledger when `delegationEnabled &&
+agent.canDelegateTo.isNotEmpty()`, so a plain `agent` node whose *registered*
+agent carries a roster delegates without any team node existing. Pro buys that;
+it does not buy the `agent_team` node.
+
+`GraphPlanCheck` reflects the same split: it requires `DELEGATION` when a team
+node's roster contains a grant, and requires `TEAMS` for the node itself. The two
+are checked separately because they are separately purchasable.
+
+### The consequence for the pricing page
+
+Both rows appear on the published matrix with the numbers as seeded, because
+hiding a row that the API enforces is how a page starts disagreeing with a guard.
+`__tests__/pricing-consistency.test.ts` compares every published cell against
+these migrations and fails the build on drift.

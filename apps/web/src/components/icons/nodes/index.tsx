@@ -31,6 +31,26 @@ export function AgentMark({ size, weight, ...rest }: IconComponentProps) {
   );
 }
 
+/**
+ * agent_team — three cells and the arrow between two of them.
+ *
+ * Deliberately built from the agent mark rather than from a group-of-people
+ * glyph: a team here is not a group of users, it is several agent cells and a
+ * DELEGATION relation over them, and the arrow is the half that distinguishes
+ * a team from three unrelated agents sitting next to each other.
+ */
+export function AgentTeamMark({ size, weight, ...rest }: IconComponentProps) {
+  return (
+    <Mark size={size} weight={weight} {...rest}>
+      <path d="M4 3.5h6.5V9L8.5 11H2.5V5.5Z" />
+      <path d="M15.5 3.5H22V9L20 11h-6.5V5.5Z" />
+      <path d="M9.5 14.5H16V20l-2 2H7.5v-5.5Z" />
+      <path d="M10.8 7.2h2.6" />
+      <path d="M12.4 12.2v1.6" />
+    </Mark>
+  );
+}
+
 /** llm — a radiating point. Generation from a single source. */
 export function LlmMark({ size, weight, ...rest }: IconComponentProps) {
   return (
@@ -145,12 +165,13 @@ export function EndMark({ size, weight, ...rest }: IconComponentProps) {
 }
 
 export type NodeType =
-  | "trigger" | "agent" | "llm" | "tool" | "branch" | "parallel"
+  | "trigger" | "agent" | "agent_team" | "llm" | "tool" | "branch" | "parallel"
   | "merge" | "wait" | "approval" | "checkpoint" | "output" | "end";
 
 export const NODE_MARKS: { type: NodeType; Icon: IconComponent; meaning: string }[] = [
   { type: "trigger", Icon: TriggerMark, meaning: "A struck arc — the impulse that starts a run" },
   { type: "agent", Icon: AgentMark, meaning: "A nested cell — work containing its own reasoning" },
+  { type: "agent_team", Icon: AgentTeamMark, meaning: "Three cells and a delegation — a roster, not a crowd" },
   { type: "llm", Icon: LlmMark, meaning: "A radiating point — generation from one source" },
   { type: "tool", Icon: ToolMark, meaning: "A keyed slot — the shape a capability fits" },
   { type: "branch", Icon: BranchMark, meaning: "A divergence" },
@@ -173,6 +194,7 @@ export const NODE_MARKS: { type: NodeType; Icon: IconComponent; meaning: string 
 const CHIP_TONE: Record<NodeType, string> = {
   trigger: "bg-accent-subtle text-accent border-accent-border",
   agent: "bg-accent-subtle text-accent border-accent-border",
+  agent_team: "bg-accent-subtle text-accent border-accent-border",
   llm: "bg-accent-subtle text-accent border-accent-border",
   tool: "bg-surface-hover text-fg-secondary border-subtle",
   branch: "bg-surface-hover text-fg-secondary border-subtle",

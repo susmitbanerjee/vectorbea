@@ -130,7 +130,11 @@ function DurableRunPanel() {
 function RuntimeConsole() {
   const lines: { t: string; lvl: string; c: string; msg: string }[] = [
     { t: "09:00:01", lvl: "info", c: "#34D399", msg: "run started" },
-    { t: "09:00:02", lvl: "info", c: "#34D399", msg: "fetch-renewals ok 284ms" },
+    /* AUDIT: this line read "fetch-renewals ok 284ms". 284ms is not a
+       measurement — nobody benchmarked anything — and a number in a
+       console-shaped element is read as one. An illustration may show the
+       SHAPE of the output; it may not invent a performance figure. */
+    { t: "09:00:02", lvl: "info", c: "#34D399", msg: "fetch-renewals ok" },
     { t: "09:01:18", lvl: "ckpt", c: "#5EEAD4", msg: "checkpoint seq=14" },
     { t: "09:01:20", lvl: "warn", c: "#FBBF24", msg: "flight-api 429 retry" },
     { t: "09:01:24", lvl: "hold", c: "#67E8F9", msg: "awaiting approval" },
@@ -262,7 +266,15 @@ export function HomeContent() {
             </div>
 
             <div className="mt-7 grid gap-x-6 gap-y-2 min-[420px]:flex min-[420px]:flex-wrap min-[420px]:items-center">
-              {["Event-sourced runs", "Human approvals", "BYOK models", "Replay any run"].map((h) => (
+              {/* AUDIT: every one of these is a claim, and each is worded to be
+                  true on the plan the button beside them sells.
+
+                  "Replay any run" was neither. Replay is a paid feature — the
+                  `replay` entitlement is false on Free — and `RunRoutes.replayRun`
+                  additionally refuses a run with no recorded model calls. Two
+                  qualifications in a four-word chip is too many, so the chip
+                  states the plan and the pricing page carries the rest. */}
+              {["Event-sourced runs", "Human approvals", "BYOK models", "Replay a run — Pro and above"].map((h) => (
                 <span key={h} className="flex items-center gap-1.5 text-[13px] text-[#6B7280]">
                   <CheckCircle2 className="h-3.5 w-3.5 text-[#007F4E]" /> {h}
                 </span>
@@ -328,7 +340,12 @@ export function HomeContent() {
                 icon={<span className="flex h-7 w-7 items-center justify-center rounded-[7px]" style={{ background: "#FFFBEB", color: "#CA8A04" }}><ShieldCheck className="h-4 w-4" /></span>}
                 title="manager-approval"
                 subtitle="waits for human decision"
-                subRows={[{ icon: <ShieldCheck className="h-3.5 w-3.5" />, label: "SLA 24h" }]}
+                /* AUDIT: this said "SLA 24h". The approval node's field really is
+                   called `slaMinutes` — it is the deadline before the gate
+                   escalates — but on a marketing page, beside a durability
+                   pitch, "SLA" reads as a service level agreement, and we
+                   offer none. Same fact, unambiguous words. */
+                subRows={[{ icon: <ShieldCheck className="h-3.5 w-3.5" />, label: "escalates in 24h" }]}
                 dotColor="#CA8A04"
               />
             </BentoCard>
@@ -367,9 +384,16 @@ export function HomeContent() {
             </BentoCard>
 
             {/* Event history */}
-            <BentoCard className="lg:col-span-2" icon={Eye} title="Immutable event history" desc="Every tool call, LLM response, retry, and approval — replayable.">
+            {/* AUDIT: this said "14 events · 0 lost". The event store applies
+                back-pressure rather than dropping — but that block is BOUNDED
+                (AGENT_EVENT_BACKPRESSURE_TIMEOUT_MS), and past the deadline it
+                drops loudly and counts the drop. "0 lost" is therefore a
+                guarantee the runtime deliberately does not make, and a
+                reliability guarantee is the worst kind of claim to get wrong
+                because it is exactly what a buyer evaluates. */}
+            <BentoCard className="lg:col-span-2" icon={Eye} title="Immutable event history" desc="Every tool call, LLM response, retry and approval, appended in order and never rewritten.">
               <div className="flex items-center gap-2 font-mono text-[11px] text-[#6B7280]">
-                <GitBranch className="h-3.5 w-3.5 text-[#9CA3AF]" /> 14 events · 0 lost
+                <GitBranch className="h-3.5 w-3.5 text-[#9CA3AF]" /> 14 events · append-only
               </div>
             </BentoCard>
           </div>
@@ -411,6 +435,62 @@ export function HomeContent() {
             <Link href="/use-cases" className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#007F4E] hover:underline">
               Browse all use cases <ArrowRight className="h-3.5 w-3.5" />
             </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* ── WHAT THIS ACTUALLY DOES BETTER ────────────────────────────────
+          AUDIT FINDING: the strongest things this product has were the least
+          marketed. The site led on durability — which every durable-execution
+          vendor leads on — and buried the four capabilities a buyer cannot get
+          from a framework:
+
+            · root-cause attribution, so "why did this fail" has an answer;
+            · resume ACROSS a human approval, not just across a crash;
+            · a budget tree, where a ceiling is a terminal state and not a bill;
+            · multi-agent with enforced guards rather than a prompt.
+
+          Most agent platforms cannot show a customer why a run failed. That is
+          the differentiator, and it was in none of the copy. Every claim in this
+          section is shipped and on by default; the one that is not is named as
+          such rather than left in the list. */}
+      <section className="w-full border-t" style={{ borderColor: "#E0E3E6", background: "#F7F8F9" }}>
+        <div className="mx-auto w-full max-w-[1180px] px-4 py-16 sm:px-6 sm:py-20 lg:px-8 2xl:max-w-[1360px]">
+          <MonoLabel>Where this is actually different</MonoLabel>
+          <h2 className="mt-3 max-w-[24ch] text-[28px] font-bold leading-[1.08] tracking-[-0.03em] sm:text-[38px] lg:text-[44px]">
+            Most agent platforms cannot tell you why a run failed.
+          </h2>
+          <p className="mt-4 max-w-[62ch] text-[15px] leading-[1.65] text-[#4B5563]">
+            A log tells you what happened. It does not tell you which step caused it, what that step
+            was actually given, or what it had already spent. Four things here answer that, and they
+            are the reason to pick this over a framework you host yourself.
+          </p>
+
+          <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2">
+            <Differentiator
+              icon={Eye}
+              title="Root cause, not a log"
+              body="Open a failed run and the Debug tab names the node that caused it — with the inputs it resolved, the payload it sent, the provider's answer, and how the failure was classified. A retry that succeeded on the second attempt is drawn as one node with two attempts, not as a mystery."
+              proof="Every plan, including Free."
+            />
+            <Differentiator
+              icon={ShieldCheck}
+              title="Resume across a person, not just across a crash"
+              body="An approval gate parks the run durably. Nothing holds a worker while it waits, the wait is not charged as agent time, and the decision resumes from the checkpoint before the gate. A three-day approval costs three days of waiting and nothing else."
+              proof="Every plan. The deadline before a gate escalates, and what it does then, are yours to set."
+            />
+            <Differentiator
+              icon={Zap}
+              title="A budget that is a ceiling, not an invoice"
+              body="Tokens and cost are bounded per step and per team, and a child is never allocated more than its parent has left. Breaching a ceiling is not a failure — the run ends in a distinct terminal state that names the limit it hit, which is a sentence you can act on rather than a number on a bill."
+              proof="Every plan."
+            />
+            <Differentiator
+              icon={Bot}
+              title="Multi-agent with guards, not with hope"
+              body="Several agents in one workflow, each with its own model, tool grants and budget, works today. Teams whose members delegate to each other add a roster grant checked in runtime code, a depth limit, a repeated-handoff stop and a wall clock — because a roster stated in a prompt is documentation, not enforcement."
+              proof="Agent steps: every plan. Teams and delegation: built, and behind a runtime switch that is off by default."
+            />
           </div>
         </div>
       </section>
@@ -482,6 +562,38 @@ function BentoCard({
       <h3 className="mt-3 text-[15px] font-bold tracking-[-0.01em]">{title}</h3>
       <p className="mt-1.5 flex-1 text-[13px] leading-[1.55] text-[#6B7280]">{desc}</p>
       {children && <div className="mt-3 border-t pt-3" style={{ borderColor: "#ECEEEF" }}>{children}</div>}
+    </div>
+  );
+}
+
+/**
+ * One differentiator.
+ *
+ * `proof` is not decoration and is not optional: every card in this section
+ * states which plans it is true on, in the card. A section arguing that we are
+ * the honest option cannot be the one place a reader has to go looking.
+ */
+function Differentiator({
+  icon: Icon, title, body, proof,
+}: {
+  icon: typeof ShieldCheck;
+  title: string;
+  body: string;
+  proof: string;
+}) {
+  return (
+    <div className="flex flex-col rounded-[14px] border bg-white p-5 sm:p-6" style={{ borderColor: "#E0E3E6" }}>
+      <span
+        className="flex h-9 w-9 items-center justify-center rounded-[9px]"
+        style={{ background: "#E6F4EF", border: "1px solid #9CCFBB", color: "#007F4E" }}
+      >
+        <Icon className="h-[18px] w-[18px]" strokeWidth={1.8} />
+      </span>
+      <h3 className="mt-3.5 text-[17px] font-bold tracking-[-0.01em]">{title}</h3>
+      <p className="mt-2 flex-1 text-[14px] leading-[1.65] text-[#4B5563]">{body}</p>
+      <p className="mt-4 border-t pt-3 font-mono text-[11.5px] leading-[1.5] text-[#6B7280]" style={{ borderColor: "#ECEEEF" }}>
+        {proof}
+      </p>
     </div>
   );
 }

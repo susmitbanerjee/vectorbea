@@ -22,7 +22,9 @@ import { CommentLayer } from "./comments";
 import { useBuilderStore, type BuilderAction, type BuilderState } from "./store";
 import { useApi } from "~/lib/api/api-provider";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { validateGraph, summarise } from "./validation";
+import { validateGraph, summarise, blockingIssues } from "./validation";
+import { EntitlementProvider, useEntitlements } from "~/lib/entitlements/use-entitlements";
+import { useLastRun } from "./use-last-run";
 import { autoLayout, snap } from "./layout";
 import { useKeyboardGraph } from "./keyboard-graph";
 import { useWorkflowGraph, type WorkflowGraphData } from "./use-workflow-graph";
@@ -71,6 +73,7 @@ export function BuilderView({ workflowId }: { workflowId: string }) {
   const workflow: BuilderWorkflow = { id: data.workflow.id, name: data.workflow.name };
 
   return (
+    <EntitlementProvider>
     <BuilderRegistryProvider>
     <ReactFlowProvider>
       {/* THE BLINK AND THE REVERTED EDITS.
@@ -100,6 +103,7 @@ export function BuilderView({ workflowId }: { workflowId: string }) {
       />
     </ReactFlowProvider>
     </BuilderRegistryProvider>
+    </EntitlementProvider>
   );
 }
 
@@ -139,11 +143,39 @@ function BuilderInner({
   /* The registry is memoised by its provider and changes only when one of its
      queries resolves, so this does not re-validate on every drag frame. */
   const registry = useBuilderRegistry();
+  /* The workspace's plan. Memoised by its provider and changing only when the
+     entitlements query resolves, so it is safe in this dependency list — the
+     same property `registry` has, and for the same reason. */
+  const plan = useEntitlements();
   const issues = React.useMemo(
-    () => validateGraph(state.nodes, state.edges, state.disabled, registry),
-    [state.nodes, state.edges, state.disabled, registry],
+    () => validateGraph(state.nodes, state.edges, state.disabled, registry, plan),
+    [state.nodes, state.edges, state.disabled, registry, plan],
   );
   const summary = React.useMemo(() => summarise(issues), [issues]);
+
+  /**
+   * The one class of error that refuses a save.
+   *
+   * See `blockingIssues` for why it is only cycles. The important part is that
+   * the refusal names the loop — "the graph contains a cycle" with the nodes in
+   * it, or "researcher → writer → researcher" for a roster — rather than saying
+   * the save failed. A refusal somebody cannot act on is worse than no refusal,
+   * because it removes the workaround as well as the mistake.
+   */
+  const blocking = React.useMemo(() => blockingIssues(issues), [issues]);
+
+  /* Read through refs by `saveGraph`, which sits above both of these because it
+     is part of the run flow and they are part of the viewport and validation
+     flows. A dependency array is evaluated DURING the render pass, so naming
+     `reveal` there from a callback declared before it is a ReferenceError
+     rather than a stale closure — the failure is immediate and total, which is
+     the one thing worse than reordering two unrelated sections. `graphRef`
+     further down exists for a version of the same reason. */
+  const blockingRef = React.useRef(blocking);
+  blockingRef.current = blocking;
+  const revealRef = React.useRef<(nodeId: string) => void>(() => {});
+
+  const lastRun = useLastRun(workflow.id);
 
   /* Saving creates a new workflow version, so edits remain explicitly dirty
      until the user presses Save. This also keeps multiple quick graph edits in
@@ -180,6 +212,37 @@ function BuilderInner({
    */
   const [triggering, setTriggering] = React.useState<null | "test" | "run" | "debug">(null);
 
+  /**
+   * Save, unless the graph contains a loop.
+   *
+   * ── THE REFUSAL IS HERE AND NOT IN THE BUTTON ───────────────────────────
+   * Save is reachable from three places — the button, ⌘S, and the start of
+   * every run — and a run in particular saves FIRST so that what executes is
+   * what is on screen. Guarding only the button would leave the two paths that
+   * matter most able to write a cyclic version, and the run path would then
+   * schedule it.
+   */
+  const saveGraph = React.useCallback(async (): Promise<boolean> => {
+    const blocked = blockingRef.current;
+    if (blocked.length > 0) {
+      const issue = blocked[0];
+      toast.error(issue.title, { description: `${issue.detail} ${issue.fix}` });
+      if (issue.nodeId) {
+        dispatch({ type: "select", ids: [issue.nodeId] });
+        revealRef.current(issue.nodeId);
+      }
+      return false;
+    }
+    const saved = await data.save({
+      nodes: graphRef.current.nodes,
+      edges: graphRef.current.edges,
+    });
+    if (saved) dispatch({ type: "markSaved" });
+    return saved;
+    // `data` is rebuilt each render; `save` is the only field read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.save, dispatch]);
+
   const trigger = React.useCallback(async (
     kind: "test" | "run" | "debug",
     start: () => Promise<{ runId: string }>,
@@ -191,15 +254,11 @@ function BuilderInner({
     try {
       // Save first, so the run executes the graph the user is looking at.
       if (graphRef.current.dirty) {
-        const saved = await data.save({
-          nodes: graphRef.current.nodes,
-          edges: graphRef.current.edges,
-        });
+        const saved = await saveGraph();
         if (!saved) {
           toast.error(data.saveError ?? "The version could not be saved, so the run was not started.");
           return;
         }
-        dispatch({ type: "markSaved" });
       }
 
       const { runId } = await start();
@@ -214,11 +273,7 @@ function BuilderInner({
     } finally {
       setTriggering(null);
     }
-    // `data` is rebuilt each render; the two fields used are read through it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    triggering, data.save, data.saveError, dispatch, router,
-  ]);
+  }, [triggering, saveGraph, data.saveError, router]);
 
   const handleTest = React.useCallback(() => {
     void trigger(
@@ -267,6 +322,7 @@ function BuilderInner({
     if (!rendered) return;
     flow.fitView({ nodes: [rendered], duration: 220, padding: 1.6, maxZoom: 1.2, minZoom: 0.5 });
   }, [flow]);
+  revealRef.current = reveal;
 
   const centreOfViewport = React.useCallback(() => {
     const rect = shellRef.current?.getBoundingClientRect();
@@ -515,11 +571,8 @@ function BuilderInner({
         onTogglePresentation={() => setPresentation((v) => !v)}
         onToggleFullscreen={toggleFullscreen}
         fullscreen={fullscreen}
-        onSave={() => {
-          void data.save({ nodes: state.nodes, edges: state.edges }).then((saved) => {
-            if (saved) dispatch({ type: "markSaved" });
-          });
-        }}
+        onSave={() => { void saveGraph(); }}
+        lastRun={lastRun.run ? { id: lastRun.run.id, status: lastRun.run.status } : null}
         onTest={handleTest}
         onSimulate={() => setSimulating(true)}
         onRun={handleRun}

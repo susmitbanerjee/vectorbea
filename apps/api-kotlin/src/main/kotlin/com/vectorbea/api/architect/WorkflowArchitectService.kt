@@ -685,6 +685,29 @@ class WorkflowArchitectService(
                 triggerConfig = mapOf<String, Any>("type" to ((plan["trigger"] as? Map<*, *>)?.get("type") ?: "manual")),
             ))
 
+            /*
+             * ── POINT THE WORKFLOW AT THE VERSION ────────────────────────────
+             *
+             * `createVersion` inserts a row into `workflow_versions` and nothing
+             * else; `workflows.current_version_id` is a separate write, which
+             * `WorkflowRoutes.createVersion` performs and this path did not. The
+             * result was a workflow that looked complete on every list screen —
+             * it has a graph, it has a version — and refused every trigger with
+             * "has no current version publish a version first", because
+             * `RunRoutes` and `DebugRoutes` both resolve the version to execute
+             * from that column and only that column.
+             *
+             * Nothing the user could do in the product fixed it: the Architect
+             * is the one creation path that never opens the builder, so the save
+             * that would have set the pointer never happened. Every AI-generated
+             * workflow was unrunnable from birth.
+             *
+             * Written BEFORE `saveWorkflowIds` so a failure here fails the build
+             * loudly rather than recording a session that points at a workflow
+             * that cannot run.
+             */
+            workflowRepo.setCurrentVersion(workflow.id, session.workspaceId, version.id)
+
             repo.saveWorkflowIds(session.id, workflow.id, version.id)
 
             // Generate rich animation steps with real IDs

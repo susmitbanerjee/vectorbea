@@ -6,7 +6,9 @@ import { cn } from "~/lib/cn";
 import { cellPath } from "~/components/app/ribbon/geometry";
 import { NODE_MARKS } from "~/components/icons/nodes";
 import { ProviderLogo } from "~/components/ui/provider-logo";
-import { NODE_SIZE } from "./store";
+import { NODE_SIZE, nodeSize } from "./store";
+import { TeamDiagram } from "./team-diagram";
+import { readTeamConfig, POLICY_INFO, joinPolicyLabel, depthCounts, longestChain } from "~/lib/workflows/team";
 import type { BoundResource, NodeChrome } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 import type { NodeKind } from "~/mocks/domain";
@@ -66,6 +68,7 @@ export interface WorkflowNodeData extends Record<string, unknown> {
 const CHIP: Record<NodeKind, string> = {
   trigger: "bg-accent-subtle text-accent border-accent-border",
   agent: "bg-accent-subtle text-accent border-accent-border",
+  agent_team: "bg-accent-subtle text-accent border-accent-border",
   llm: "bg-accent-subtle text-accent border-accent-border",
   tool: "bg-accent-subtle text-accent border-accent-border",
   checkpoint: "bg-accent-subtle text-accent border-accent-border",
@@ -156,8 +159,13 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
   const mark = NODE_MARKS.find((m) => m.type === node.kind);
   const Mark = mark?.Icon;
 
-  const w = NODE_SIZE.width;
-  const h = compact ? 40 : NODE_SIZE.height;
+  const isTeam = node.kind === "agent_team";
+  const size = nodeSize(node);
+  const w = size.width;
+  /* A team collapses to the ordinary compact bar. Below 60% zoom the member
+     chips are 6px of illegible grey, and 200px of them costs the same paint
+     time as the label somebody can actually read. */
+  const h = compact ? 40 : size.height;
 
   return (
     <div
@@ -208,64 +216,79 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
         />
       </svg>
 
-      <div className={cn("relative flex h-full min-w-0 items-center gap-2", compact ? "px-2" : "px-2.5")}>
-        {/* Type mark on its tinted chip. */}
-        <span
-          className={cn(
-            "grid shrink-0 place-items-center rounded-xs border",
-            compact ? "size-6" : "size-7",
-            CHIP[node.kind],
-          )}
-        >
-          {Mark ? <Mark size={compact ? 13 : 15} aria-hidden="true" /> : null}
-        </span>
-
-        <div className="flex min-w-0 flex-1 flex-col justify-center leading-tight">
-          <span className="font-ui text-body-sm text-fg-primary truncate">{node.name}</span>
-
-          {!compact ? (
-            <>
-              {resource ? (
-                <span className="flex min-w-0 items-center gap-1">
-                  {resource.provider ? (
-                    <ProviderLogo
-                      provider={resource.provider}
-                      connected={resource.connected}
-                      size={9}
-                      decorative
-                      className="!size-4 shrink-0 !rounded-xs"
-                    />
-                  ) : null}
-                  <span className="font-code text-mono-sm text-fg-muted truncate">{resource.label}</span>
-                </span>
-              ) : (
-                <span className="font-ui text-caption text-fg-disabled truncate">
-                  {node.kind === "branch" && !node.config.condition ? "No condition set"
-                    : node.kind === "approval" && !node.config.approverGroup ? "No approver group"
-                      : mark?.meaning.split(" — ")[0] ?? node.kind}
-                </span>
+      <div
+        className={cn(
+          "relative flex h-full min-w-0 gap-2",
+          isTeam && !compact ? "flex-col items-stretch py-2" : "items-center",
+          compact ? "px-2" : "px-2.5",
+        )}
+      >
+        {/* A team draws its own body — a roster and the delegation between
+            its members — because its failure modes are properties of that
+            graph's shape and nothing shaped like two lines of text can show
+            them. Everything else uses the standard mark/label/status body. */}
+        {isTeam && !compact ? (
+          <TeamBody node={node} width={w - 20} />
+        ) : (
+          <>
+            <span
+              className={cn(
+                "grid shrink-0 place-items-center rounded-xs border",
+                compact ? "size-6" : "size-7",
+                CHIP[node.kind],
               )}
+            >
+              {Mark ? <Mark size={compact ? 13 : 15} aria-hidden="true" /> : null}
+            </span>
 
-              {/* Status row: the non-default policies, the gate warning, the
-                  commit glyph. Silent when everything is ordinary. */}
-              <span className="flex min-w-0 items-center gap-1.5">
-                {chrome.retry ? <Chip title={`Retry policy: ${chrome.retry} attempts`}>{chrome.retry}</Chip> : null}
-                {chrome.timeout ? <Chip title={`Timeout: ${chrome.timeout}`}>{chrome.timeout}</Chip> : null}
-                {chrome.commits ? (
-                  <span className="text-status-success" title="Commits a checkpoint">
-                    <CommitGlyph />
+            <div className="flex min-w-0 flex-1 flex-col justify-center leading-tight">
+              <span className="font-ui text-body-sm text-fg-primary truncate">{node.name}</span>
+
+              {!compact ? (
+                <>
+                  {resource ? (
+                    <span className="flex min-w-0 items-center gap-1">
+                      {resource.provider ? (
+                        <ProviderLogo
+                          provider={resource.provider}
+                          connected={resource.connected}
+                          size={9}
+                          decorative
+                          className="!size-4 shrink-0 !rounded-xs"
+                        />
+                      ) : null}
+                      <span className="font-code text-mono-sm text-fg-muted truncate">{resource.label}</span>
+                    </span>
+                  ) : (
+                    <span className="font-ui text-caption text-fg-disabled truncate">
+                      {node.kind === "branch" && !node.config.condition ? "No condition set"
+                        : node.kind === "approval" && !node.config.approverGroup ? "No approver group"
+                          : mark?.meaning.split(" — ")[0] ?? node.kind}
+                    </span>
+                  )}
+
+                  {/* Status row: the non-default policies, the gate warning, the
+                      commit glyph. Silent when everything is ordinary. */}
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {chrome.retry ? <Chip title={`Retry policy: ${chrome.retry} attempts`}>{chrome.retry}</Chip> : null}
+                    {chrome.timeout ? <Chip title={`Timeout: ${chrome.timeout}`}>{chrome.timeout}</Chip> : null}
+                    {chrome.commits ? (
+                      <span className="text-status-success" title="Commits a checkpoint">
+                        <CommitGlyph />
+                      </span>
+                    ) : null}
+                    {chrome.precedesGate ? (
+                      <span className="text-status-waiting" title="Feeds an approval gate — work stops here for a person">
+                        <GateGlyph />
+                      </span>
+                    ) : null}
+                    <span className="font-ui text-[10px] text-fg-disabled ml-auto truncate">{style.label}</span>
                   </span>
-                ) : null}
-                {chrome.precedesGate ? (
-                  <span className="text-status-waiting" title="Feeds an approval gate — work stops here for a person">
-                    <GateGlyph />
-                  </span>
-                ) : null}
-                <span className="font-ui text-[10px] text-fg-disabled ml-auto truncate">{style.label}</span>
-              </span>
-            </>
-          ) : null}
-        </div>
+                </>
+              ) : null}
+            </div>
+          </>
+        )}
 
         {issueCount > 0 ? (
           <button
@@ -298,6 +321,100 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
         <Port type="source" position={Position.Bottom} id="error" kind={node.kind} />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * A team node's body: the roster, the delegation between its members, and the
+ * three numbers that bound it.
+ *
+ * ── WHY THE DIAGRAM IS THE NODE AND NOT AN ICON ─────────────────────────────
+ * Every other node type is fully described by "what it is" plus "what it is
+ * bound to", which fits on two lines. A team is not: it is a graph, and its
+ * failure modes — an unreachable member, a delegation cycle, a chain deeper
+ * than the limit — are properties of that graph's SHAPE. Rendering it as
+ * "Agent team · 4 members" would put every one of those behind a click, which
+ * is to say behind a decision somebody has to think to make.
+ *
+ * The three numbers underneath are the ones that end a run: depth, activations,
+ * and the cost ceiling. They are drawn even when they are defaults, because
+ * "this team has no cost ceiling" is exactly the fact that is invisible until
+ * an invoice makes it visible.
+ */
+function TeamBody({ node, width }: { node: VersionNode; width: number }) {
+  const team = React.useMemo(() => readTeamConfig(node.config), [node.config]);
+  const info = POLICY_INFO[team.policy];
+
+  /* Members with no agent picked. The diagram draws them differently — a roster
+     row that names nobody is dropped by the runtime's parser, so it is a member
+     that exists on the canvas and not in the run. */
+  const unbound = React.useMemo(
+    () => new Set(team.roster.filter((m) => !m.agentId).map((m) => m.alias)),
+    [team.roster],
+  );
+
+  const chain = React.useMemo(
+    () => (depthCounts(team.policy) ? longestChain(team).hops : 0),
+    [team],
+  );
+
+  const budget = team.budget.maxCostCents > 0
+    ? `$${(team.budget.maxCostCents / 100).toFixed(2)}`
+    : team.budget.maxTotalTokens > 0
+      ? `${Math.round(team.budget.maxTotalTokens / 1000)}k tok`
+      : "no ceiling";
+
+  return (
+    <>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="font-ui text-body-sm text-fg-primary min-w-0 flex-1 truncate">
+          {node.name}
+        </span>
+        <span
+          className="border-subtle text-fg-muted font-code shrink-0 rounded-xs border px-1 text-[9px]"
+          title={`${info.label} — ${info.summary} ${info.terminates}`}
+        >
+          {team.policy}
+        </span>
+      </div>
+
+      <TeamDiagram
+        team={team}
+        width={width}
+        height={node.kind === "agent_team" && team.roster.length > 3 ? 200 : 84}
+        unbound={unbound}
+        className="shrink-0"
+      />
+
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Chip
+          title={depthCounts(team.policy)
+            ? `Delegation is ${chain} deep against a limit of ${team.limits.maxDepth}`
+            : `A ${team.policy} transfers rather than delegates, so it does not grow the depth`}
+        >
+          {depthCounts(team.policy) ? `d${chain}/${team.limits.maxDepth}` : "flat"}
+        </Chip>
+        <Chip title={`At most ${team.limits.maxActivations} activations across the whole tree`}>
+          {team.limits.maxActivations}a
+        </Chip>
+        <Chip title={joinPolicyLabel(team.joinPolicy)}>{joinPolicyLabel(team.joinPolicy)}</Chip>
+        <span
+          className={cn(
+            "font-code ml-auto shrink-0 truncate text-[9px] tabular",
+            team.budget.maxCostCents > 0 || team.budget.maxTotalTokens > 0
+              ? "text-fg-muted"
+              : "text-status-waiting",
+          )}
+          title={
+            team.budget.maxCostCents > 0 || team.budget.maxTotalTokens > 0
+              ? "This team ends in CeilingExceeded if it spends past this."
+              : "A zero budget means NO ceiling, not a ceiling of zero. Nothing here bounds the spend."
+          }
+        >
+          {budget}
+        </span>
+      </div>
+    </>
   );
 }
 

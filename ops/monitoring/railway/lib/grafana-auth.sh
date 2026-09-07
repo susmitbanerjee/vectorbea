@@ -57,9 +57,25 @@ grafana_auth_configure() {
     # domain — a shared password is not an identity and cannot deny anyone by email.
     # Said loudly, because this is the state someone reaches by forgetting one variable.
     echo "[grafana] GRAFANA_OAUTH_CLIENT_ID unset — local admin login only." >&2
+    echo "[grafana] Sign in with username 'admin' and the value of" >&2
+    echo "[grafana] GF_SECURITY_ADMIN_PASSWORD. This form is Grafana's own — it is NOT" >&2
+    echo "[grafana] Google, and a Google password will never work here." >&2
     echo "[grafana] Access is NOT restricted by email in this mode. Do not use it on a" >&2
     echo "[grafana] public domain. See ops/monitoring/railway/README.md section 4." >&2
     export GF_AUTH_DISABLE_LOGIN_FORM="false"
+
+    # ── A note for whoever tries to improve this ──────────────────────────────
+    # The obvious fix for "someone typed their Google password into Grafana's local
+    # form" is to label the form. `[auth] login_hint` and `password_hint` look like
+    # exactly that, and they are still listed in Grafana 11.2's defaults.ini.
+    #
+    # THEY DO NOTHING. Setting GF_AUTH_LOGIN_HINT / GF_AUTH_PASSWORD_HINT was tried:
+    # the variables reach the process, and `/api/admin/settings` reports both as null
+    # while the rendered login page contains neither string. The React login form uses
+    # fixed placeholders in this version.
+    #
+    # So the guidance lives in the startup log above and in README §4, and the real
+    # fix is to configure OAuth — at which point this form is not rendered at all.
     return 0
   fi
 

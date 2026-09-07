@@ -26,7 +26,7 @@ export type RunStatus =
   | "cancelled";
 
 export type NodeKind =
-  | "trigger" | "agent" | "llm" | "tool" | "branch" | "parallel"
+  | "trigger" | "agent" | "agent_team" | "llm" | "tool" | "branch" | "parallel"
   | "merge" | "wait" | "approval" | "checkpoint" | "output" | "end";
 
 export interface RunNode {
