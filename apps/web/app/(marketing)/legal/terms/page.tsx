@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Route } from "next";
-import { LegalPage, LegalSection, LegalP, LegalList, LegalNote } from "@/components/marketing/legal";
+import { LegalPage, LegalSection, LegalP, LegalList, LegalNote } from "~/components/marketing/legal";
 import { createMetadata, SITE } from "@/lib/seo";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -57,11 +57,11 @@ export default function TermsPage() {
           </LegalP>
           <LegalP>
             The{" "}
-            <Link href={"/legal/privacy" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/legal/privacy" as Route} className="text-accent underline">
               Privacy Policy
             </Link>{" "}
             and, where you process personal data through the service, the{" "}
-            <Link href={"/legal/dpa" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/legal/dpa" as Route} className="text-accent underline">
               Data Processing Addendum
             </Link>{" "}
             form part of this agreement.
@@ -113,7 +113,7 @@ export default function TermsPage() {
           <LegalP>
             Each plan carries limits — runs, tokens, agents, concurrency and retention — published
             on the{" "}
-            <Link href={"/pricing" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/pricing" as Route} className="text-accent underline">
               pricing page
             </Link>
             . Those numbers are the values the platform enforces. Limits resolve from the billing
@@ -214,7 +214,7 @@ export default function TermsPage() {
             accept it.
           </LegalP>
           <LegalP>
-            Questions about these terms: <a href={`mailto:${SITE.contactEmail}`} className="underline" style={{ color: "#006B45" }}>{SITE.contactEmail}</a>.
+            Questions about these terms: <a href={`mailto:${SITE.contactEmail}`} className="text-accent underline">{SITE.contactEmail}</a>.
           </LegalP>
         </LegalSection>
       </div>

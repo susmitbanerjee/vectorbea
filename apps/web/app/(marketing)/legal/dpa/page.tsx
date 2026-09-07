@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Route } from "next";
-import { LegalPage, LegalSection, LegalP, LegalList, LegalNote } from "@/components/marketing/legal";
+import { LegalPage, LegalSection, LegalP, LegalList, LegalNote } from "~/components/marketing/legal";
 import { createMetadata, SITE } from "@/lib/seo";
 import { SUBPROCESSORS_REVIEWED } from "@/lib/marketing/subprocessors";
 
@@ -54,7 +54,7 @@ export default function DpaPage() {
           <LegalP>
             For your own account data — the email address you signed up with, your sign-in
             metadata — we are the controller, and the{" "}
-            <Link href={"/legal/privacy" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/legal/privacy" as Route} className="text-accent underline">
               Privacy Policy
             </Link>{" "}
             applies.
@@ -128,7 +128,7 @@ export default function DpaPage() {
           <LegalP>
             You give general authorisation for us to engage subprocessors. The current list is
             published at{" "}
-            <Link href={"/legal/subprocessors" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/legal/subprocessors" as Route} className="text-accent underline">
               /legal/subprocessors
             </Link>{" "}
             and is incorporated into this addendum by reference. It names every third party this
@@ -193,7 +193,7 @@ export default function DpaPage() {
         <LegalSection n="10" title="Contact">
           <LegalP>
             Data protection enquiries:{" "}
-            <a href={`mailto:${SITE.contactEmail}`} className="underline" style={{ color: "#006B45" }}>
+            <a href={`mailto:${SITE.contactEmail}`} className="text-accent underline">
               {SITE.contactEmail}
             </a>
             .

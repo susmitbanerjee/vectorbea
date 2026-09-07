@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Route } from "next";
-import { LegalPage, LegalSection, LegalP, LegalNote } from "@/components/marketing/legal";
+import { LegalPage, LegalSection, LegalP, LegalNote } from "~/components/marketing/legal";
 import { createMetadata, SITE } from "@/lib/seo";
 import { byCategory, CATEGORY_LABEL, SUBPROCESSORS_REVIEWED } from "@/lib/marketing/subprocessors";
 
@@ -34,11 +34,11 @@ export default function SubprocessorsPage() {
     >
       <LegalP>
         This list is incorporated into the{" "}
-        <Link href={"/legal/dpa" as Route} className="underline" style={{ color: "#006B45" }}>
+        <Link href={"/legal/dpa" as Route} className="text-accent underline">
           Data Processing Addendum
         </Link>
         . We give at least 30 days&apos; notice before adding to it. To be notified, write to{" "}
-        <a href={`mailto:${SITE.contactEmail}`} className="underline" style={{ color: "#006B45" }}>
+        <a href={`mailto:${SITE.contactEmail}`} className="text-accent underline">
           {SITE.contactEmail}
         </a>
         .
@@ -60,15 +60,18 @@ export default function SubprocessorsPage() {
               </LegalNote>
             ) : null}
 
-            <div className="overflow-x-auto rounded-[12px] border bg-white" style={{ borderColor: "#E0E3E6" }}>
+            {/* Tokens, not hex: this page moved onto the current design system
+                with the rest of the legal set, and a table still painted in the
+                previous palette is exactly the seam a reader notices. */}
+            <div className="border-subtle bg-surface-raised overflow-x-auto rounded-md border">
               <table className="w-full min-w-[700px] border-collapse text-left">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid #E0E3E6" }}>
+                  <tr className="border-subtle border-b">
                     {["Subprocessor", "What it does", "What it receives", "Where"].map((head) => (
                       <th
                         key={head}
                         scope="col"
-                        className="px-4 py-2.5 text-[11.5px] font-semibold uppercase tracking-[0.06em] text-[#6B7280]"
+                        className="font-ui text-eyebrow text-fg-muted px-4 py-2.5 uppercase"
                       >
                         {head}
                       </th>
@@ -77,32 +80,29 @@ export default function SubprocessorsPage() {
                 </thead>
                 <tbody>
                   {group.rows.map((row) => (
-                    <tr key={row.name} style={{ borderBottom: "1px solid #ECEEEF" }}>
+                    <tr key={row.name} className="border-subtle border-b last:border-b-0">
                       <th scope="row" className="px-4 py-3 align-top font-normal">
-                        <span className="block text-[13.5px] font-medium text-[#0B0D0F]">
+                        <span className="font-ui text-body-sm text-fg-primary block">
                           {row.name}
                         </span>
                         {row.optional ? (
-                          <span
-                            className="mt-1 inline-block rounded-[5px] px-1.5 py-0.5 text-[11px]"
-                            style={{ background: "#F3F4F5", color: "#6B7280" }}
-                          >
+                          <span className="bg-surface-sunken text-fg-muted font-ui text-caption mt-1 inline-block rounded-xs px-1.5 py-0.5">
                             {row.optional}
                           </span>
                         ) : null}
                       </th>
-                      <td className="px-4 py-3 align-top text-[13px] leading-[1.55] text-[#4B5563]">
+                      <td className="font-ui text-body-sm text-fg-secondary px-4 py-3 align-top leading-snug">
                         {row.purpose}
                       </td>
-                      <td className="px-4 py-3 align-top text-[13px] leading-[1.55] text-[#4B5563]">
+                      <td className="font-ui text-body-sm text-fg-secondary px-4 py-3 align-top leading-snug">
                         {row.dataProcessed}
                         {row.note ? (
-                          <span className="mt-1 block text-[12px] leading-[1.5] text-[#9CA3AF]">
+                          <span className="font-ui text-caption text-fg-muted mt-1 block leading-snug">
                             {row.note}
                           </span>
                         ) : null}
                       </td>
-                      <td className="px-4 py-3 align-top text-[13px] leading-[1.55] text-[#6B7280]">
+                      <td className="font-ui text-body-sm text-fg-muted px-4 py-3 align-top leading-snug">
                         {row.location}
                       </td>
                     </tr>

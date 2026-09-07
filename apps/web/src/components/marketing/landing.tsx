@@ -781,17 +781,28 @@ function Footer() {
           © {new Date().getFullYear()} Vectorbea
         </Text>
         <nav className="flex flex-wrap gap-4">
-          {/* Legal is in the footer of the page people actually land on. A DPA
-              a procurement reviewer cannot find is a DPA that does not exist for
-              the purpose it was written for. */}
+          {/* WHAT IS AND IS NOT LINKED FROM HERE.
+
+              Legal stays: a DPA a procurement reviewer cannot find is a DPA that
+              does not exist for the purpose it was written for. The four pages
+              are on this design system, so following one does not walk the
+              reader out of the site mid-sentence.
+
+              `/support` is GONE. It is not a public support page — it is an
+              admin portal that redirects to sign-in and then says "Restricted
+              area" to everyone who is not the support administrator. A footer
+              link that reliably dead-ends is worse than no link.
+
+              `/use-cases` and `/compare` are gone too, for a smaller reason:
+              they still render the previous marketing chrome, and a footer is
+              the wrong place to discover that. They come back when they are
+              re-skinned. */}
           {[
             { href: "/docs", label: "Docs" },
-            { href: "/use-cases", label: "Use cases" },
             { href: "/legal/terms", label: "Terms" },
             { href: "/legal/privacy", label: "Privacy" },
             { href: "/legal/dpa", label: "DPA" },
             { href: "/legal/subprocessors", label: "Subprocessors" },
-            { href: "/support", label: "Support" },
           ].map((l) => (
             <Link
               key={l.href}

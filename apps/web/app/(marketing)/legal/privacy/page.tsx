@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { Route } from "next";
-import { LegalPage, LegalSection, LegalP, LegalList, LegalNote } from "@/components/marketing/legal";
+import { LegalPage, LegalSection, LegalP, LegalList, LegalNote } from "~/components/marketing/legal";
 import { createMetadata, SITE } from "@/lib/seo";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -46,7 +46,7 @@ export default function PrivacyPage() {
             Vectorbea provides a hosted workflow platform. For your account, we are the controller.
             For the data you put THROUGH a workflow — inputs, outputs, and anything a step reads —
             we are a processor acting on your instructions, and the{" "}
-            <Link href={"/legal/dpa" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/legal/dpa" as Route} className="text-accent underline">
               Data Processing Addendum
             </Link>{" "}
             governs.
@@ -113,7 +113,7 @@ export default function PrivacyPage() {
           </LegalP>
           <LegalP>
             Every provider we can reach is named on the{" "}
-            <Link href={"/legal/subprocessors" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/legal/subprocessors" as Route} className="text-accent underline">
               subprocessor list
             </Link>
             , alongside what is sent to each.
@@ -138,7 +138,7 @@ export default function PrivacyPage() {
             depending on the plan and the surface — and is then <strong>deleted</strong>. Deletion
             means removed from the database, not hidden behind a filter; there is no flag that brings
             it back. The exact windows are on the{" "}
-            <Link href={"/pricing" as Route} className="underline" style={{ color: "#006B45" }}>
+            <Link href={"/pricing" as Route} className="text-accent underline">
               pricing page
             </Link>
             .
@@ -171,7 +171,7 @@ export default function PrivacyPage() {
           />
           <LegalP>
             Write to{" "}
-            <a href={`mailto:${SITE.contactEmail}`} className="underline" style={{ color: "#006B45" }}>
+            <a href={`mailto:${SITE.contactEmail}`} className="text-accent underline">
               {SITE.contactEmail}
             </a>{" "}
             and we will answer within 30 days. If you are exercising a right on behalf of someone
@@ -206,7 +206,7 @@ export default function PrivacyPage() {
           <LegalP>
             We will give at least 30 days&apos; notice of a material change, by email to the account
             owner. Questions:{" "}
-            <a href={`mailto:${SITE.contactEmail}`} className="underline" style={{ color: "#006B45" }}>
+            <a href={`mailto:${SITE.contactEmail}`} className="text-accent underline">
               {SITE.contactEmail}
             </a>
             .
