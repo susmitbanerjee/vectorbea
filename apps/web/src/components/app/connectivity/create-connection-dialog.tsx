@@ -246,6 +246,8 @@ function CreateConnectionDialogBody({
   const [name, setName] = React.useState("");
   const [secret, setSecret] = React.useState("");
   const [endpoint, setEndpoint] = React.useState("");
+  const [healthPath, setHealthPath] = React.useState("");
+  const [apiKeyHeader, setApiKeyHeader] = React.useState("Authorization");
   const [readOnly, setReadOnly] = React.useState(true);
 
   /* Where the database lives and how it is reached.
@@ -280,6 +282,8 @@ function CreateConnectionDialogBody({
     setName(`${integration.name} — ${new Date().getUTCFullYear()}`);
     setSecret("");
     setEndpoint(PROVIDER_ENDPOINTS[integration.id]?.baseUrl ?? "");
+    setHealthPath("");
+    setApiKeyHeader("Authorization");
     setResult(null);
     setVerifyError(null);
     // The hosting list is per wire protocol, so a Postgres choice is meaningless
@@ -368,6 +372,10 @@ function CreateConnectionDialogBody({
       authType: apiAuthTypeFor(method),
       config: {
         ...(baseUrl ? { baseUrl } : {}),
+        ...(integration.id === "http" ? {
+          ...(healthPath.trim() ? { healthPath: healthPath.trim() } : {}),
+          ...(method === "api-key" ? { authHeaderName: apiKeyHeader.trim() || "Authorization" } : {}),
+        } : {}),
         ...(isDatabase
           ? {
               // `connectionMode` says how the CREDENTIAL WAS ENTERED, and the
@@ -389,7 +397,7 @@ function CreateConnectionDialogBody({
           : {}),
       } as Record<string, unknown>,
     };
-  }, [integration, method, endpoint, needsEndpoint, readOnly, isDatabase, pooling, hosting]);
+  }, [integration, method, endpoint, needsEndpoint, readOnly, isDatabase, pooling, hosting, healthPath, apiKeyHeader]);
 
   async function verify() {
     if (!payload) return;
@@ -499,6 +507,10 @@ function CreateConnectionDialogBody({
               endpoint={endpoint}
               onEndpoint={(next) => { setEndpoint(next); setResult(null); }}
               needsEndpoint={needsEndpoint}
+              healthPath={healthPath}
+              onHealthPath={(next) => { setHealthPath(next); setResult(null); }}
+              apiKeyHeader={apiKeyHeader}
+              onApiKeyHeader={(next) => { setApiKeyHeader(next); setResult(null); }}
               tenantHost={tenantHost}
               readOnly={readOnly}
               onReadOnly={setReadOnly}
@@ -732,6 +744,7 @@ function CredentialStep({
   integration, method, onMethod, name, onName, secret, onSecret,
   endpoint, onEndpoint, needsEndpoint, tenantHost, readOnly, onReadOnly,
   isDatabase, hosting, hostingOptions, onHosting, pooling, onPooling, detectedFromUrl,
+  healthPath, onHealthPath, apiKeyHeader, onApiKeyHeader,
 }: {
   integration: CatalogueEntry;
   method: AuthMethod;
@@ -743,6 +756,10 @@ function CredentialStep({
   endpoint: string;
   onEndpoint: (value: string) => void;
   needsEndpoint: boolean;
+  healthPath: string;
+  onHealthPath: (value: string) => void;
+  apiKeyHeader: string;
+  onApiKeyHeader: (value: string) => void;
   tenantHost: { label: string; placeholder: string; help: string } | null;
   readOnly: boolean;
   onReadOnly: (value: boolean) => void;
@@ -798,6 +815,15 @@ function CredentialStep({
           </Field>
         </ModalSection>
       ) : null}
+
+      {integration.id === "http" ? <ModalSection title="HTTP connection test" description="Test a read-only endpoint before saving this connection. Request bodies, input mappings and pagination are configured on HTTP tools.">
+        <Field label="Test endpoint path" description="Appended to the base URL. Use an endpoint that requires authentication, such as /me, to check your credential. Leave blank for a reachability check.">
+          <Input value={healthPath} onChange={(event) => onHealthPath(event.target.value)} placeholder="/me" className="font-code text-mono-sm" />
+        </Field>
+        {method === "api-key" ? <Field label="API key header" description="Use the header required by your API, such as X-API-Key. Authorization sends the key as a Bearer token.">
+          <Input value={apiKeyHeader} onChange={(event) => onApiKeyHeader(event.target.value)} placeholder="X-API-Key" className="font-code text-mono-sm" />
+        </Field> : null}
+      </ModalSection> : null}
 
       {isDatabase && hostingOptions.length > 0 ? (
         <>

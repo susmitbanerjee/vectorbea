@@ -59,9 +59,10 @@ const STEPS: ModalStep[] = [
 ];
 
 export function ImportSpecDialog({
-  open, onOpenChange, onImported,
+  open, onOpenChange, onImported, presetConnectionId,
 }: {
   open: boolean;
+  presetConnectionId?: string | null;
   onOpenChange: (open: boolean) => void;
   onImported?: () => void;
 }) {
@@ -74,7 +75,7 @@ export function ImportSpecDialog({
   const [url, setUrl] = React.useState("");
   const [document, setDocument] = React.useState("");
   const [fileName, setFileName] = React.useState<string | null>(null);
-  const [connectionId, setConnectionId] = React.useState<string | null>(null);
+  const [connectionId, setConnectionId] = React.useState<string | null>(presetConnectionId ?? null);
   const [result, setResult] = React.useState<contracts.SpecImportResult | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [search, setSearch] = React.useState("");

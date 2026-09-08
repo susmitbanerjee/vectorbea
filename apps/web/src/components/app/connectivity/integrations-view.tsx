@@ -15,6 +15,9 @@ import { Checkbox } from "~/components/ui/choice";
 import { ProviderLogo } from "~/components/ui/provider-logo";
 import { getConnections } from "@/lib/repository";
 import { CreateConnectionDialog } from "./create-connection-dialog";
+import { CreateToolDialog } from "../registry/create-tool-dialog";
+import { ImportSpecDialog } from "../registry/import-spec-dialog";
+import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
 import type { Connection } from "@/types/connections";
 import {
   INTEGRATIONS, integrationById, INTEGRATION_CATEGORY_LABEL, AUTH_LABEL,
@@ -35,6 +38,10 @@ const CATEGORIES: (IntegrationCategory | "all")[] = [
 ];
 
 export function IntegrationsView() {
+  const { canBuild } = useWorkspaceRole();
+  const [httpAction, setHttpAction] = React.useState<"create" | "import" | null>(null);
+  const [httpConnectionId, setHttpConnectionId] = React.useState<string | null>(null);
+  const [pendingHttpAction, setPendingHttpAction] = React.useState<"create" | "import" | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -158,16 +165,41 @@ export function IntegrationsView() {
         integration={open}
         onClose={() => setParams({ integration: null })}
         onConnect={(id) => setParams({ integration: null, connect: id })}
+        canBuild={canBuild}
+        onHttpAction={(action) => {
+          const existing = connections.filter((connection) => providerMatches("http", connection.provider));
+          if (existing.length === 0) {
+            setPendingHttpAction(action);
+            setParams({ integration: null, connect: "http" });
+          } else {
+            setHttpConnectionId(existing.length === 1 ? existing[0]!.id : null);
+            setParams({ integration: null });
+            setHttpAction(action);
+          }
+        }}
       />
       <CreateConnectionDialog
         open={connectTo !== null}
         presetProvider={connectTo?.id ?? null}
-        onOpenChange={(next) => { if (!next) setParams({ connect: null }); }}
-        onCreated={() => {
+        onOpenChange={(next) => { if (!next) { setParams({ connect: null }); setPendingHttpAction(null); } }}
+        onCreated={(connection) => {
           void refreshConnections();
           setParams({ connect: null });
+          if (pendingHttpAction) {
+            setHttpConnectionId(connection.id);
+            setHttpAction(pendingHttpAction);
+            setPendingHttpAction(null);
+          }
         }}
       />
+      {httpAction === "create" ? <CreateToolDialog
+        open presetConnectionId={httpConnectionId}
+        onOpenChange={(next) => { if (!next) setHttpAction(null); }}
+      /> : null}
+      {httpAction === "import" ? <ImportSpecDialog
+        open presetConnectionId={httpConnectionId}
+        onOpenChange={(next) => { if (!next) setHttpAction(null); }}
+      /> : null}
     </PageContainer>
   );
 }
@@ -228,11 +260,13 @@ function Grid({ integrations, onOpen }: { integrations: IntegrationRecord[]; onO
 /* ── Detail ───────────────────────────────────────────────────────────────── */
 
 function IntegrationDetail({
-  integration, onClose, onConnect,
+  integration, onClose, onConnect, onHttpAction, canBuild,
 }: {
   integration: IntegrationRecord | null;
   onClose: () => void;
   onConnect: (id: string) => void;
+  onHttpAction: (action: "create" | "import") => void;
+  canBuild: boolean;
 }) {
   if (!integration) return null;
   const isConnected = integration.connectionNames.length > 0;
@@ -270,6 +304,15 @@ function IntegrationDetail({
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <div className="grid gap-4">
               <Text variant="body-sm" tone="secondary" className="block">{integration.description}</Text>
+              {integration.id === "http" ? <Section title="HTTP requests and API documents" help="Configure request inputs, authentication, response extraction and pagination, or generate tools from an API document.">
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="primary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("create")}>Create HTTP tool</Button>
+                  <Button variant="secondary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("import")}>Import OpenAPI / Postman</Button>
+                </div>
+                <Text variant="caption" tone="muted" className="mt-2 block">
+                  {!canBuild ? "Creating tools requires the developer role or higher." : isConnected ? "Choose a saved connection for these tools." : "First save and test your connection; then continue to the request editor or importer."}
+                </Text>
+              </Section> : null}
 
               {isConnected ? (
                 <Section title="Existing connections">

@@ -286,12 +286,13 @@ const STEPS: ModalStep[] = [
 
 export interface CreateToolDialogProps {
   open: boolean;
+  presetConnectionId?: string | null;
   onOpenChange: (open: boolean) => void;
   /** Called after a successful create, with the persisted tool. */
   onCreated?: (tool: contracts.Tool) => void;
 }
 
-export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDialogProps) {
+export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnectionId }: CreateToolDialogProps) {
   const api = useApi();
   const scope = useScope();
   const queryClient = useQueryClient();
@@ -305,7 +306,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const [description, setDescription] = React.useState("");
   const [type, setType] = React.useState<ToolType>("http");
   const [httpSpec, setHttpSpec] = React.useState<http.SpecDocument>(http.emptySpec);
-  const [connectionId, setConnectionId] = React.useState<string | null>(null);
+  const [connectionId, setConnectionId] = React.useState<string | null>(presetConnectionId ?? null);
 
   const [method, setMethod] = React.useState<string>("GET");
   const [url, setUrl] = React.useState("");
