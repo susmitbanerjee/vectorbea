@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { HttpSpecEditor } from "./http-spec-editor";
+import * as http from "~/lib/tools/http-spec";
 import { useQueryClient } from "@tanstack/react-query";
 import type { contracts } from "@vectorbea/shared";
 import {
@@ -93,8 +95,6 @@ const RISK_TIERS: { value: RiskLevel; label: string; markerClassName: string; bl
   { value: "high", label: "High", markerClassName: "bg-risk-high", blurb: "Writes to a system of record, or spends money. Approval on by default." },
   { value: "critical", label: "Critical", markerClassName: "bg-risk-critical", blurb: "Irreversible, or externally visible. Always gated, always audited." },
 ];
-
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 /** So a catalogue default can raise the risk tier without ever lowering one. */
 const RISK_ORDER: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
@@ -274,15 +274,6 @@ function missingBoundParam(
   return null;
 }
 
-function validUrl(value: string): boolean {
-  try {
-    const url = new URL(value.trim());
-    return (url.protocol === "http:" || url.protocol === "https:") && url.host !== "";
-  } catch {
-    return false;
-  }
-}
-
 const EMPTY_SCHEMA = '{\n  "type": "object",\n  "properties": {}\n}';
 
 const STEPS: ModalStep[] = [
@@ -313,6 +304,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [type, setType] = React.useState<ToolType>("http");
+  const [httpSpec, setHttpSpec] = React.useState<http.SpecDocument>(http.emptySpec);
   const [connectionId, setConnectionId] = React.useState<string | null>(null);
 
   const [method, setMethod] = React.useState<string>("GET");
@@ -519,7 +511,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   const trimmedName = name.trim();
   const parsedExtra = parseObject(extraConfig);
-  const parsedInput = parseObject(inputSchema);
+  const customHttp = type === "http" && !operation;
+  const parsedInput = customHttp ? http.inputSchema(httpSpec) : parseObject(inputSchema);
   const parsedOutput = parseObject(outputSchema);
 
   /**
@@ -544,7 +537,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   const config = React.useMemo<Record<string, unknown>>(() => {
     const base: Record<string, unknown> = { ...(parsedExtra ?? {}) };
-    if (type === "http") {
+    if (type === "http" && operation) {
       base.method = method;
       base.url = operation ? operationUrl : url.trim();
       if (operation) {
@@ -598,8 +591,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       ? "Pick what this tool does. Every option is one call to the connected account."
       : type === "http" && operation
         ? missingBoundParam(operation, operationValues, bindingOf)
-        : type === "http" && !validUrl(url)
-          ? "Enter the full endpoint URL, including https://."
+        : type === "http" && http.specProblems(httpSpec).length > 0
+          ? http.specProblems(httpSpec)[0]!
       : type === "database" && !handWritten && generated.problem
         ? generated.problem
         : type === "database" && !sqlTemplate.trim()
@@ -631,6 +624,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const reachableIndex = firstBroken === -1 ? STEPS.length - 1 : firstBroken;
 
   const complete = reachableIndex === STEPS.length - 1;
+  const validationKey = JSON.stringify({ type, connectionId, config, httpSpec, inputSchema, outputSchema });
+  React.useEffect(() => { setValidation(null); }, [validationKey]);
 
   /* ── Validate against the API, without writing ──────────────────────────── */
   async function validate() {
@@ -638,7 +633,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     setValidation(null);
     try {
       const result = await api.tools.testDraft(
-        { type, connectionId, config, inputSchema: parsedInput ?? {}, outputSchema: parsedOutput ?? {} },
+        { type, connectionId, config, ...(type === "http" && !operation ? { httpSpec } : {}), inputSchema: parsedInput ?? {}, outputSchema: parsedOutput ?? {} },
         { workspaceId: scope.workspaceId, environmentId: null },
       );
       setValidation({ valid: result.valid, message: result.message });
@@ -662,6 +657,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
           type,
           connectionId,
           config,
+          ...(type === "http" && !operation ? { httpSpec } : {}),
           inputSchema: parsedInput ?? {},
           outputSchema: parsedOutput ?? {},
           riskLevel: risk,
@@ -689,7 +685,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     // Deferred so the exit animation does not play against a blanked form.
     const timer = window.setTimeout(() => {
       setStep(0);
-      setName(""); setDescription(""); setType("http"); setConnectionId(null);
+      setName(""); setDescription(""); setType("http"); setConnectionId(null); setHttpSpec(http.emptySpec());
       setMethod("GET"); setUrl(""); setSqlTemplate(""); setWrites(false);
       setExtraConfig("{}"); setInputSchema(EMPTY_SCHEMA); setOutputSchema(EMPTY_SCHEMA);
       setBuilder(EMPTY_BUILDER); setHandWritten(false);
@@ -717,7 +713,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
         : index === 1 ? (connectionId ? connections.find((c) => c.id === connectionId)?.name : requiresConnection ? undefined : "None needed")
           : index === 2
         ? (operation ? operation.label
-          : type === "http" ? `${method} endpoint`
+          : type === "http" ? `${http.method(httpSpec)} endpoint`
             : type === "database" ? "SQL template" : undefined)
             : index === 3 ? `${RISK_TIERS.find((tier) => tier.value === risk)?.label} risk${requiresApproval ? " · gated" : ""}`
               : undefined,
@@ -951,36 +947,11 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
               ) : null}
 
               {type === "http" && (!usesCatalogue || operationId === CUSTOM_REQUEST) ? (
-                <ModalSection title="Endpoint" description="The request the adapter issues on every call.">
-                  <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                    <Field label="Method" required>
-                      <Select
-                        value={method}
-                        onValueChange={setMethod}
-                        options={HTTP_METHODS.map((verb) => ({ value: verb, label: verb }))}
-                      />
-                    </Field>
-                    <Field
-                      label="URL"
-                      required
-                      description="Template placeholders like {customerId} are bound from the input schema."
-                      error={url.trim() !== "" && !validUrl(url) ? "That is not a valid http or https URL." : undefined}
-                    >
-                      <Input
-                        mono
-                        value={url}
-                        onChange={(event) => setUrl(event.target.value)}
-                        placeholder="https://api.example.com/customers/{customerId}"
-                        spellCheck={false}
-                      />
-                    </Field>
-                  </div>
-                  {method !== "GET" ? (
-                    <ModalNote tone="warning" title={`${method} is a write`}>
-                      Consider a risk tier of high or above so the approval gate is on by default.
-                    </ModalNote>
-                  ) : null}
-                </ModalSection>
+                <HttpSpecEditor
+                  value={httpSpec}
+                  onChange={setHttpSpec}
+                  connectionBaseUrl={String(selectedConnection?.config?.baseUrl ?? selectedConnection?.config?.url ?? "")}
+                />
               ) : null}
 
               {type === "database" ? (
@@ -1068,13 +1039,13 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 }
               >
                 <div className="grid gap-3 lg:grid-cols-2">
-                  <Field label="Input schema">
+                  <Field label="Input schema" description={customHttp ? "Generated from the HTTP inputs above. Bound values are excluded." : undefined}>
                     <CodeEditor
-                      value={inputSchema}
+                      value={customHttp ? JSON.stringify(parsedInput, null, 2) : inputSchema}
                       onValueChange={setInputSchema}
                       minRows={8}
                       aria-label="Input schema"
-                      disabled={schemasAreGenerated}
+                      disabled={schemasAreGenerated || customHttp}
                     />
                   </Field>
                   <Field label="Output schema">
@@ -1174,7 +1145,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                   </SummaryRow>
                   {type === "http" ? (
                     <SummaryRow label="Endpoint" mono onEdit={() => setStep(2)}>
-                      {method} {url.trim()}
+                      {operation ? `${method} ${operationUrl}` : http.requestSummary(httpSpec)}
                     </SummaryRow>
                   ) : null}
                   {type === "database" ? (

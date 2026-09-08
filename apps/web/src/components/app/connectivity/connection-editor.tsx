@@ -18,6 +18,7 @@ export function ConnectionEditor({ id, scope, onUpdated }: { id: string; scope: 
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
+  const [testResult, setTestResult] = React.useState<string | null>(null);
   const [name, setName] = React.useState("");
   const [config, setConfig] = React.useState("{}");
   const [hosts, setHosts] = React.useState("");
@@ -37,11 +38,13 @@ export function ConnectionEditor({ id, scope, onUpdated }: { id: string; scope: 
 
   React.useEffect(() => { let alive = true; void load().catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not load connection.")).finally(() => { if (alive) setLoading(false); }); return () => { alive = false; }; }, [load]);
 
-  async function save() {
-    if (!name.trim()) { toast.error("Connection name is required."); return; }
+  React.useEffect(() => { setTestResult(null); }, [name, config, hosts, paths, schemas, tables, secret]);
+
+  async function save(): Promise<boolean> {
+    if (!name.trim()) { toast.error("Connection name is required."); return false; }
     let parsed: Record<string, unknown>;
     try { const value: unknown = JSON.parse(config); if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(); parsed = value as Record<string, unknown>; }
-    catch { toast.error("Configuration must be a valid JSON object."); return; }
+    catch { toast.error("Configuration must be a valid JSON object."); return false; }
     setSaving(true);
     try {
       await api.connections.update(id, {
@@ -49,25 +52,51 @@ export function ConnectionEditor({ id, scope, onUpdated }: { id: string; scope: 
         allowedSchemas: split(schemas), allowedTables: split(tables), ...(secret.trim() ? { plaintextSecret: secret.trim() } : {}),
       }, scope);
       setSecret(""); await load(); await onUpdated(); toast.success("Connection updated.");
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not update connection."); }
+      return true;
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Could not update connection."); return false; }
     finally { setSaving(false); }
   }
 
   async function test() {
     setTesting(true);
-    try { const result = await api.connections.test(id, scope); result.status === "connected" ? toast.success(`${result.message} · ${result.latencyMs}ms`) : toast.error(`${result.errorCode ?? "TEST_FAILED"}: ${result.message}`); await onUpdated(); }
-    catch (error) { toast.error(error instanceof Error ? error.message : "Connection test failed."); }
+    setTestResult(null);
+    try {
+      if (!await save()) return;
+      const result = await api.connections.test(id, scope);
+      setTestResult(`${result.status === "connected" ? "Endpoint reachable" : result.errorCode ?? "Test failed"}: ${result.message} · ${result.latencyMs}ms`);
+      await onUpdated();
+    }
+    catch (error) { setTestResult(error instanceof Error ? error.message : "Connection test failed."); }
     finally { setTesting(false); }
   }
 
   if (loading) return <div className="border-subtle bg-surface-raised h-40 animate-pulse rounded-lg border" />;
+  let httpConfig: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(config);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) httpConfig = parsed as Record<string, unknown>;
+  } catch { /* The configuration field reports invalid JSON on save. */ }
+  function setHttpField(key: string, value: string) {
+    if (httpConfig) setConfig(JSON.stringify({ ...httpConfig, [key]: value }, null, 2));
+  }
   return (
-    <div className="grid gap-3">
+    <fieldset disabled={saving || testing} className="grid min-w-0 gap-3">
       <section className="border-subtle bg-surface-raised rounded-lg border p-4">
         <Text variant="heading-sm" tone="max">Connection settings</Text>
         <Text variant="caption" tone="muted" className="mt-1 block">{meta.type} · {meta.provider} · {meta.authType}</Text>
         <div className="mt-4 grid gap-4">
           <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+          {meta.type === "http" && httpConfig ? <>
+            <Field label="Base URL" description="The API base used by HTTP tools. Known providers use their standard endpoint for connection tests.">
+              <Input value={String(httpConfig.baseUrl ?? httpConfig.base_url ?? httpConfig.url ?? "")} onChange={(e) => setHttpField("baseUrl", e.target.value)} placeholder="https://api.example.com" />
+            </Field>
+            <Field label="Test endpoint path" description="For custom providers, use a read-only endpoint that requires authentication, such as /me. Known providers supply their own test endpoint.">
+              <Input value={String(httpConfig.healthPath ?? "")} onChange={(e) => setHttpField("healthPath", e.target.value)} placeholder="/me" />
+            </Field>
+            {meta.authType === "api_key" ? <Field label="API key header" description="Custom provider header. Authorization sends a Bearer token.">
+              <Input value={String(httpConfig.authHeaderName ?? httpConfig.apiKeyHeaderName ?? "")} onChange={(e) => setHttpField("authHeaderName", e.target.value)} placeholder="Authorization" />
+            </Field> : null}
+          </> : null}
           <Field label="Provider configuration" description="Non-secret runtime configuration. Credentials belong in the encrypted field below."><Textarea mono autoGrow={false} minRows={9} value={config} onChange={(e) => setConfig(e.target.value)} /></Field>
         </div>
       </section>
@@ -84,7 +113,9 @@ export function ConnectionEditor({ id, scope, onUpdated }: { id: string; scope: 
         <Text variant="heading-sm" tone="max">Encrypted credential</Text>
         <Field className="mt-4" label={meta.secretConfigured ? "Replace credential" : "Add credential"} description="Leave blank to keep the current encrypted credential."><Input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={meta.secretConfigured ? "Credential configured" : "Enter credential"} /></Field>
       </section>
-      <div className="flex justify-end gap-2"><Button variant="secondary" loading={testing} onClick={() => void test()}>Test connection</Button><Button variant="primary" loading={saving} onClick={() => void save()}>Save changes</Button></div>
-    </div>
+      <Text variant="caption" tone="muted">Save and test applies your settings and checks connectivity. HTTP tools are configured and validated in the tool registry.</Text>
+      {testResult ? <div role="status" className="border-subtle rounded-lg border p-3"><Text variant="body-sm">{testResult}</Text></div> : null}
+      <div className="flex justify-end gap-2"><Button variant="secondary" loading={testing} onClick={() => void test()}>Save and test connection</Button><Button variant="primary" loading={saving} onClick={() => void save()}>Save changes</Button></div>
+    </fieldset>
   );
 }

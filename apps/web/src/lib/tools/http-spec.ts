@@ -178,6 +178,21 @@ export function emptySpec(): SpecDocument {
   };
 }
 
+/** Model arguments follow the request mapping; author-bound values stay private. */
+export function inputSchema(spec: SpecDocument): Record<string, unknown> {
+  const visible = inputs(spec).filter((input) => input.constant == null);
+  return {
+    type: "object",
+    properties: Object.fromEntries(visible.map((input) => [input.name, {
+      type: input.type ?? "string",
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.default !== undefined ? { default: input.default } : {}),
+      ...(input.enum ? { enum: input.enum } : {}),
+    }])),
+    required: visible.filter((input) => input.required).map((input) => input.name),
+  };
+}
+
 /**
  * The placeholders a path template needs.
  *
