@@ -21,6 +21,12 @@ class NodeExecutorRegistry(
     eventStore: RunEventStore,
     dataSource: DataSource,
     /**
+     * Needed by the spec-driven HTTP path to read a connection's secret as named
+     * fields rather than as one opaque value. Null leaves that path able to call
+     * unauthenticated endpoints only.
+     */
+    secretService: com.vectorbea.worker.connector.SecretService? = null,
+    /**
      * Exactly-once guard for outbound side effects. Null in tests; production
      * always supplies it, because an at-least-once queue plus an unguarded POST
      * is a duplicate email waiting to happen.
@@ -60,7 +66,8 @@ class NodeExecutorRegistry(
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),
         // Reference executors — look up tool/agent definition from DB at runtime
         NodeType.TOOL      to ToolNodeExecutor(dataSource, connectionResolver, dbPoolManager,
-                                  eventStore, circuit = circuit),
+                                  eventStore, circuit = circuit,
+                                  secretService = secretService, sideEffects = sideEffects),
         /* The agent path matters MORE than the plain LLM node here: an agent
            loop is where one run becomes twenty provider calls, which is the
            multiplier §12.4 exists for. */

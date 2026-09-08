@@ -31,6 +31,26 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")
 
+    /*
+     * ── YAML, FOR OPENAPI IMPORT ────────────────────────────────────────────
+     *
+     * Most published OpenAPI documents are YAML — Swagger's own Petstore, and
+     * the majority of what a customer will paste a URL to. Supporting only JSON
+     * would mean the import feature works on a minority of the documents it
+     * exists for.
+     *
+     * The Jackson dataformat module rather than SnakeYAML directly: it is the
+     * same version line as the Jackson already here, produces `JsonNode`
+     * (so `$ref` resolution, the operation walk and the schema translation are
+     * one implementation over both formats rather than two), and it is where
+     * the codebase's existing Jackson pins already point.
+     *
+     * `OpenApiReader` caps the document size and disables anchor expansion
+     * beyond a bounded count before parsing — a YAML bomb is a denial of service
+     * against the importer, and the importer takes a URL from a user.
+     */
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.17.2")
+
     // Logging — SLF4J + Logback
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("ch.qos.logback:logback-classic:1.5.8")
@@ -78,7 +98,7 @@ dependencies {
 }
 
 /**
- * THREE THINGS ARE COMPILED BY BOTH SERVICES, for one reason.
+ * FOUR THINGS ARE COMPILED BY BOTH SERVICES, for one reason.
  *
  * Each is a contract between what the API writes and what the worker later
  * reads. A second implementation of any of them is a second opinion, and every
@@ -103,6 +123,14 @@ dependencies {
  *    handed the wrong JDBC driver, or no timeouts at all. See the header of
  *    DbProviders.kt for the three copies that had already drifted apart.
  *
+ *  · THE HTTP TOOL SPEC. The API GENERATES these documents from an OpenAPI or
+ *    Postman import; the worker EXECUTES them. A second reader would let the
+ *    importer emit a body encoding, an auth strategy or a pagination shape the
+ *    runtime silently ignores — and the symptom of that is a tool that saves
+ *    cleanly, validates cleanly, and sends the wrong request. Only the pure
+ *    model and its reader travel; the resolver, the transport and the auth
+ *    applier are worker-only and stay there.
+ *
  * Sharing the source is deliberate. A common module is more build machinery than
  * these files justify; copying them guarantees they drift.
  */
@@ -111,6 +139,7 @@ sourceSets {
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/crypto")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract")
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec")
         // Only the pure language files travel. ContractValidator is bound to the
         // worker's DataSource and its runtime concerns; the API has no business
         // compiling it, and pulling it in drags worker-only dependencies with it.

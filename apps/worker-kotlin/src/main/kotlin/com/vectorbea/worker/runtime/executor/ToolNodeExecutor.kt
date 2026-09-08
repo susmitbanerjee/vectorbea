@@ -49,6 +49,23 @@ class ToolNodeExecutor(
      * being called on exactly the terms an HTTP endpoint that is down does.
      */
     private val circuit: com.vectorbea.worker.net.ConnectionCircuit? = null,
+    /**
+     * Needed by the spec-driven HTTP path, for two things the legacy path never
+     * did: reading a connection's secret as a named BUNDLE (so an auth strategy
+     * can ask for `clientSecret` rather than "the secret"), and sealing a
+     * refreshed OAuth2 token into `connection_oauth_tokens`.
+     *
+     * Null keeps every existing call site compiling and degrades the spec path
+     * to what it can do without secrets — which is enough for an unauthenticated
+     * endpoint and nothing else, and says so when it is not.
+     */
+    private val secretService: com.vectorbea.worker.connector.SecretService? = null,
+    /**
+     * The exactly-once guard, so a spec-driven POST is deduplicated on redelivery
+     * exactly as `HttpNodeExecutor`'s is. Passing null disables deduplication —
+     * acceptable in unit tests, never in production.
+     */
+    private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -59,6 +76,31 @@ class ToolNodeExecutor(
         System.getenv("BUILTIN_EMAIL_MONTHLY_LIMIT")?.toIntOrNull()?.takeIf { it > 0 } ?: 15
 
     private val httpExecutor    by lazy { HttpNodeExecutor(connectionResolver, eventStore) }
+
+    /**
+     * The spec-driven HTTP resolver, for tools that carry `http_spec_json`.
+     *
+     * ── WHY TWO EXECUTORS AND NOT A REWRITE IN PLACE ────────────────────────
+     * `HttpNodeExecutor` reads loose config keys (`url`, `method`, `body`) with
+     * no declared parameter mapping, one hard-coded auth header per `auth_type`,
+     * and no response extraction. Everything currently registered is written in
+     * those terms and works. Rewriting it to read a spec would mean synthesising
+     * a spec for every existing tool at execution time — a translation layer
+     * whose failures land in a customer's run rather than in a review.
+     *
+     * So the split is on DATA, not on a flag: a tool with a spec goes to
+     * [HttpToolResolver], a tool without one goes where it always went. The old
+     * path is deleted when the last tool has a spec, and not before.
+     */
+    private val httpSpecResolver by lazy {
+        com.vectorbea.worker.tools.http.HttpToolResolver(
+            connectionResolver = connectionResolver,
+            eventStore = eventStore,
+            secretService = secretService,
+            dataSource = dataSource,
+            sideEffects = sideEffects,
+        )
+    }
 
     /** MCP, lazily: most workspaces have no MCP server and should pay nothing. */
     private val mcpExecutor by lazy {
@@ -146,7 +188,22 @@ class ToolNodeExecutor(
         val result: NodeResult = when (tool.type) {
             // Aliases for the canonical "http" type — some tools (e.g. architect-generated
             // before the type normalizer existed) may be persisted with these variants.
-            "http", "http_api", "rest_api", "api", "rest" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            "http", "http_api", "rest_api", "api", "rest" ->
+                /*
+                 * ── ONE BRANCH, DECIDED BY THE DATA ──────────────────────────
+                 *
+                 * A tool that carries `http_spec_json` executes on the resolver
+                 * that understands it; everything else executes exactly where it
+                 * did. There is no flag, no environment variable and no
+                 * per-workspace rollout switch, because all three would let the
+                 * two paths diverge for the SAME tool between one run and the
+                 * next — and "it worked yesterday" on a tool that spends money is
+                 * the failure this split exists to avoid.
+                 */
+                if (tool.httpSpecJson != null)
+                    httpSpecResolver.execute(syntheticNode, resolvedInputs, ctx)
+                else
+                    httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
             /*
              * ── DATABASE: A NAMED QUERY, OR A GATED FALLBACK ─────────────────
@@ -189,8 +246,12 @@ class ToolNodeExecutor(
             }
 
             "slack", "email", "crm" -> {
-                // Slack/Email/CRM tools are stored as HTTP tools under the hood
-                httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+                // Slack/Email/CRM tools are stored as HTTP tools under the hood,
+                // and take the same spec-or-legacy split as `http` above.
+                if (tool.httpSpecJson != null)
+                    httpSpecResolver.execute(syntheticNode, resolvedInputs, ctx)
+                else
+                    httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
             }
 
             else -> NodeResult.Failed(
@@ -634,6 +695,12 @@ class ToolNodeExecutor(
         val mcpToolName: String? = null,
         /** Locally-authored result contract. Overrides a server's annotations. */
         val resultContractJson: String? = null,
+        /**
+         * The declarative HTTP call (V064). Present means this tool executes on
+         * [com.vectorbea.worker.tools.http.HttpToolResolver]; absent means it
+         * executes on the legacy [HttpNodeExecutor], unchanged.
+         */
+        val httpSpecJson: String? = null,
     )
 
     private fun loadTool(toolId: UUID, workspaceId: UUID): ToolRow? = try {
@@ -642,7 +709,8 @@ class ToolNodeExecutor(
                 """SELECT id, name, type, connection_id, config_json,
                    risk_level, requires_approval, timeout_ms,
                    named_queries_json, allow_freeform_sql,
-                   mcp_server_connection_id, mcp_tool_name, result_contract_json
+                   mcp_server_connection_id, mcp_tool_name, result_contract_json,
+                   http_spec_json
                    FROM tools
                    WHERE id = ? AND workspace_id = ? AND status = 'active'"""
             ).use { stmt ->
@@ -672,6 +740,7 @@ class ToolNodeExecutor(
                         mcpServerConnectionId = rs.getString("mcp_server_connection_id"),
                         mcpToolName = rs.getString("mcp_tool_name"),
                         resultContractJson = rs.getString("result_contract_json"),
+                        httpSpecJson = rs.getString("http_spec_json"),
                     )
                 }
             }
@@ -704,6 +773,18 @@ class ToolNodeExecutor(
 
         // Inject connection ID from tool definition
         tool.connectionId?.let { result["connectionId"] = it }
+
+        /*
+         * The declarative spec, passed through verbatim.
+         *
+         * Everything below this line remaps legacy keys — `urlTemplate` to `url`,
+         * `bodyTemplate` to a resolved `body`, `sqlTemplate` to `query`. None of
+         * it applies to a spec-driven tool: `HttpToolResolver` reads the spec and
+         * the model's arguments, and derives the URL, the body and the headers
+         * itself. Handing it a pre-resolved body would be two layers deciding the
+         * same thing, and the one that lost would do so silently.
+         */
+        tool.httpSpecJson?.let { result["httpSpec"] = it }
 
         // Base from tool's stored config
         result.putAll(tool.configJson)

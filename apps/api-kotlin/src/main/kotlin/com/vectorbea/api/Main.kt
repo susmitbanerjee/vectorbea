@@ -401,9 +401,32 @@ fun main() {
         AgentRoutes(agentRepo, connectionRepo, cacheService, entitlementGuard).register(router)
     } else log.warn("AgentRoutes disabled — no database")
 
+    /*
+     * ── TOOLS, THEIR VERSIONS, AND THE SPEC IMPORTS THAT PROPOSE THEM ───────
+     *
+     * One `ToolVersionRepository` shared by all three, because they are three
+     * views of one rule: a tool's definition changes only through a version.
+     * `ToolRoutes` writes an `applied` one (a person edited their own tool);
+     * `ApiSpecRoutes` writes a `pending` one (nobody has read what a re-import
+     * changed); `ToolVersionRoutes` is the only thing that makes a pending one
+     * live. See V064.
+     */
+    val toolVersionRepo = ds?.let { com.vectorbea.api.repository.ToolVersionRepository(it) }
+
     if (toolRepo != null && connectionRepo != null) {
-        ToolRoutes(toolRepo, connectionRepo, cacheService).register(router)
+        ToolRoutes(toolRepo, connectionRepo, cacheService, toolVersionRepo).register(router)
     } else log.warn("ToolRoutes disabled — no database")
+
+    if (toolRepo != null && connectionRepo != null && toolVersionRepo != null && ds != null) {
+        com.vectorbea.api.routes.ApiSpecRoutes(
+            imports = com.vectorbea.api.repository.SpecImportRepository(ds),
+            tools = toolRepo,
+            versions = toolVersionRepo,
+            connections = connectionRepo,
+            dataSource = ds,
+        ).register(router)
+        com.vectorbea.api.routes.ToolVersionRoutes(toolVersionRepo, toolRepo).register(router)
+    } else log.warn("Spec import and tool versioning disabled — no database")
 
     if (workflowRepo != null) {
         WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo, entitlementGuard).register(router)

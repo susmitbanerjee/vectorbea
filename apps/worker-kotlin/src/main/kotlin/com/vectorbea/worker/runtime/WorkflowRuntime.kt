@@ -66,6 +66,16 @@ class WorkflowRuntime(
     private val stepOutputStore: StepOutputStore,
     private val workerId: String,
     connectionResolver: ConnectionResolver? = null,
+    /**
+     * Reads a connection's secret as a named BUNDLE, for the spec-driven HTTP
+     * resolver's auth strategies (`secret.clientSecret`, `secret.accessToken`),
+     * and seals refreshed OAuth2 tokens. [ConnectionResolver] already holds one
+     * privately and hands out a single opaque value; this is the same service,
+     * passed explicitly because a strategy needs to ask for a FIELD.
+     *
+     * Null degrades the spec path to unauthenticated calls, and says so.
+     */
+    secretService: com.vectorbea.worker.connector.SecretService? = null,
     dbPoolManager: ClientDbPoolManager? = null,
     private val debugWriter: DebugSnapshotWriter? = null,
     /** Idempotency guard — prevents duplicate side effects on redelivery/recovery. */
@@ -155,6 +165,7 @@ class WorkflowRuntime(
         dbPoolManager      = dbPoolManager ?: ClientDbPoolManager(),
         eventStore         = eventStore,
         dataSource         = dataSource,
+        secretService      = secretService,
         sideEffects        = sideEffects,
         circuit            = circuit,
         recorder           = recorder,

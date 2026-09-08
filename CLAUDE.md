@@ -114,7 +114,7 @@ Full baseline and migration order: `/docs/audit/CURRENT-STATE.md`.
 Design docs: docs/AGENT-HARNESS-ARCHITECTURE.md, docs/AGENT-TRACE-AND-DEBUGGER.md,
 docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md,
 docs/PLANS-AND-ENTITLEMENTS.md, docs/RETENTION.md,
-docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md.
+docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md, docs/HTTP-TOOLS.md.
 Read the relevant sections before changing runtime code. The docs explain WHY
 each guard exists; most were written after a production bug.
 
@@ -179,6 +179,17 @@ each guard exists; most were written after a production bug.
    data. Webhooks are verified over the RAW body, deduplicated on the provider's
    event id, ordered by the PROVIDER's timestamp, and an unrecognised type is
    stored and ignored — never inferred. See docs/BILLING.md.
+14. A tool's definition changes only through a VERSION. `agents.allowed_tool_ids`
+   grants a tool by uuid, so an id whose behaviour changed underneath it is a
+   grant to something nobody reviewed. A spec re-import writes `tool_versions`
+   rows in `review_state = 'pending'` and NEVER touches `tools` —
+   `ToolVersionRepository.apply` is the only writer of the live definition, it
+   takes a person, and it records who. The rule is never-mutate, not "not when
+   granted": a grant can be added a minute after an import. A credential never
+   appears in `http_spec_json` — auth strategies name FIELDS of the connection's
+   secret, and `SpecSecretScan` rejects a document that inlines one, because
+   that column is read by the list endpoint, rendered in a form, snapshotted
+   into every version and shown in re-import diffs. See docs/HTTP-TOOLS.md.
 
 ### Conventions
 

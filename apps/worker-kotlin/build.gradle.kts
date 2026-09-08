@@ -57,6 +57,35 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")
 
+    /*
+     * ── RESPONSE EXTRACTION, IN THE TWO LANGUAGES PEOPLE ACTUALLY PASTE ─────
+     *
+     * An HTTP tool declares how to cut the agent-visible document out of the
+     * response (`HttpToolSpec.Extraction`). Two engines, because the two
+     * communities do not overlap and neither expression translates: an API's own
+     * documentation quotes JSONPath, the AWS ecosystem speaks JMESPath, and
+     * supporting one would make half of all copied expressions silently wrong
+     * rather than rejected.
+     *
+     * Both are configured for the JACKSON node model in `ResponseExtractor`, not
+     * the default one:
+     *
+     *   · json-path's default provider is `JsonSmartJsonProvider`, which parses
+     *     into net.minidev maps. Every extraction would then be a second parse of
+     *     a document Jackson has already parsed, and the result would have to be
+     *     converted back before the projection layer could read it.
+     *   · Configuration.setDefaults is process-wide and set ONCE, at class init,
+     *     rather than per call. Two call sites setting different defaults is a
+     *     race whose symptom is an extraction returning the wrong node type
+     *     intermittently.
+     *
+     * Neither library evaluates arbitrary code: json-path's filter syntax is a
+     * closed predicate grammar, and it is fed expressions from a tool's stored
+     * spec, never from a model's arguments.
+     */
+    implementation("com.jayway.jsonpath:json-path:2.9.0")
+    implementation("io.burt:jmespath-jackson:0.6.0")
+
     // Logging — SLF4J + Logback
     implementation("org.slf4j:slf4j-api:2.0.13")
     implementation("ch.qos.logback:logback-classic:1.5.8")
@@ -183,6 +212,33 @@ tasks.withType<Test>().configureEach {
 
 tasks.test {
     useJUnitPlatform { excludeTags("integration", "benchmark") }
+
+    /*
+     * ── THE UNIT TIER MAY REACH ITS OWN LOOPBACK SERVERS ────────────────────
+     *
+     * `HttpToolResolverTest` asserts what goes ON THE WIRE — the body encoding,
+     * the auth header name, how many pages were fetched — against a real
+     * `com.sun.net.httpserver` on 127.0.0.1. A stubbed HttpClient would only
+     * assert that the code restates its own intent.
+     *
+     * `SsrfGuard` blocks loopback, which is correct, and
+     * `SSRF_ALLOWED_TEST_HOSTS` is its own documented exemption: exact host
+     * matches only, applied after the name block and the per-connection
+     * allow-list, and IGNORED ENTIRELY when APP_ENV=production. Setting it here
+     * cannot weaken a deployed worker — this is a Gradle test task.
+     *
+     * ── AND IT IS 127.0.0.2, NOT 127.0.0.1, ON PURPOSE ─────────────────────
+     * `SsrfGuardTest` and `HttpNodeExecutorTest` both assert that
+     * `http://127.0.0.1` IS blocked. Exempting that exact address here made the
+     * guard's own tests pass vacuously — the suite went green while proving
+     * nothing about the thing it exists to prove. The whole of 127/8 is loopback
+     * and binds identically, so the server moves and the assertions stay real.
+     *
+     * Set through the environment rather than by reflecting on `System.getenv()`
+     * from the test: JDK 17's strong encapsulation makes that silently fail,
+     * which is how a suite passes while never reaching its server at all.
+     */
+    environment("SSRF_ALLOWED_TEST_HOSTS", "127.0.0.2")
 }
 
 val integrationTest by tasks.registering(Test::class) {

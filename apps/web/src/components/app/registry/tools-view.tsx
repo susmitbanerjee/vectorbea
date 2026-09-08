@@ -23,6 +23,8 @@ import { RegistryRowActions, type RegistryActionHandlers } from "./row-actions";
 import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { useToolsData } from "./use-registry-data";
 import { CreateToolDialog } from "./create-tool-dialog";
+import { ImportSpecDialog } from "./import-spec-dialog";
+import { PendingChangesButton, ToolChangesDialog } from "./tool-changes-view";
 import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -54,6 +56,10 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
   /* Creation is URL-synced so `/tools/new` can redirect here and the dialog is
      linkable — "open the register form for me" is a link, not a set of clicks. */
   const creating = params.get("create") === "1";
+  /* Same reason: "import this API document" is a link somebody pastes into a
+     ticket, and the review queue is a place a notification points at. */
+  const importing = params.get("import") === "1";
+  const reviewing = params.get("changes") === "1";
   const detailTab = params.get("tab") ?? "overview";
 
   const sort = React.useMemo(
@@ -322,15 +328,31 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         title="Tools"
         description="Every registered tool, riskiest first — what it can do, what it is allowed to do, and how often it works."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!canBuild}
-            title={canBuild ? undefined : "Creating a tool needs the developer role or higher. Ask an owner or admin."}
-            onClick={() => setParams({ create: "1" })}
-          >
-            New tool
-          </Button>
+          <div className="flex items-center gap-2">
+            <PendingChangesButton onOpen={() => setParams({ changes: "1" })} />
+            {/* Import sits BESIDE New tool rather than inside it. Importing a
+                document is how most tools should be registered — the parameters,
+                body encoding, auth and response shape all come out correct —
+                and burying it one level down makes hand-writing the default. */}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!canBuild}
+              title={canBuild ? undefined : "Importing tools needs the developer role or higher. Ask an owner or admin."}
+              onClick={() => setParams({ import: "1" })}
+            >
+              Import from an API document
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!canBuild}
+              title={canBuild ? undefined : "Creating a tool needs the developer role or higher. Ask an owner or admin."}
+              onClick={() => setParams({ create: "1" })}
+            >
+              New tool
+            </Button>
+          </div>
         }
       />
 
@@ -391,6 +413,17 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         open={creating}
         onOpenChange={(next) => setParams({ create: next ? "1" : null })}
         onCreated={(tool) => setParams({ create: null, tool: tool.id, tab: null })}
+      />
+
+      <ImportSpecDialog
+        open={importing}
+        onOpenChange={(next) => setParams({ import: next ? "1" : null })}
+        onImported={() => void data.refetch?.()}
+      />
+
+      <ToolChangesDialog
+        open={reviewing}
+        onOpenChange={(next) => setParams({ changes: next ? "1" : null })}
       />
 
       <ToolDetail

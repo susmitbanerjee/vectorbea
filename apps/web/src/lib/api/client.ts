@@ -35,6 +35,11 @@ type Workflow = contracts.Workflow;
 type WorkflowVersion = contracts.WorkflowVersion;
 type Agent = contracts.Agent;
 type Tool = contracts.Tool;
+type ToolVersion = contracts.ToolVersion;
+type SpecImport = contracts.SpecImport;
+type SpecImportResult = contracts.SpecImportResult;
+type SpecOperation = contracts.SpecOperation;
+type SpecDiff = contracts.SpecDiff;
 type Connection = contracts.Connection;
 export interface ConnectionTestResult {
   status: "connected" | "failed" | "private_runner_required" | "whitelist_required";
@@ -561,6 +566,63 @@ export interface VectorbeaClient {
     testDraft(body: TestToolDraftBody, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    /** `GET /api/tools/:id/versions` — the definition's history. */
+    versions(id: string, scope?: Scope, options?: RequestOptions): Promise<{
+      currentVersion?: number | null; toolName: string; items: ToolVersion[];
+    }>;
+  };
+
+  /**
+   * Import an API document, and turn its operations into tools.
+   *
+   * Three steps rather than one, deliberately: importing lists nine hundred
+   * GitHub operations and creates NOTHING, and a second call creates the four
+   * somebody actually wants. An import that created nine hundred tools would
+   * have made the registry unusable in one click, with no undo.
+   */
+  toolSpecs: {
+    /**
+     * `POST /api/tool-specs/import` — fetch or accept a document.
+     *
+     * Exactly one of `url` and `document`. A URL is fetched SERVER-side (so it
+     * needs no CORS, and so the SSRF guard applies, including across redirects);
+     * `document` is for a file the person has on disk, and is bounded by the
+     * API's request-body cap rather than the larger document cap.
+     */
+    import(
+      body: { name?: string; url?: string; document?: string; connectionId?: string | null; previousImportId?: string },
+      scope?: Scope, options?: RequestOptions,
+    ): Promise<SpecImportResult>;
+    list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<SpecImport>>;
+    get(id: string, scope?: Scope, options?: RequestOptions): Promise<SpecImport>;
+    operations(
+      id: string, params?: { tag?: string; q?: string },
+      scope?: Scope, options?: RequestOptions,
+    ): Promise<{ items: SpecOperation[]; tags: string[]; total: number }>;
+    /** `GET /api/tool-specs/:id/diff` — what a re-import changed. */
+    diff(id: string, previousImportId?: string, scope?: Scope, options?: RequestOptions): Promise<SpecDiff>;
+    /**
+     * `POST /api/tool-specs/:id/tools` — selected operations become tools.
+     *
+     * An operation that ALREADY backs a tool does not overwrite it: it produces
+     * a pending version for review, in `pendingReview`. Re-selecting forty
+     * operations must not be a silent mass edit of forty granted tools.
+     */
+    createTools(
+      id: string, body: { operationKeys: string[]; connectionId?: string | null },
+      scope?: Scope, options?: RequestOptions,
+    ): Promise<contracts.SpecToolsCreated>;
+    attachConnection(id: string, connectionId: string | null, scope?: Scope, options?: RequestOptions): Promise<void>;
+  };
+
+  /** The review queue. The only place a pending definition becomes live. */
+  toolVersions: {
+    pending(scope?: Scope, options?: RequestOptions): Promise<{
+      items: contracts.PendingToolVersion[]; total: number; grantedCount: number;
+    }>;
+    get(versionId: string, scope?: Scope, options?: RequestOptions): Promise<ToolVersion>;
+    apply(versionId: string, scope?: Scope, options?: RequestOptions): Promise<{ applied: boolean; message: string }>;
+    reject(versionId: string, scope?: Scope, options?: RequestOptions): Promise<{ rejected: boolean; message: string }>;
   };
 
   connections: {
@@ -994,6 +1056,52 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<Tool>(`/api/tools/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.tool, options) }),
       delete: (id, scope, options) =>
         call<void>(`/api/tools/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      versions: (id, scope, options) =>
+        call(`/api/tools/${id}/versions`, req(scope, contracts.toolVersionList, options)),
+    },
+
+    toolSpecs: {
+      import: (body, scope, options) =>
+        call(`/api/tool-specs/import`, {
+          method: "POST", body,
+          /* A 12 MB document is fetched and parsed server-side, and GitHub's takes
+             seconds. The default timeout is written for a row read. */
+          ...req(scope, contracts.specImportResult, { timeoutMs: 120_000, ...options }),
+        }),
+      list: ({ workspaceId, environmentId, page, pageSize } = {}, options) =>
+        call(`/api/tool-specs`, req({ workspaceId, environmentId }, contracts.specImportPage, options, { page, pageSize })),
+      get: (id, scope, options) =>
+        call(`/api/tool-specs/${id}`, req(scope, contracts.specImport, options)),
+      operations: (id, params, scope, options) =>
+        call(`/api/tool-specs/${id}/operations`, req(scope, contracts.specOperationList, options, {
+          tag: params?.tag, q: params?.q,
+        })),
+      diff: (id, previousImportId, scope, options) =>
+        call(`/api/tool-specs/${id}/diff`, req(scope, contracts.specDiff, options, { previousImportId })),
+      createTools: (id, body, scope, options) =>
+        call(`/api/tool-specs/${id}/tools`, {
+          method: "POST", body,
+          ...req(scope, contracts.specToolsCreated, { timeoutMs: 120_000, ...options }),
+        }),
+      attachConnection: (id, connectionId, scope, options) =>
+        call<void>(`/api/tool-specs/${id}`, {
+          method: "PATCH", body: { connectionId }, ...req(scope, undefined, options),
+        }),
+    },
+
+    toolVersions: {
+      pending: (scope, options) =>
+        call(`/api/tool-versions/pending`, req(scope, contracts.pendingToolVersionList, options)),
+      get: (versionId, scope, options) =>
+        call(`/api/tool-versions/${versionId}`, req(scope, contracts.toolVersion, options)),
+      apply: (versionId, scope, options) =>
+        call(`/api/tool-versions/${versionId}/apply`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+      reject: (versionId, scope, options) =>
+        call(`/api/tool-versions/${versionId}/reject`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
     },
 
     connections: {

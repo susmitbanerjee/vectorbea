@@ -20,6 +20,8 @@ import { Segmented } from "~/components/ui/option-card";
 import { useApi } from "~/lib/api/api-provider";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
+import { emptySpec, specProblems as problemsIn, type SpecDocument } from "~/lib/tools/http-spec";
+import { HttpSpecEditor } from "./http-spec-editor";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE INLINE EDITORS
@@ -125,6 +127,15 @@ export function ToolEditor({
   const [config, setConfig] = React.useState("{}");
   const [inputSchema, setInputSchema] = React.useState("{}");
   const [outputSchema, setOutputSchema] = React.useState("{}");
+  /**
+   * The declarative HTTP call (V064).
+   *
+   * Null for a tool written before this existed, and for every non-HTTP
+   * adapter. That is the migration: such a tool keeps its legacy `config` keys
+   * and behaves exactly as it did, and the form below offers to adopt a
+   * definition rather than silently writing one.
+   */
+  const [httpSpec, setHttpSpec] = React.useState<SpecDocument | null>(null);
 
   React.useEffect(() => {
     let alive = true;
@@ -146,6 +157,7 @@ export function ToolEditor({
         setConfig(json(tool.config));
         setInputSchema(json(tool.inputSchema));
         setOutputSchema(json(tool.outputSchema));
+        setHttpSpec((tool.httpSpec as SpecDocument | null | undefined) ?? null);
       })
       .catch((error: unknown) => toast.error(error instanceof Error ? error.message : "Could not load tool."))
       .finally(() => { if (alive) setLoading(false); });
@@ -163,7 +175,17 @@ export function ToolEditor({
 
   const timeoutValue = Number(timeoutMs);
   const timeoutValid = Number.isInteger(timeoutValue) && timeoutValue > 0;
-  const blocked = !name.trim() || !timeoutValid || (requiresConnection && connectionId === "none");
+  /*
+   * A definition with problems cannot be saved.
+   *
+   * Mirrored server-side by `ToolRoutes.validateHttpSpec` and enforced again by
+   * the request assembler — this copy exists so the answer arrives beside the
+   * field rather than after a round trip, not because it is the one that counts.
+   */
+  const specProblems = httpSpec ? problemsIn(httpSpec) : [];
+  const blocked = !name.trim() || !timeoutValid
+    || (requiresConnection && connectionId === "none")
+    || specProblems.length > 0;
 
   async function save() {
     if (blocked) return;
@@ -182,6 +204,10 @@ export function ToolEditor({
           config: parseObject(config, "Configuration"),
           inputSchema: parseObject(inputSchema, "Input schema"),
           outputSchema: parseObject(outputSchema, "Output schema"),
+          /* Omitted entirely when there is none, rather than sent as null: the
+             API treats an absent field as "leave it alone", and a null would
+             read as "remove the definition" on a tool that has one. */
+          ...(httpSpec ? { httpSpec } : {}),
         },
         scope,
       );
@@ -291,6 +317,45 @@ export function ToolEditor({
           Require human approval
         </Checkbox>
       </Panel>
+
+      {type === "http" ? (
+        <Panel
+          title="What this tool sends"
+          description="The whole call, declared: where each input lands on the wire, how the body is encoded, how it authenticates, and what the agent is shown of the response."
+        >
+          {httpSpec ? (
+            <HttpSpecEditor
+              value={httpSpec}
+              onChange={setHttpSpec}
+              connectionBaseUrl={
+                compatible.find((c) => c.id === connectionId)?.config?.baseUrl as string | undefined
+              }
+              disabled={saving}
+            />
+          ) : (
+            <div className="border-subtle rounded-md border border-dashed p-5">
+              <Text variant="body-sm" tone="primary" className="block font-medium">
+                This tool still uses the legacy configuration
+              </Text>
+              <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[68ch]">
+                It reads loose keys from Runtime configuration below, and works exactly as it
+                always has. Adopting a definition lets you map each input to a path, query,
+                header or body field, choose the body encoding, name the auth header the
+                service actually reads, and extract the part of the response the agent needs.
+              </Text>
+              <Button
+                variant="secondary"
+                size="sm"
+                className="mt-3"
+                disabled={saving}
+                onClick={() => setHttpSpec(emptySpec())}
+              >
+                Adopt a definition
+              </Button>
+            </div>
+          )}
+        </Panel>
+      ) : null}
 
       <Panel title="Configuration and schemas" description="JSON is validated here before the mutation is sent.">
         <Field label="Runtime configuration">

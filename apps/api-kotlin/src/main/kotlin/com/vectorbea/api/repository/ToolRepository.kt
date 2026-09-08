@@ -25,6 +25,12 @@ data class Tool(
     val retryPolicyJson: String,
     val idempotencyStrategy: String?,
     val status: String,
+    /** The declarative HTTP call (V064). Null means the legacy config keys. */
+    val httpSpecJson: String?,
+    /** What the model sees of the result (V056). */
+    val resultContractJson: String?,
+    /** Which `tool_versions.version` is live. */
+    val currentVersion: Int,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -54,7 +60,8 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     private val cols = """
         id, workspace_id, environment_id, name, slug, type, description, connection_id,
         input_schema_json, output_schema_json, config_json, risk_level, requires_approval,
-        timeout_ms, retry_policy_json, idempotency_strategy, status, created_at, updated_at
+        timeout_ms, retry_policy_json, idempotency_strategy, status,
+        http_spec_json, result_contract_json, current_version, created_at, updated_at
     """.trimIndent()
 
     fun findById(id: UUID, workspaceId: UUID): Tool? = queryOne(
@@ -138,6 +145,17 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         retryPolicy: Map<String, Any>? = null,
         idempotencyStrategy: String? = null,
         status: String? = null,
+        /**
+         * The declarative HTTP call, as JSON text.
+         *
+         * TEXT rather than a Map, and written with `?::jsonb`, because it is a
+         * document the worker's `HttpToolSpec` reader owns end to end. Round
+         * tripping it through a Kotlin `Map` here would let this layer reorder
+         * keys, coerce a number, or drop a null — and the reader would then be
+         * parsing something subtly different from what the generator produced.
+         */
+        httpSpecJson: String? = null,
+        resultContractJson: String? = null,
     ): Tool? {
         val setClauses = buildList {
             if (name != null) add("name = ?")
@@ -152,6 +170,8 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (retryPolicy != null) add("retry_policy_json = ?")
             if (idempotencyStrategy != null) add("idempotency_strategy = ?")
             if (status != null) add("status = ?")
+            if (httpSpecJson != null) add("http_spec_json = ?::jsonb")
+            if (resultContractJson != null) add("result_contract_json = ?::jsonb")
             add("updated_at = now()")
         }
         if (setClauses.size == 1) return findById(id, workspaceId)
@@ -171,6 +191,8 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                 if (retryPolicy != null) setJsonb(i++, retryPolicy)
                 if (idempotencyStrategy != null) setString(i++, idempotencyStrategy)
                 if (status != null) setString(i++, status)
+                if (httpSpecJson != null) setString(i++, httpSpecJson)
+                if (resultContractJson != null) setString(i++, resultContractJson)
                 setUuid(i++, id)
                 setUuid(i, workspaceId)
             },
@@ -201,6 +223,9 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         retryPolicyJson = rs.getJsonbString("retry_policy_json"),
         idempotencyStrategy = rs.getString("idempotency_strategy"),
         status = rs.getString("status"),
+        httpSpecJson = rs.getString("http_spec_json"),
+        resultContractJson = rs.getString("result_contract_json"),
+        currentVersion = rs.getInt("current_version"),
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
     )

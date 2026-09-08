@@ -235,6 +235,7 @@ fun main() {
         stepOutputStore    = stepOutputStore,
         workerId           = config.workerId,
         connectionResolver = connectionResolver,
+        secretService      = secretService,
         dbPoolManager      = dbPoolManager,
         debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
         stepGuard          = stepGuard,
