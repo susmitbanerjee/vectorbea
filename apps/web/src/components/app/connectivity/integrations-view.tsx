@@ -15,6 +15,7 @@ import { Checkbox } from "~/components/ui/choice";
 import { ProviderLogo } from "~/components/ui/provider-logo";
 import { getConnections } from "@/lib/repository";
 import { CreateConnectionDialog } from "./create-connection-dialog";
+import { HttpClientDialog } from "./http-client-dialog";
 import { CreateToolDialog } from "../registry/create-tool-dialog";
 import { ImportSpecDialog } from "../registry/import-spec-dialog";
 import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
@@ -39,9 +40,8 @@ const CATEGORIES: (IntegrationCategory | "all")[] = [
 
 export function IntegrationsView() {
   const { canBuild } = useWorkspaceRole();
-  const [httpAction, setHttpAction] = React.useState<"create" | "import" | null>(null);
+  const [httpAction, setHttpAction] = React.useState<"test" | "create" | "import" | null>(null);
   const [httpConnectionId, setHttpConnectionId] = React.useState<string | null>(null);
-  const [pendingHttpAction, setPendingHttpAction] = React.useState<"create" | "import" | null>(null);
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -164,34 +164,26 @@ export function IntegrationsView() {
       <IntegrationDetail
         integration={open}
         onClose={() => setParams({ integration: null })}
-        onConnect={(id) => setParams({ integration: null, connect: id })}
+        onConnect={(id) => { if (id === "http") { setParams({ integration: null }); setHttpAction("test"); } else setParams({ integration: null, connect: id }); }}
         canBuild={canBuild}
         onHttpAction={(action) => {
           const existing = connections.filter((connection) => providerMatches("http", connection.provider));
-          if (existing.length === 0) {
-            setPendingHttpAction(action);
-            setParams({ integration: null, connect: "http" });
-          } else {
-            setHttpConnectionId(existing.length === 1 ? existing[0]!.id : null);
-            setParams({ integration: null });
-            setHttpAction(action);
-          }
+          setHttpConnectionId(existing.length === 1 ? existing[0]!.id : null);
+          setParams({ integration: null });
+          setHttpAction(action);
         }}
       />
       <CreateConnectionDialog
-        open={connectTo !== null}
+        open={connectTo !== null && connectTo.id !== "http"}
         presetProvider={connectTo?.id ?? null}
-        onOpenChange={(next) => { if (!next) { setParams({ connect: null }); setPendingHttpAction(null); } }}
-        onCreated={(connection) => {
+        onOpenChange={(next) => { if (!next) { setParams({ connect: null }); } }}
+        onCreated={() => {
           void refreshConnections();
           setParams({ connect: null });
-          if (pendingHttpAction) {
-            setHttpConnectionId(connection.id);
-            setHttpAction(pendingHttpAction);
-            setPendingHttpAction(null);
-          }
+
         }}
       />
+      {httpAction === "test" || connectTo?.id === "http" ? <HttpClientDialog onClose={() => { setHttpAction(null); setParams({ connect: null }); }} /> : null}
       {httpAction === "create" ? <CreateToolDialog
         open presetConnectionId={httpConnectionId}
         onOpenChange={(next) => { if (!next) setHttpAction(null); }}
@@ -265,7 +257,7 @@ function IntegrationDetail({
   integration: IntegrationRecord | null;
   onClose: () => void;
   onConnect: (id: string) => void;
-  onHttpAction: (action: "create" | "import") => void;
+  onHttpAction: (action: "test" | "create" | "import") => void;
   canBuild: boolean;
 }) {
   if (!integration) return null;
@@ -306,11 +298,12 @@ function IntegrationDetail({
               <Text variant="body-sm" tone="secondary" className="block">{integration.description}</Text>
               {integration.id === "http" ? <Section title="HTTP requests and API documents" help="Configure request inputs, authentication, response extraction and pagination, or generate tools from an API document.">
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="primary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("create")}>Create HTTP tool</Button>
+                  <Button variant="primary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("test")}>Open HTTP client</Button>
+                  <Button variant="secondary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("create")}>Create HTTP tool</Button>
                   <Button variant="secondary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("import")}>Import OpenAPI / Postman</Button>
                 </div>
                 <Text variant="caption" tone="muted" className="mt-2 block">
-                  {!canBuild ? "Creating tools requires the developer role or higher." : isConnected ? "Choose a saved connection for these tools." : "First save and test your connection; then continue to the request editor or importer."}
+                  {!canBuild ? "Creating tools requires the developer role or higher." : isConnected ? "Choose a saved connection for these tools." : "Test requests without saving a connection. Import API documents separately to generate tools."}
                 </Text>
               </Section> : null}
 
@@ -388,7 +381,7 @@ function IntegrationDetail({
 
           <footer className="border-subtle flex justify-end gap-2 border-t px-4 py-3">
             <Button variant="primary" size="sm" onClick={() => onConnect(integration.id)}>
-              {isConnected ? "Add another connection" : `Connect ${integration.name}`}
+              {integration.id === "http" ? "Open HTTP client" : isConnected ? "Add another connection" : `Connect ${integration.name}`}
             </Button>
           </footer>
         </Dialog.Content>

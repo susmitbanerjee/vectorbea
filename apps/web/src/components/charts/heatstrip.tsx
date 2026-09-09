@@ -28,6 +28,7 @@ const STATUS_FILL: Record<RunStatus, string | null> = {
   failed: "var(--status-failed)",
   running: "var(--status-live)",
   "awaiting-approval": "var(--status-waiting)",
+  waiting: "var(--status-waiting)",
   queued: null,
   cancelled: null,
 };
@@ -37,6 +38,7 @@ const STATUS_LABEL: Record<RunStatus, string> = {
   failed: "Failed",
   running: "Running",
   "awaiting-approval": "Awaiting approval",
+  waiting: "Waiting",
   queued: "Queued",
   cancelled: "Cancelled",
 };

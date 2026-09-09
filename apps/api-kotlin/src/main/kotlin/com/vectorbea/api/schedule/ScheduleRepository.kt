@@ -31,6 +31,25 @@ data class Schedule(
     val overlapPolicy: String = "skip",
     /** The run this schedule last fired, while it is still in flight. */
     val activeRunId: UUID? = null,
+    /**
+     * A fixed period instead of a cron. Exactly one of the two is set; the
+     * `schedules_one_cadence` check in V066 enforces it.
+     */
+    val intervalSeconds: Int? = null,
+    /** `skip` · `fire_once` · `backfill`. See [CatchupPolicy]. */
+    val misfirePolicy: String = "fire_once",
+    /** Ceiling on a single backfill, so a long outage does not become a flood. */
+    val catchupMaxRuns: Int = 10,
+    /**
+     * The occurrence this schedule has fired up to.
+     *
+     * Not the same fact as [lastFireAt], which is wall-clock: during a backfill
+     * the 03:00 occurrence is fired at 09:00, and it is the OCCURRENCE that says
+     * what is still owed.
+     */
+    val lastOccurrenceAt: Instant? = null,
+    /** The interval cadence's phase anchor — see `Cadence.Every`. */
+    val createdAt: Instant = Instant.EPOCH,
 )
 
 /** A schedule joined with its workflow name — for the schedules list UI. */
@@ -64,6 +83,13 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
         activeRunId = runCatching { rs.uuidOrNull("active_run_id") }.getOrNull(),
         timezone = rs.getString("timezone"),
         enabled = rs.getBoolean("enabled"),
+        intervalSeconds = runCatching {
+            rs.getInt("interval_seconds").takeIf { !rs.wasNull() }
+        }.getOrNull(),
+        misfirePolicy = runCatching { rs.getString("misfire_policy") }.getOrNull() ?: "fire_once",
+        catchupMaxRuns = runCatching { rs.getInt("catchup_max_runs") }.getOrDefault(10),
+        lastOccurrenceAt = runCatching { rs.instantOrNull("last_occurrence_at") }.getOrNull(),
+        createdAt = runCatching { rs.instantOrNull("created_at") }.getOrNull() ?: Instant.EPOCH,
         nextFireAt = rs.instantOrNull("next_fire_at"),
         lastFireAt = rs.instantOrNull("last_fire_at"),
     )
@@ -160,7 +186,9 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
         """
         SELECT id, workspace_id, environment_id, workflow_id, cron_expression,
                timezone, enabled, next_fire_at, last_fire_at,
-               jitter_seconds, overlap_policy, active_run_id
+               jitter_seconds, overlap_policy, active_run_id,
+               interval_seconds, misfire_policy, catchup_max_runs,
+               last_occurrence_at, created_at
           FROM schedules
          WHERE enabled = true AND next_fire_at IS NOT NULL
            -- The jitter is applied here, in the due predicate, rather than by
@@ -204,17 +232,34 @@ open class ScheduleRepository(dataSource: DataSource) : BaseRepository(dataSourc
      * next_fire_at means a second concurrent firer sees 0 rows. This makes firing
      * exactly-once across multiple API instances without a separate lock.
      */
-    open fun claimAndAdvance(id: UUID, threshold: Instant, firedAt: Instant, nextFireAt: Instant?): Boolean =
+    open fun claimAndAdvance(
+        id: UUID,
+        threshold: Instant,
+        firedAt: Instant,
+        nextFireAt: Instant?,
+        /**
+         * The occurrence this claim covers.
+         *
+         * Recorded in the SAME statement as the advance, so the two can never
+         * disagree: a crash between them would otherwise leave a schedule whose
+         * `next_fire_at` has moved on but whose `last_occurrence_at` has not,
+         * and the next backfill would re-fire everything in between.
+         */
+        occurrenceAt: Instant? = null,
+    ): Boolean =
         execute(
             """
             UPDATE schedules
-               SET last_fire_at = ?, next_fire_at = ?, updated_at = now()
+               SET last_fire_at = ?, next_fire_at = ?,
+                   last_occurrence_at = COALESCE(?, last_occurrence_at),
+                   updated_at = now()
              WHERE id = ? AND enabled = true AND next_fire_at IS NOT NULL AND next_fire_at <= ?
             """.trimIndent(),
         ) {
             setInstant(1, firedAt)
             setInstantOrNull(2, nextFireAt)
-            setUuid(3, id)
-            setInstant(4, threshold)
+            setInstantOrNull(3, occurrenceAt)
+            setUuid(4, id)
+            setInstant(5, threshold)
         } > 0
 }

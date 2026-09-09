@@ -65,6 +65,17 @@ class AgentBrainRunner(
      * still better than the silent failure this replaced.
      */
     private val approvalStore: com.vectorbea.worker.runtime.checkpoint.ApprovalStore? = null,
+    /**
+     * Where a WAIT action becomes a real parked wait instead of a dead end.
+     *
+     * Null only where there is no database to write one to, in which case an
+     * agent choosing to wait fails with a message saying so — the same honest
+     * failure [approvalStore] gives, and for the same reason: an action that
+     * silently does nothing is worse than one that reports it cannot.
+     */
+    private val waitStore: com.vectorbea.worker.durable.wait.WaitStore? = null,
+    /** Read when a WAIT's signal may already have arrived. See [openAgentWait]. */
+    private val signalStore: com.vectorbea.worker.durable.wait.SignalStore? = null,
     private val budgetGuard: AgentBudgetGuard = AgentBudgetGuard(),
     private val safetyGuard: AgentSafetyGuard = AgentSafetyGuard(),
     private val memoryStore: AgentMemoryStore = AgentMemoryStore(dataSource),
@@ -855,6 +866,17 @@ class AgentBrainRunner(
          */
         val approvalId: String? = null,
         val approvalMessage: String? = null,
+
+        /**
+         * The wait this run parked on, when [stopReason] is WAITING.
+         *
+         * Present for the same reason [approvalId] is: so the caller can return
+         * `NodeResult.Waiting` and let the runtime park the run against a real
+         * `run_waits` row. Without it an agent that chose to wait would have
+         * nowhere to put the question, and the wait would be reported as a step
+         * failure — which is exactly what ASK_APPROVAL used to do.
+         */
+        val wait: NodeResult.Waiting? = null,
     )
 
     suspend fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
@@ -1004,6 +1026,9 @@ class AgentBrainRunner(
 
         /* The approval the loop is parked on, when it parks. See RunResult.approvalId. */
         var approvalId: String? = null
+        /* The wait the loop is parked on, when it parks on something that is not
+           a person. See RunResult.wait. */
+        var pendingWait: NodeResult.Waiting? = null
         var approvalMessage: String? = null
 
         /* Set by HANDOFF. See RunResult.handedOff. */
@@ -1201,6 +1226,19 @@ class AgentBrainRunner(
                             toolResultRef = outcome.resultRef,
                             toolResultCached = outcome.cached)
 
+                        /* The tool started something long-running. Park the step on it
+                           for the same reason an approval parks it: an agent that keeps
+                           reasoning while a six-minute render runs spends its whole
+                           iteration budget and then reports that it could not finish. */
+                        if (outcome.wait != null) {
+                            state.stopReason = AgentLoopState.StopReason.WAITING
+                            retryable = false
+                            pendingWait = outcome.wait
+                            emitEvent(config, RunEventStore.EventType.RUN_WAIT_STARTED,
+                                "waiting_for_event",
+                                "Tool call is waiting: ${outcome.wait.label}")
+                        }
+
                         /* The tool needs a person. Park the whole step on that decision
                            rather than letting the agent reason around a locked door. */
                         if (outcome.pause != null) {
@@ -1237,7 +1275,7 @@ class AgentBrainRunner(
                            observation twice over if the agent already tried it, and without
                            this the repeat check would overwrite APPROVAL_REQUESTED with
                            ERROR and turn a waiting run back into a failed one. */
-                        if (outcome.pause == null &&
+                        if (outcome.pause == null && outcome.wait == null &&
                             !obs.success && previous != null && !previous.success &&
                             previous.actionType == "CALL_TOOL" &&
                             previous.toolId == obs.toolId &&
@@ -1468,6 +1506,101 @@ class AgentBrainRunner(
                             "Agent reported failure: ${reason.ifBlank { "no reason given" }}")
                         persistIterationComplete(iterationId, iterSpan, "failed", action, reason, budget, budgetMark)
                     }
+
+                    AgentAction.ActionType.WAIT -> {
+                        /*
+                         * ── THE AGENT CHOOSES; THE RUNTIME VALIDATES ─────────
+                         *
+                         * Invariant 1, applied to a new action. The model names a
+                         * signal and a duration; neither is trusted. A blank name
+                         * is a malformed action and becomes a failure the model can
+                         * read, and the duration is CLAMPED by `WaitStore.open`
+                         * rather than checked — a clamp cannot be forgotten by the
+                         * next caller, and a model asking to wait a year gets the
+                         * platform maximum and is told so.
+                         *
+                         * The wait is keyed on (run, stepId, attemptGroup) like
+                         * every other durable key, so the agent gets ONE wait per
+                         * step — the same limit ASK_APPROVAL has, for the same
+                         * reason: a per-question key would need something that
+                         * survives re-execution, and iteration numbers do not.
+                         */
+                        val signalName = action.waitFor?.trim()?.take(200).orEmpty()
+                        if (!AgentPromptBuilder.agentWaitEnabled()) {
+                            /*
+                             * The flag is off, so this deployment does not offer WAIT
+                             * and the prompt never described it. A model emitting it
+                             * anyway is emitting an action the runtime will not
+                             * execute — which is the ordinary invalid-action path,
+                             * not a special case. Refusing here rather than only
+                             * omitting it from the prompt is what makes the flag a
+                             * real off switch: invariant 1 says the runtime decides,
+                             * so the runtime is where "off" has to be enforced.
+                             */
+                            state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                            retryable = false
+                            failureReason = "The agent asked to wait, but waiting is not enabled " +
+                                "for this deployment. Set AGENT_WAIT_ACTION_ENABLED=true to allow it."
+                            emitEvent(config, RunEventStore.EventType.AGENT_INVALID_ACTION, "failed",
+                                failureReason!!)
+                            persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                failureReason, budget, budgetMark)
+                        } else if (signalName.isBlank()) {
+                            state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                            retryable = false
+                            failureReason = "The agent asked to wait but named no signal to wait " +
+                                "for. A WAIT must say what would wake it."
+                            emitEvent(config, RunEventStore.EventType.AGENT_INVALID_ACTION, "failed",
+                                failureReason!!)
+                            persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                failureReason, budget, budgetMark)
+                        } else when (val opened = openAgentWait(config, runtimeCtx, signalName,
+                            action.waitSeconds, sanitizedReason)) {
+                            is AgentWaitOutcome.Parked -> {
+                                state.stopReason = AgentLoopState.StopReason.WAITING
+                                retryable = false
+                                pendingWait = opened.wait
+                                state.addObservation(AgentObservation(
+                                    state.iteration, "WAIT",
+                                    sanitizedSummary = "Waiting for '$signalName'. " +
+                                        "The run is parked and will resume when it arrives."))
+                                emitEvent(config, RunEventStore.EventType.RUN_WAIT_STARTED,
+                                    "waiting_for_event",
+                                    "Agent is waiting for '$signalName': $sanitizedReason")
+                                persistIterationComplete(iterationId, iterSpan, "completed", action,
+                                    sanitizedReason, budget, budgetMark)
+                            }
+
+                            /*
+                             * The signal already arrived — between the agent deciding
+                             * to wait and the wait being opened, or on a resume where
+                             * this step re-executes after being woken. Parking would
+                             * be a deadlock: nothing else is coming.
+                             */
+                            is AgentWaitOutcome.AlreadyArrived -> {
+                                state.addObservation(AgentObservation(
+                                    state.iteration, "WAIT",
+                                    sanitizedSummary = "Signal '$signalName' had already arrived: " +
+                                        opened.summary))
+                                state.addMemory("signal_$signalName", opened.summary)
+                                emitEvent(config, RunEventStore.EventType.SIGNAL_DELIVERED, "running",
+                                    "Signal '$signalName' delivered to the agent without parking.")
+                                persistIterationComplete(iterationId, iterSpan, "completed", action,
+                                    sanitizedReason, budget, budgetMark)
+                            }
+
+                            is AgentWaitOutcome.Unavailable -> {
+                                state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                                retryable = false
+                                failureReason = "The agent asked to wait for '$signalName', but the " +
+                                    "wait could not be created: ${opened.why}"
+                                emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
+                                    failureReason!!)
+                                persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                    failureReason, budget, budgetMark)
+                            }
+                        }
+                    }
                 }
 
                 /* A backstop, not the normal path: every branch above finishes its
@@ -1556,10 +1689,94 @@ class AgentBrainRunner(
                                      ?: describeStop(state.stopReason, config),
             retryable          = retryable,
             approvalId         = approvalId,
+            wait               = pendingWait,
             approvalMessage    = approvalMessage,
             handedOff          = handedOff,
             yieldedReason      = yieldedReason,
         )
+    }
+
+    /** What happened when the agent asked to wait. */
+    private sealed class AgentWaitOutcome {
+        data class Parked(val wait: NodeResult.Waiting) : AgentWaitOutcome()
+
+        /** The signal was already there. Parking would deadlock. */
+        data class AlreadyArrived(val summary: String) : AgentWaitOutcome()
+
+        data class Unavailable(val why: String) : AgentWaitOutcome()
+    }
+
+    /**
+     * Open — or find — this step's wait.
+     *
+     * ── THE ORDER OF THE TWO CHECKS IS THE WHOLE CORRECTNESS ────────────────
+     * Signals are read BEFORE the wait is opened, and that order is not
+     * arbitrary. A signal can arrive between the model deciding to wait and this
+     * running, and a wait opened first would park a run for a signal that has
+     * already been delivered — a deadlock lasting until the timeout, with the
+     * answer sitting unconsumed in the table the whole time.
+     *
+     * It is also what makes the resumed step correct. After the run is woken,
+     * this step re-executes from iteration 1, reaches WAIT again, finds the
+     * signal it was woken by, and carries on — rather than opening a second wait
+     * and parking again, which would be a run that never finishes however many
+     * signals it is sent.
+     */
+    private fun openAgentWait(
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        signalName: String,
+        requestedSeconds: Long?,
+        reason: String,
+    ): AgentWaitOutcome {
+        val waits = waitStore
+            ?: return AgentWaitOutcome.Unavailable("this worker has no database connection")
+
+        signalStore?.pending(runtimeCtx.runId)
+            ?.firstOrNull { it.name == signalName }
+            ?.let { signal ->
+                signalStore.consume(listOf(signal.id), waitId = null)
+                val payload = runCatching { mapper.writeValueAsString(signal.asObservation(mapper)) }
+                    .getOrDefault("{}")
+                return AgentWaitOutcome.AlreadyArrived(payload.take(MAX_TOOL_PAYLOAD_CHARS))
+            }
+
+        return try {
+            val opened = waits.open(
+                com.vectorbea.worker.durable.wait.WaitStore.OpenRequest(
+                    workspaceId = config.workspaceId,
+                    environmentId = config.environmentId,
+                    runId = runtimeCtx.runId,
+                    workflowId = runtimeCtx.workflowId,
+                    nodeId = config.stepId,
+                    attemptGroup = runtimeCtx.attemptGroup,
+                    kind = com.vectorbea.worker.durable.wait.WaitKind.AGENT_WAIT,
+                    label = "Agent '${config.agentName}' is waiting for '$signalName'",
+                    signalName = signalName,
+                    /* Clamped by the store. A model asking for a year gets the
+                       platform maximum; a model asking for nothing gets the
+                       default. Neither is trusted, and neither has to be checked
+                       here — which is the point of clamping at the boundary. */
+                    timeoutMs = requestedSeconds?.times(1_000),
+                    /* Sanitized: the model's own one-line reason, already through
+                       `sanitizeReasoningSummary`. Nothing else, and never a tool
+                       result — invariant 4 applies to this store like any other. */
+                    metadata = mapOf("reason" to reason.take(500), "agent" to config.agentName),
+                )
+            )
+            AgentWaitOutcome.Parked(
+                NodeResult.Waiting(
+                    waitId = opened.wait.id.toString(),
+                    kind = opened.wait.kind.wire,
+                    label = opened.wait.label ?: "Waiting for '$signalName'",
+                    timeoutAt = opened.wait.timeoutAt,
+                )
+            )
+        } catch (e: Exception) {
+            log.error("[brain] could not open agent wait [run={}, signal={}]: {}",
+                runtimeCtx.runId, signalName, e.message)
+            AgentWaitOutcome.Unavailable(e.message?.take(200) ?: e.javaClass.simpleName)
+        }
     }
 
     /** What the approval gate says about this step, right now. */
@@ -1638,6 +1855,9 @@ class AgentBrainRunner(
             "The agent reported it could not complete the task but gave no reason."
         AgentLoopState.StopReason.APPROVAL_REQUESTED ->
             "The agent asked for human approval before it could continue."
+        AgentLoopState.StopReason.WAITING ->
+            "The agent is waiting for an external event. The run is parked and will " +
+            "resume when it arrives, or when the wait's deadline passes."
         AgentLoopState.StopReason.TOOL_NOT_ALLOWED ->
             "The agent tried to call a tool that is not in its allowed tool list."
         AgentLoopState.StopReason.SCHEMA_INVALID ->
@@ -2358,6 +2578,16 @@ class AgentBrainRunner(
         val observation: AgentObservation,
         val pause: NodeResult.ApprovalPaused? = null,
         /**
+         * The tool parked on something that is not a person.
+         *
+         * A SEPARATE field from [pause] rather than a widened one, for the same
+         * reason `targetAgentId` is separate from `toolId`: the two are handled
+         * differently — an approval sets `waiting_for_approval` and lands on the
+         * Approvals screen, a wait sets `waiting_for_event` and does not — and one
+         * field carrying both is how a video render ends up in an approvals queue.
+         */
+        val wait: NodeResult.Waiting? = null,
+        /**
          * The FULL tool result in the payload store, if it was captured.
          *
          * ── THE CAP AND THE DURABILITY WERE THE SAME THING, AND SHOULD NOT BE ──
@@ -2656,6 +2886,26 @@ class AgentBrainRunner(
                 is NodeResult.Throttled -> ToolOutcome(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
                         "Tool $toolId was rate limited by ${execResult.provider}", false))
+
+                /*
+                 * ── AN ASYNC TOOL PARKS THE STEP, IT DOES NOT FAIL IT ────────
+                 *
+                 * The same shape as the approval arm above, and for the same
+                 * reason: the alternative is one unsuccessful observation and a
+                 * loop that reasons around a job which is running perfectly well.
+                 * A six-minute render would burn the agent's remaining iterations
+                 * and report that it could not proceed.
+                 *
+                 * The pause travels out of the loop and the step returns
+                 * NodeResult.Waiting, so the runtime parks the run and releases the
+                 * worker. On resume the tool re-executes, recomputes the same wait
+                 * key, finds its own RESOLVED wait, and reads the result out of it
+                 * instead of submitting the job again.
+                 */
+                is NodeResult.Waiting -> ToolOutcome(
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                        "Tool $toolId started work that takes a while: ${execResult.label}", false),
+                    wait = execResult)
 
                 is NodeResult.Unsupported -> ToolOutcome(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),

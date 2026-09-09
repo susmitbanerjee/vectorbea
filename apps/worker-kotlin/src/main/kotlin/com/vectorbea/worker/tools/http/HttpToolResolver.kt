@@ -69,6 +69,20 @@ class HttpToolResolver(
     private val sideEffects: SideEffectGuard? = null,
     /** Injectable for tests; production uses the transport-bound client. */
     private val httpClientOverride: java.net.http.HttpClient? = null,
+    /**
+     * Where an async tool's wait is recorded. Null makes async tools refuse
+     * rather than run — a job submitted with nothing waiting for it is a
+     * six-minute render nobody will ever collect.
+     */
+    private val waitStore: com.vectorbea.worker.durable.wait.WaitStore? = null,
+    /**
+     * The public origin a provider calls back on, e.g. `https://api.vectorbea.com`.
+     *
+     * Null disables callbacks and leaves polling; a tool that declared only a
+     * callback then refuses, rather than submitting a job whose completion has no
+     * route home.
+     */
+    private val callbackBaseUrl: String? = System.getenv("PUBLIC_API_BASE_URL"),
 ) : NodeExecutor {
 
     private val log = logger()
@@ -166,9 +180,91 @@ class HttpToolResolver(
             ?: (node.config["maxResponseBytes"] as? Number)?.toLong()
             ?: DEFAULT_MAX_RESPONSE_BYTES
 
+        /*
+         * ── 2b. ASYNC: IS THIS STEP ALREADY WAITING, OR ALREADY ANSWERED? ────
+         *
+         * Before anything is assembled or sent. On a resume this step re-executes
+         * from the top, and the wait it opened last time is sitting there with the
+         * provider's answer in it — so the answer is read out and the provider is
+         * never contacted again. That is what makes a six-minute render survive a
+         * worker restart without being submitted twice.
+         */
+        val async = spec.async
+        var asyncWait: com.vectorbea.worker.durable.wait.RunWait? = null
+        var callbackUrl: String? = null
+        if (async != null) {
+            val waits = waitStore
+                ?: return NodeResult.Failed(
+                    "This tool runs asynchronously and this worker has no database to " +
+                        "record the wait in. The call was not made.",
+                    retryable = false,
+                )
+            when (val pre = AsyncToolProtocol.precheck(
+                spec = spec, async = async, waits = waits,
+                workspaceId = ctx.workspaceId, environmentId = ctx.environmentId,
+                runId = ctx.runId, workflowId = ctx.workflowId,
+                nodeId = node.id, attemptGroup = ctx.attemptGroup,
+                toolLabel = (node.config["toolName"] as? String) ?: node.label.ifBlank { node.id },
+                callbackBaseUrl = callbackBaseUrl,
+            )) {
+                is AsyncToolProtocol.Precheck.AlreadyResolved -> {
+                    waits.recordWaitedTime(
+                        ctx.runId,
+                        java.time.Duration.between(
+                            pre.wait.createdAt, pre.wait.resolvedAt ?: java.time.Instant.now()
+                        ).toMillis(),
+                    )
+                    return completeFromWait(node, spec, pre.wait, ctx, scope)
+                }
+
+                is AsyncToolProtocol.Precheck.StillWaiting ->
+                    /* Submitted on an earlier tick and still running. Park again
+                       WITHOUT re-submitting — this branch is what stops a
+                       redelivered queue message starting a second render. */
+                    return parkOn(pre.wait, node, ctx)
+
+                is AsyncToolProtocol.Precheck.Unavailable ->
+                    return NodeResult.Failed(
+                        "This tool runs asynchronously and its wait could not be created: " +
+                            "${pre.why}. The call was not made.",
+                        retryable = true,
+                    )
+
+                is AsyncToolProtocol.Precheck.Submit -> {
+                    asyncWait = pre.wait
+                    callbackUrl = pre.callbackUrl
+                    if (callbackUrl == null && async.poll == null) {
+                        /* No token could be minted (no callback secret configured)
+                           and nothing to poll. Submitting would start a job whose
+                           completion has no route home — a run parked to its
+                           deadline every time. Refuse loudly instead. */
+                        return NodeResult.Failed(
+                            "This tool expects a completion callback, but no callback secret " +
+                                "is configured on this worker, so the provider would have no " +
+                                "way to report back. Set WAIT_CALLBACK_SECRET, or give the " +
+                                "tool a status URL to poll.",
+                            retryable = false,
+                        )
+                    }
+                }
+            }
+        }
+
         // ── 3. Assemble + authenticate ────────────────────────────────────────
+        /*
+         * The callback URL is injected as an ARGUMENT, into the input the spec
+         * names — so it travels wherever that provider expects it (a body field,
+         * a query parameter, a header) without this code knowing which.
+         *
+         * It is added AFTER the model's arguments and therefore wins, which is
+         * the point: a model-supplied callback URL would be a model choosing
+         * where a completion is delivered.
+         */
+        val submitArgs = if (async?.callback != null && callbackUrl != null)
+            args + (async.callback.urlInput to callbackUrl) else args
+
         val prepared = try {
-            RequestAssembler.assemble(spec, baseUrl, args)
+            RequestAssembler.assemble(spec, baseUrl, submitArgs)
         } catch (e: RequestAssembler.AssemblyException) {
             return NodeResult.Failed("HTTP tool '${node.id}': ${e.message}", retryable = false)
         }
@@ -350,6 +446,58 @@ class HttpToolResolver(
         matchSoftFailure(spec, firstPage)?.let {
             reservation?.let { r -> guard?.fail(r.sideEffectId, "soft failure") }
             return httpFailure(node, spec, firstPage, lastRawBody, reportableUrl, ctx, scope, startMs)
+        }
+
+        /*
+         * ── THE SUBMIT SUCCEEDED. TAKE THE HANDLE AND PARK. ─────────────────
+         *
+         * The side-effect reservation is COMPLETED here, not left open: the
+         * submit is the side effect, it happened, and a redelivery must not
+         * repeat it. The long-running job is tracked by the wait from now on,
+         * which is a different mechanism with a different key — the guard stops a
+         * second submit, the wait's `status = 'waiting'` CAS stops a second
+         * completion.
+         */
+        if (async != null && asyncWait != null) {
+            val handle = AsyncToolProtocol.handleFrom(firstPage.body, async)
+            if (handle == null) {
+                /*
+                 * The provider accepted the job and we cannot say which job it is.
+                 * Polling is impossible and a callback would arrive against a wait
+                 * carrying no handle to correlate against — so the wait is
+                 * cancelled rather than left to time out, and the node fails now
+                 * with the reason, instead of in seven days.
+                 */
+                waitStore?.resolve(
+                    java.util.UUID.fromString(asyncWait.id.toString()),
+                    com.vectorbea.worker.durable.wait.RunWait.Resolution.CANCELLED,
+                    null, "runtime:no_handle",
+                )
+                reservation?.let { guard?.complete(it.sideEffectId, lastRawBody.take(MAX_STORED_RESPONSE)) }
+                return NodeResult.Failed(
+                    "This tool submitted a long-running job, but the response contained " +
+                        "nothing at '${async.handlePath}' to identify it, so its completion " +
+                        "could not be tracked. Check the tool's handle path against the " +
+                        "provider's response.",
+                    retryable = false,
+                )
+            }
+
+            val pollUrl = async.poll?.let { poll ->
+                runCatching {
+                    SpecTemplate.render(poll.url, submitArgs + mapOf("handle" to handle), strict = false)
+                }.getOrNull()
+            }
+            waitStore?.attachHandle(asyncWait.id, handle, pollUrl)
+            reservation?.let { guard?.complete(it.sideEffectId, lastRawBody.take(MAX_STORED_RESPONSE)) }
+
+            log.info("[async-tool] submitted and parked [run={}, node={}, handle={}, poll={}, callback={}]",
+                ctx.runId, node.id, handle, pollUrl != null, callbackUrl != null)
+
+            return parkOn(
+                asyncWait.copy(externalRef = handle, pollUrl = pollUrl),
+                node, ctx,
+            )
         }
 
         val paged = Paginator.walk(spec.pagination, firstPage) { extraQuery, absoluteUrl ->
@@ -686,6 +834,94 @@ class HttpToolResolver(
             proxyCredential = read(spec.transport.proxy?.credentialSecretRef),
         )
         return HttpTransport.bind(spec.transport, material)
+    }
+
+    // ── Async: parking, and coming back ──────────────────────────────────────
+
+    /** Hand the wait to the runtime, which parks the run and releases the worker. */
+    private fun parkOn(
+        wait: com.vectorbea.worker.durable.wait.RunWait,
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+    ): NodeResult {
+        emit(ctx, node.id, EventType.RUN_WAIT_STARTED, "waiting_for_event",
+            "Waiting for a long-running job",
+            wait.label ?: "The provider is still working.")
+        return NodeResult.Waiting(
+            waitId = wait.id.toString(),
+            kind = wait.kind.wire,
+            label = wait.label ?: "Waiting for a long-running job",
+            timeoutAt = wait.timeoutAt,
+            metadata = buildMap {
+                wait.externalRef?.let { put("handle", it) }
+                put("waitKey", wait.waitKey)
+            },
+        )
+    }
+
+    /**
+     * The node's result, taken out of a wait that has already resolved.
+     *
+     * ── THE PROVIDER IS NOT CONTACTED ───────────────────────────────────────
+     * This is the resume path. The render finished, the callback (or a poll)
+     * wrote the answer onto the wait, the run was woken, and this step
+     * re-executed. Everything it needs is on the row — so it must not submit
+     * again, and the extraction and error mapping run over the stored payload
+     * exactly as they would over a live response.
+     */
+    private fun completeFromWait(
+        node: WorkflowNode,
+        spec: HttpToolSpec,
+        wait: com.vectorbea.worker.durable.wait.RunWait,
+        ctx: RuntimeContext,
+        scope: SecretScope,
+    ): NodeResult {
+        val waitedMs = java.time.Duration.between(
+            wait.createdAt, wait.resolvedAt ?: java.time.Instant.now()).toMillis()
+
+        return when (val outcome = AsyncToolProtocol.resultFrom(wait)) {
+            is AsyncToolProtocol.AsyncResult.Completed -> {
+                /* The same extraction the synchronous path applies. An async tool's
+                   result is a response like any other, and a model should not see a
+                   different shape because the work took six minutes. */
+                val extracted = ResponseExtractor.extract(outcome.payload, spec.response.extract)
+
+                emit(ctx, node.id, EventType.RUN_WAIT_RESOLVED, "success",
+                    "Long-running job finished",
+                    "Completed after ${waitedMs / 1000}s" +
+                        (wait.externalRef?.let { " (job $it)" } ?: ""),
+                    durationMs = waitedMs)
+
+                NodeResult.Completed(
+                    output = buildMap {
+                        put("body", mapper.convertValue(extracted.node, Any::class.java))
+                        put("async", true)
+                        wait.externalRef?.let { put("handle", it) }
+                    },
+                    metadata = mapOf(
+                        "async" to true,
+                        "waitedMs" to waitedMs,
+                        "resolvedBy" to (wait.resolvedBy ?: "unknown"),
+                        "extractionApplied" to extracted.applied,
+                    ),
+                )
+            }
+
+            is AsyncToolProtocol.AsyncResult.Failed -> {
+                val timedOut = wait.resolution == com.vectorbea.worker.durable.wait.RunWait.Resolution.TIMEOUT
+                emit(ctx, node.id,
+                    if (timedOut) EventType.RUN_WAIT_TIMED_OUT else EventType.RUN_WAIT_RESOLVED,
+                    "failed",
+                    if (timedOut) "Long-running job timed out" else "Long-running job failed",
+                    scope.scrub(outcome.message.take(300)),
+                    durationMs = waitedMs)
+
+                NodeResult.Failed(
+                    scope.scrub(outcome.message) ?: outcome.message,
+                    retryable = outcome.retryable,
+                )
+            }
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

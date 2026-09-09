@@ -72,6 +72,7 @@ private data class TestToolBody(
     val inputSchema: Map<String, Any>? = null,
     val outputSchema: Map<String, Any>? = null,
     val config: Map<String, Any>? = null,
+    val httpSpec: Map<String, Any>? = null,
 )
 
 @Suppress("UNCHECKED_CAST")
@@ -139,6 +140,7 @@ class ToolRoutes(
         val type = requireOneOf(requireField(body.type, "type"), "type", TOOL_TYPES)
         val config = body.config ?: emptyMap()
         validateConfigJsonNotContainsSecrets(config, "config")
+        val httpSpecJson = validateHttpSpec(body.httpSpec, type)
 
         if (body.connectionId != null) {
             validateToolConnection(body.connectionId, type, ctx.workspaceId)
@@ -148,15 +150,17 @@ class ToolRoutes(
 
         when (type) {
             "http" -> {
-                val url = requireField(config["url"] as? String, "config.url")
-                val uri = runCatching { java.net.URI(url) }.getOrElse {
-                    throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                if (httpSpecJson == null) {
+                    val url = requireField(config["url"] as? String, "config.url")
+                    val uri = runCatching { java.net.URI(url) }.getOrElse {
+                        throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                    }
+                    if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) {
+                        throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                    }
+                    val method = (config["method"] as? String)?.uppercase() ?: "GET"
+                    requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
                 }
-                if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) {
-                    throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
-                }
-                val method = (config["method"] as? String)?.uppercase() ?: "GET"
-                requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE"))
             }
             "database" -> requireField(config["sqlTemplate"] as? String, "config.sqlTemplate")
         }

@@ -29,7 +29,7 @@ class StopReasonTaxonomyTest {
             val result = StopReasonTaxonomy.classify(reason, failureReason = "something happened")
             assertNotNull(result, "$reason produced no classification")
         }
-        assertEquals(14, StopReason.entries.size,
+        assertEquals(15, StopReason.entries.size,
             "the enum changed — check the new stop reason has a deliberate class, " +
             "and add it to the case-by-case assertions below rather than relying on " +
             "the loop above, which only proves it is non-null")
@@ -43,6 +43,42 @@ class StopReasonTaxonomyTest {
         val waiting = StopReasonTaxonomy.classify(StopReason.APPROVAL_REQUESTED)
         assertTrue(waiting is Classification.Waiting)
         assertEquals("a human approval", (waiting as Classification.Waiting).on)
+
+        /*
+         * WAITING is the same argument about a different thing waited on. A
+         * six-minute render still running is not a failure, and a run parked on a
+         * signal that has not arrived is not one either. `failureReason` is passed
+         * deliberately: the loop records why it stopped even when stopping was
+         * correct, and a classifier that reads that text and concludes "failed"
+         * would put every healthy async tool call in the failure metrics.
+         */
+        val external = StopReasonTaxonomy.classify(
+            StopReason.WAITING, failureReason = "waiting for render_video to finish")
+        assertTrue(external is Classification.Waiting,
+            "a run parked on an external event was classified as $external. Every " +
+                "async tool call and every signal wait would then be counted as a " +
+                "failure on somebody's dashboard.")
+        assertEquals("an external event", (external as Classification.Waiting).on)
+    }
+
+    @Test
+    fun `every parked stop reason is a Waiting, and every wait kind has one`() {
+        /*
+         * The taxonomy's half of the wait primitive. A wait kind that parks a run
+         * with no `Waiting` classification behind it renders as an error in the
+         * timeline — the run is fine, the label is not.
+         *
+         * APPROVAL_REQUESTED covers WaitKind.APPROVAL; WAITING covers the other
+         * three. Adding a fifth kind means deciding which of the two it stops with,
+         * and this asserts both are still classified as waiting rather than failed.
+         */
+        listOf(StopReason.APPROVAL_REQUESTED, StopReason.WAITING).forEach { reason ->
+            val c = StopReasonTaxonomy.classify(reason, failureReason = "something happened")
+            assertTrue(c is Classification.Waiting, "$reason is not classified as waiting")
+            assertTrue((c as Classification.Waiting).on.isNotBlank(),
+                "$reason does not name what it is waiting on, so the timeline can " +
+                    "only say 'waiting', which tells the operator nothing")
+        }
     }
 
     @Test

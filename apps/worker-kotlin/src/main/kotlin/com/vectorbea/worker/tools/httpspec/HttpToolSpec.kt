@@ -56,7 +56,134 @@ data class HttpToolSpec(
     val retry: RetrySpec = RetrySpec(),
     val idempotency: IdempotencySpec = IdempotencySpec(),
     val transport: TransportSpec = TransportSpec(),
+    /**
+     * Declared when the call does not finish in one request.
+     *
+     * Null — the default and the overwhelming majority — means request/response
+     * exactly as before. See [AsyncSpec].
+     */
+    val async: AsyncSpec? = null,
 ) {
+
+    /**
+     * A tool whose work outlives its request.
+     *
+     * ── THE CATEGORY THIS UNBLOCKS ──────────────────────────────────────────
+     * A video generation tool takes six minutes. Request/response leaves two
+     * options: hold a worker for six minutes, or fail. Both are wrong, and
+     * together they rule out media generation, long report builds, batch jobs
+     * and human tasks in another system.
+     *
+     * The protocol is: submit returns a HANDLE, the run parks, and completion
+     * arrives by callback or by polling. The worker is released in between —
+     * which is the whole point, and is why this is a wait rather than a longer
+     * timeout.
+     *
+     * ── BOTH COMPLETION PATHS, ALWAYS ───────────────────────────────────────
+     * A callback that never comes must not park a run forever. So a spec may
+     * declare a callback, a poll, or both — and when it declares only a
+     * callback, the resolver still schedules a slow backstop poll if the
+     * provider exposes a status URL. The timeout is the last line: it is set on
+     * every wait, cannot be omitted, and is clamped by the store.
+     */
+    data class AsyncSpec(
+        /**
+         * Where the provider's job id is in the submit response.
+         *
+         * Dotted, rooted at the response body. The handle is stored on the wait
+         * and is what a poll asks about.
+         */
+        val handlePath: String,
+
+        /**
+         * How long to wait before giving up. Clamped by `WaitStore`.
+         *
+         * Named in the spec rather than defaulted, because six minutes and six
+         * hours are both real and the difference matters to whoever is waiting.
+         */
+        val timeoutMs: Long? = null,
+
+        /** Polling, when the provider offers a status endpoint. */
+        val poll: PollSpec? = null,
+
+        /** Callback, when the provider will call us. */
+        val callback: CallbackSpec? = null,
+    ) {
+        /**
+         * A tool with neither is misconfigured: nothing would ever resolve it,
+         * and it would park every run until the timeout. Refused at parse time.
+         */
+        val isResolvable: Boolean get() = poll != null || callback != null
+    }
+
+    /**
+     * Ask the provider whether it has finished.
+     *
+     * ── THE FALLBACK THAT MAKES CALLBACKS SAFE ──────────────────────────────
+     * A callback is faster and a poll is reliable, and the brief requires both.
+     * A provider that drops a webhook — a deploy, a firewall change, a bug on
+     * their side — would otherwise park a run until its deadline, and the run
+     * would report a timeout for a job that finished in four minutes.
+     */
+    data class PollSpec(
+        /**
+         * The status URL. `{{handle}}` is substituted with what submit returned;
+         * the tool's own inputs are also in scope.
+         */
+        val url: String,
+        val method: String = "GET",
+        val intervalMs: Long = 30_000,
+        /**
+         * Stops polling. Not a substitute for the timeout — this bounds the
+         * REQUESTS, the timeout bounds the wall clock, and a provider that
+         * answers "still working" forever needs both.
+         */
+        val maxAttempts: Int = 60,
+        /** Where the state is. Dotted, rooted at the poll response body. */
+        val statusPath: String = "status",
+        /** Values of [statusPath] that mean finished. */
+        val completedValues: List<String> = listOf("succeeded", "completed", "success", "done", "finished"),
+        /** Values that mean finished badly. Distinct: the agent is told which. */
+        val failedValues: List<String> = listOf("failed", "error", "cancelled", "canceled", "expired"),
+        /** Where the result is, once complete. Null means the whole body. */
+        val resultPath: String? = null,
+        /** Where the provider's failure message is, when it failed. */
+        val errorPath: String? = null,
+    )
+
+    /**
+     * The provider calls us when it is done.
+     *
+     * ── HOW THE URL REACHES THE PROVIDER ────────────────────────────────────
+     * [urlInput] names the tool input the callback URL is written into, so the
+     * submit request carries it wherever that provider expects — a body field,
+     * a query parameter, a header. The resolver fills that input in; the model
+     * never supplies it and cannot override it, because a model-supplied
+     * callback URL is a model choosing where a completion is delivered.
+     */
+    data class CallbackSpec(
+        /** The declared input the URL is written into before submit. */
+        val urlInput: String,
+        /**
+         * Dotted path in the callback body that says whether it succeeded.
+         * Null means any delivery is a completion.
+         */
+        val statusPath: String? = null,
+        val completedValues: List<String> = listOf("succeeded", "completed", "success", "done"),
+        val failedValues: List<String> = listOf("failed", "error", "cancelled"),
+        val resultPath: String? = null,
+        val errorPath: String? = null,
+        /**
+         * A shared secret the provider signs the callback with, as a `secretRef`.
+         *
+         * Optional because the token in the URL is already unguessable and is the
+         * primary authentication. A signature is defence in depth for providers
+         * that offer it, and its absence must not be a reason to refuse a
+         * completion — that would park runs for every provider that does not sign.
+         */
+        val signatureSecretRef: String? = null,
+        val signatureHeader: String? = null,
+    )
 
     // ── Request ──────────────────────────────────────────────────────────────
 

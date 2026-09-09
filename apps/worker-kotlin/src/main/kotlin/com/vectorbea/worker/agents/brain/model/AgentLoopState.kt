@@ -52,6 +52,18 @@ data class AgentLoopState(
         FINAL_OUTPUT, MAX_ITERATIONS, BUDGET_EXCEEDED, AGENT_FAILED,
         APPROVAL_REQUESTED, TOOL_NOT_ALLOWED, SCHEMA_INVALID, ERROR,
 
+        /**
+         * Parked on something that is not a person: an async tool still working,
+         * or a signal the agent chose to wait for.
+         *
+         * SEPARATE from APPROVAL_REQUESTED, which parks the run as
+         * `waiting_for_approval` and puts it on the Approvals screen. A six-minute
+         * render carrying that reason would appear in a queue nobody can action.
+         * Not retryable, for the same reason APPROVAL_REQUESTED is not: retrying
+         * a step that is waiting is not waiting.
+         */
+        WAITING,
+
         // ── Orchestration (§5.3). All non-retryable, all ORCHESTRATION class. ──
 
         /** Delegated to an agent it was not granted. The roster analogue of TOOL_NOT_ALLOWED. */

@@ -41,6 +41,14 @@ object RbacGuard {
         "/api/bootstrap",    // first-run wiring, before any membership exists
         "/api/beta/apply",   // an applicant is by definition not a member yet
         "/api/telemetry/events",
+        /*
+         * A webhook delivery. Public and principal-less by design, so `check`
+         * already returns early — but a sender that happens to hold a session
+         * cookie would otherwise be measured against WORKFLOW_WRITE and refused
+         * for a delivery that has nothing to do with editing a workflow. Named
+         * here so the exemption is a decision rather than a side effect of one.
+         */
+        "/api/hooks/:token",
     )
 
     /**
@@ -83,6 +91,40 @@ object RbacGuard {
            not a developer's — and a developer who could mint an unattributed key
            would have a way around the member cap set for them. */
         "POST /api/api-keys"                         to Permission.WORKSPACE_WRITE,
+        /* Rotating a key mints a live credential and narrowing its limit changes
+           what an integration can do. Both are workspace administration, held to
+           the same floor as minting one. */
+        "POST /api/api-keys/:id/rotate"              to Permission.WORKSPACE_WRITE,
+        "PUT /api/api-keys/:id/rate-limit"           to Permission.WORKSPACE_WRITE,
+
+        /*
+         * A webhook is a trigger, so it is classified with the schedule that is
+         * its closest relative rather than with the workflow it starts. Somebody
+         * trusted to change when a workflow runs is not automatically trusted to
+         * change what it does.
+         *
+         * The replay is a RUN, not a write: it starts one. Whoever may press Run
+         * may replay a delivery, and whoever may not, may not.
+         */
+        "POST /api/webhooks"                         to Permission.SCHEDULE_WRITE,
+        "DELETE /api/webhooks/:id"                   to Permission.SCHEDULE_WRITE,
+        "POST /api/webhooks/:id/enable"              to Permission.SCHEDULE_WRITE,
+        "POST /api/webhooks/:id/disable"             to Permission.SCHEDULE_WRITE,
+        "POST /api/webhooks/:id/rotate"              to Permission.SCHEDULE_WRITE,
+        "POST /api/webhooks/:id/deliveries/:deliveryId/replay" to Permission.WORKFLOW_RUN,
+
+        /* An event trigger is a trigger, classified with its siblings above. */
+        "POST /api/event-triggers"                   to Permission.SCHEDULE_WRITE,
+        "DELETE /api/event-triggers/:id"             to Permission.SCHEDULE_WRITE,
+        "POST /api/event-triggers/:id/enable"        to Permission.SCHEDULE_WRITE,
+        "POST /api/event-triggers/:id/disable"       to Permission.SCHEDULE_WRITE,
+
+        /*
+         * An MCP tool call starts a run, so it is WORKFLOW_RUN — the same
+         * permission pressing Run in the UI needs. A key that may not run a
+         * workflow must not be able to run one by asking in JSON-RPC.
+         */
+        "POST /api/mcp"                              to Permission.WORKFLOW_RUN,
         "DELETE /api/api-keys/:id"                   to Permission.WORKSPACE_WRITE,
         "PUT /api/workspaces/member-budget/:userId"  to Permission.WORKSPACE_WRITE,
 
@@ -121,6 +163,7 @@ object RbacGuard {
         // is a connection act rather than a read — but it changes nothing, so
         // it sits at CONNECTION_TEST rather than WRITE.
         "POST /api/connections/:id/test"             to Permission.CONNECTION_TEST,
+        "POST /api/connections/test-http-request"    to Permission.CONNECTION_TEST,
         "POST /api/connections/test-unsaved"         to Permission.CONNECTION_TEST,
         "POST /api/connections/schema-preview"       to Permission.CONNECTION_TEST,
         "POST /api/connections/:id/schema-preview"   to Permission.CONNECTION_TEST,

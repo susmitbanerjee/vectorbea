@@ -99,6 +99,11 @@ class ToolNodeExecutor(
             secretService = secretService,
             dataSource = dataSource,
             sideEffects = sideEffects,
+            /* So an async tool can park rather than hold a worker for six
+               minutes. Built here because it needs nothing but the data source,
+               and because a resolver without one refuses async tools loudly
+               instead of running them down a path that cannot work. */
+            waitStore = com.vectorbea.worker.durable.wait.WaitStore(dataSource),
         )
     }
 

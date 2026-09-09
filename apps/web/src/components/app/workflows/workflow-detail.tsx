@@ -425,6 +425,7 @@ function toUiRunStatus(status: string): RunStatus {
   if (status === "failed" || status === "timed_out" || status === "enqueue_failed") return "failed";
   if (status === "running" || status === "recovering") return "running";
   if (status === "awaiting_approval" || status === "waiting_for_approval" || status === "paused") return "awaiting-approval";
+  if (status === "waiting_for_event" || status === "waiting_for_timer" || status === "yielded") return "waiting";
   if (status === "cancelled" || status === "cancellation_requested") return "cancelled";
   return "queued";
 }

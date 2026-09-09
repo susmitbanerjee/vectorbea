@@ -52,6 +52,7 @@ const STATUS_FILL: Record<string, string> = {
   running: "fill-status-live/20 stroke-status-live",
   waiting_for_approval: "fill-status-waiting/20 stroke-status-waiting",
   waiting_for_child: "fill-status-waiting/20 stroke-status-waiting",
+  waiting_for_event: "fill-status-waiting/20 stroke-status-waiting",
   /*
    * HANDED OFF IS ITS OWN STATE, and deliberately neither green nor red.
    *
@@ -75,6 +76,10 @@ const STATUS_LABEL: Record<string, string> = {
   running: "Running",
   waiting_for_approval: "Waiting for a person",
   waiting_for_child: "Waiting on its children",
+  /* Named for what it is waiting on, not just that it is waiting. "Waiting" on
+     its own tells an operator nothing they can act on; this says the run is
+     fine and the answer is coming from somewhere else. */
+  waiting_for_event: "Waiting for an external event",
   handed_off: "Handed off — neither success nor failure",
   cancelled: "Cancelled",
   superseded: "Superseded",

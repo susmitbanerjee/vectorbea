@@ -75,6 +75,7 @@ class Router {
     }
 
     data class SseRoute(
+        val method: String,
         val pathPattern: String,
         val segments: List<Segment>,
         val handler: (Request, SseEmitter) -> Unit,
@@ -84,25 +85,57 @@ class Router {
 
     /** Register a GET SSE streaming route. */
     fun sseGet(pattern: String, handler: (Request, SseEmitter) -> Unit) {
-        sseRoutes += SseRoute(
-            pathPattern = pattern,
-            segments = parsePattern(pattern),
-            handler = handler,
-        )
+        sseRoutes += SseRoute("GET", pattern, parsePattern(pattern), handler)
         // Also register a normal GET that returns 405-ish for non-SSE clients (content-type check
         // happens in HttpServer before dispatch — just ensure allowedMethods includes GET).
     }
 
-    /** Returns the matching SSE route and extracted path params, or null. */
-    fun findSseRoute(method: String, path: String): Pair<SseRoute, Map<String, String>>? {
-        if (method != "GET") return null
-        val segments = splitPath(path)
+    /**
+     * Register a POST SSE streaming route.
+     *
+     * ── WHY A POST WOULD STREAM AT ALL ──────────────────────────────────────
+     * Starting a run and watching it are one action for a caller who is waiting
+     * on the answer, and splitting them into POST-then-GET loses events: the
+     * run can reach a step, or finish, between the two requests. The stream has
+     * to open on the same request that creates the run, and creating a run is a
+     * POST — so SSE has to work over POST.
+     *
+     * The body is read before the stream opens, exactly as for a normal POST, so
+     * the handler receives a fully-formed [Request].
+     */
+    fun ssePost(pattern: String, handler: (Request, SseEmitter) -> Unit) {
+        sseRoutes += SseRoute("POST", pattern, parsePattern(pattern), handler)
+    }
+
+    /**
+     * Returns the matching SSE route and extracted path params, or null.
+     *
+     * ── WHY A POST SSE ROUTE HAS TO ASK ─────────────────────────────────────
+     * A GET SSE route is at its own path and streaming is the only thing it
+     * does. A POST one is not: `POST /api/workflows/:id/run` starts a run for
+     * every caller, and only some of them want to watch it happen. The router
+     * runs before the body is parsed, so the choice cannot come from the body —
+     * it comes from `Accept: text/event-stream`, which is what that header is
+     * for, or from `?mode=stream` for a caller who cannot set headers.
+     *
+     * Requiring the signal on POST rather than defaulting to it is what keeps
+     * every existing client working: a plain POST is still a plain POST.
+     */
+    fun findSseRoute(request: Request): Pair<SseRoute, Map<String, String>>? {
+        val segments = splitPath(request.path)
         for (route in sseRoutes) {
+            if (route.method != request.method) continue
+            if (route.method != "GET" && !wantsStream(request)) continue
             val params = matchPath(route.segments, segments) ?: continue
             return route to params
         }
         return null
     }
+
+    /** True when the caller asked for a stream rather than a single response. */
+    fun wantsStream(request: Request): Boolean =
+        request.header("accept")?.contains("text/event-stream", ignoreCase = true) == true ||
+            request.query("mode").equals("stream", ignoreCase = true)
 
     /**
      * Match [request] against registered routes.

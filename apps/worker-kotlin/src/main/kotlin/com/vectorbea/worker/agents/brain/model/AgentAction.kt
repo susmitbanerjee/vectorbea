@@ -73,6 +73,30 @@ data class AgentAction(
     val targetAgentIds: List<String>? = null,
 
     /**
+     * The signal that ends a WAIT.
+     *
+     * ── WHY AN AGENT MAY CHOOSE TO WAIT AT ALL ──────────────────────────────
+     * "I have asked the SRE what to do, wake me when they answer" is a thing an
+     * agent should be able to say. Without it the only options are to burn the
+     * remaining iterations polling, or to FAIL and lose the work — and an agent
+     * that gives up because a person was slow is not one anybody will trust with
+     * an incident.
+     *
+     * ── AND WHY THE RUNTIME VALIDATES IT LIKE EVERYTHING ELSE ───────────────
+     * Invariant 1: the model chooses, the runtime executes. A WAIT is validated
+     * exactly as a CALL_TOOL is — the name must be non-blank and within the
+     * length the store accepts, and the timeout is CLAMPED to the platform
+     * ceiling rather than trusted. A model asking to wait a year gets the
+     * maximum, not a year, and is told so in its observation.
+     */
+    @JsonProperty("waitFor")
+    val waitFor: String? = null,
+
+    /** How long the agent wants to wait, in seconds. Clamped by the runtime. */
+    @JsonProperty("waitSeconds")
+    val waitSeconds: Long? = null,
+
+    /**
      * The task contract for the delegation, as the model wrote it.
      *
      * A map rather than a parsed [com.vectorbea.worker.agents.orchestration.TaskContract]
@@ -129,6 +153,7 @@ data class AgentAction(
         HANDOFF,      // transfer control to a rostered peer; a tail call, no return
         FINAL,        // produce final output and stop
         ASK_APPROVAL, // request human approval
+        WAIT,         // park until a named signal arrives, or the deadline passes
         FAIL,         // agent decided it cannot complete the task
     }
 }

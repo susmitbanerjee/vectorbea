@@ -19,6 +19,7 @@ export function countByStatus(runs: Run[]): Record<RunStatus, number> {
     running: 0,
     queued: 0,
     "awaiting-approval": 0,
+    waiting: 0,
     cancelled: 0,
   };
   for (const run of runs) counts[run.status] += 1;

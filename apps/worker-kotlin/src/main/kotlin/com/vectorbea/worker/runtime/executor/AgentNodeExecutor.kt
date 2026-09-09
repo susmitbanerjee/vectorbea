@@ -495,6 +495,12 @@ class AgentNodeExecutor(
             /* So ASK_APPROVAL can open a real row in `run_approvals` — the same table
                the Approvals screen reads and the same gate DB_WRITE nodes use. */
             approvalStore      = com.vectorbea.worker.runtime.checkpoint.ApprovalStore(dataSource),
+            /* So a WAIT action can open a real row in `run_waits` — the same
+               table an async tool and a signal park on, swept by the same
+               reconciler. Built here rather than injected for the same reason the
+               approval store is: it needs nothing but the data source. */
+            waitStore          = com.vectorbea.worker.durable.wait.WaitStore(dataSource),
+            signalStore        = com.vectorbea.worker.durable.wait.SignalStore(dataSource),
             llmHttpClient      = llmHttpClient,
             /* One ledger per step, shared by every agent beneath it. That sharing IS
                the budget tree: a child's spend debits its parent because both are
@@ -577,6 +583,22 @@ class AgentNodeExecutor(
                         ?: "Agent '${agent.name}' is waiting for approval to continue.",
                     metadata   = mapOf(
                         "agentName"       to agent.name,
+                        "brainIterations" to result.iterationsUsed,
+                    ),
+                )
+            }
+
+            /*
+             * A step waiting on something that is not a person is also paused, and
+             * needs its own branch for exactly one reason: the run STATUS differs.
+             * An approval parks as `waiting_for_approval`, which the Approvals page
+             * reads as "somebody must decide"; a six-minute render must not appear
+             * there. Everything else about the two paths is identical.
+             */
+            if (result.stopReason == AgentLoopState.StopReason.WAITING && result.wait != null) {
+                return result.wait.copy(
+                    metadata = result.wait.metadata + mapOf(
+                        "agentName" to agent.name,
                         "brainIterations" to result.iterationsUsed,
                     ),
                 )

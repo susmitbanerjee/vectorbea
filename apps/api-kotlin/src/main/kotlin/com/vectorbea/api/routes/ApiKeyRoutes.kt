@@ -27,6 +27,15 @@ class ApiKeyRoutes(
     private val ds: DataSource,
     private val keys: ApiKeyService,
     private val guard: EntitlementGuard,
+    /**
+     * The audit trail.
+     *
+     * A key is a credential with a budget attached, so every change to one is a
+     * security event: who minted it, who rotated it, who widened its limit and
+     * when. Null degrades to no trail rather than refusing the action — losing
+     * an audit row must never lose a customer's ability to rotate a leaked key.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
     private val log = LoggerFactory.getLogger(ApiKeyRoutes::class.java)
 
@@ -34,9 +43,92 @@ class ApiKeyRoutes(
         router.get("/api/api-keys", ::list)
         router.post("/api/api-keys", ::create)
         router.delete("/api/api-keys/:id", ::revoke)
+        router.post("/api/api-keys/:id/rotate", ::rotate)
+        router.put("/api/api-keys/:id/rate-limit", ::setRateLimit)
 
         router.get("/api/workspaces/spend-by-member", ::spendByMember)
         router.put("/api/workspaces/member-budget/:userId", ::setMemberBudget)
+    }
+
+    // ── Rotation and per-key limits ───────────────────────────────────
+
+    /**
+     * Replace a key, keeping the old one alive for a bounded window.
+     *
+     * ── WHY NOT "REVOKE AND CREATE" ────────────────────────────────
+     * Because that is an outage. Between the revoke and the new key reaching
+     * every deployment that uses it, every request from those deployments fails
+     * — and "rotate your keys regularly" is advice nobody follows twice after
+     * that happens once.
+     *
+     * The overlap is bounded, because an unbounded one is not rotation. The
+     * response says exactly when the old key stops working, so the deadline is
+     * something the operator planned for rather than discovered.
+     */
+    private fun rotate(req: Request): Response {
+        val ctx = req.context()
+        val keyId = req.pathUUID("id")
+        val graceSeconds = req.query("graceSeconds")?.toLongOrNull()
+            ?.coerceIn(0L, 7L * 24 * 60 * 60)
+
+        val created = (if (graceSeconds != null)
+            keys.rotate(ctx.workspaceId, keyId, req.principal?.appUserId, graceSeconds)
+        else
+            keys.rotate(ctx.workspaceId, keyId, req.principal?.appUserId))
+            ?: throw ApiError.NotFound("API key")
+
+        audit?.recordUserAction(
+            req = req, workspaceId = ctx.workspaceId,
+            action = "api_key.rotate", targetType = "api_key", targetId = keyId,
+            after = mapOf("newKeyId" to created.id.toString(), "graceSeconds" to graceSeconds),
+        )
+
+        log.info("[apikey] {} rotated by {}", keyId, req.principal?.appUserId)
+        return Response.ok(mapOf(
+            "id" to created.id.toString(),
+            "name" to created.name,
+            "prefix" to created.prefix,
+            /* The secret, once. Same contract as create: it is in this response
+               and nowhere else, ever again. */
+            "key" to created.secret,
+            "rotatedFrom" to keyId.toString(),
+            "message" to "The previous key keeps working for " +
+                "${(graceSeconds ?: 86_400L) / 3600} hours. Deploy this one before then.",
+        ))
+    }
+
+    /**
+     * Give one key its own ceiling.
+     *
+     * Clamped to the plan's limit inside the service, so this cannot be a way to
+     * buy throughput by adding keys — it can only ever narrow.
+     */
+    private fun setRateLimit(req: Request): Response {
+        val ctx = req.context()
+        val keyId = req.pathUUID("id")
+
+        data class Body(val perMinute: Int? = null)
+        val body = if (req.body.isBlank()) Body() else req.bodyAs<Body>()
+
+        if (!keys.setRateLimit(ctx.workspaceId, keyId, body.perMinute)) {
+            throw ApiError.NotFound("API key")
+        }
+
+        audit?.recordUserAction(
+            req = req, workspaceId = ctx.workspaceId,
+            action = "api_key.rate_limit", targetType = "api_key", targetId = keyId,
+            after = mapOf("perMinute" to body.perMinute),
+        )
+
+        return Response.ok(mapOf(
+            "id" to keyId.toString(),
+            "rateLimitPerMinute" to body.perMinute,
+            "planCeiling" to keys.rateLimitPerMinute(ctx.workspaceId),
+            "message" to if (body.perMinute == null)
+                "This key now uses the workspace's plan limit."
+            else
+                "This key is limited to ${body.perMinute} requests per minute.",
+        ))
     }
 
     // ── Keys ──────────────────────────────────────────────────────────────────

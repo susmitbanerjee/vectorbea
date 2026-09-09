@@ -114,7 +114,8 @@ Full baseline and migration order: `/docs/audit/CURRENT-STATE.md`.
 Design docs: docs/AGENT-HARNESS-ARCHITECTURE.md, docs/AGENT-TRACE-AND-DEBUGGER.md,
 docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md,
 docs/PLANS-AND-ENTITLEMENTS.md, docs/RETENTION.md,
-docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md, docs/HTTP-TOOLS.md.
+docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md, docs/HTTP-TOOLS.md,
+docs/WAITS-AND-SIGNALS.md, docs/INGRESS.md.
 Read the relevant sections before changing runtime code. The docs explain WHY
 each guard exists; most were written after a production bug.
 
@@ -190,6 +191,33 @@ each guard exists; most were written after a production bug.
    secret, and `SpecSecretScan` rejects a document that inlines one, because
    that column is read by the list endpoint, rendered in a form, snapshotted
    into every version and shown in re-import diffs. See docs/HTTP-TOOLS.md.
+15. A run parks through the WAIT PRIMITIVE and nothing else. Approval, async
+   tools, signals and the agent's own WAIT action are kinds of one thing —
+   invariant 9 applied to suspension. A second parking mechanism means a second
+   timeout policy, a second reconciler sweep and a second way for a run to be
+   stuck forever, and only one of those would be tested. Every wait carries a
+   deadline (clamped, never absent), resolves by compare-and-set on
+   `status = 'waiting'` so a redelivered callback resolves it exactly once, and
+   is keyed by a derivation that survives re-execution. Waiting consumes no
+   wall-clock budget because a wait ends the tick, not because anything is
+   subtracted afterwards. A new kind is not done until the reconciler sweeps it —
+   `WaitReconciliationTest` walks the enum, so it fails until then. The
+   approval gate is the one kind still parking through its own mechanism; that
+   migration is a stop-and-ask, and docs/WAITS-AND-SIGNALS.md §12 says what it
+   should look like. See docs/WAITS-AND-SIGNALS.md.
+
+16. A run starts through RUN INGRESS and nothing else. API, webhook, schedule,
+   event and MCP are adapters that say who is asking and what for; the rate
+   limit, the plan quota, the fair placement, the admission decision, the
+   metering and the events happen once, in `RunIngress`. This is not tidiness:
+   the sequence used to live in a route handler, so `WorkflowScheduler` could
+   not call it and reimplemented the half it remembered — and scheduled runs
+   skipped every plan check in the product, for free, until somebody read the
+   two functions side by side. A run started five different ways differs in
+   `trigger_type` and in nothing else, and `IngressAcceptanceTest` reads the
+   rows back to prove it. Idempotency is claimed BEFORE the checks and released
+   by every refusal, because a run that was refused did not happen and its key
+   must still work. See docs/INGRESS.md.
 
 ### Conventions
 
@@ -209,7 +237,10 @@ Ask before proceeding if a change would touch:
 - the run status state machine or the status CAS
 - run lease acquisition or renewal
 - the event sequence assignment
-- idempotency key derivation
+- idempotency key derivation, including `RunWait.keyFor` and the callback
+  token derived from it
+- the order of checks in `RunIngress.start`, or where the idempotency claim
+  sits within it
 - anything that alters what happens on resume
 
 These are the places where a plausible-looking change causes duplicate side

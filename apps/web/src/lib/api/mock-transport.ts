@@ -753,6 +753,12 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     },
   ],
 
+  /* What a run is parked on. Empty for every fixture run, and correctly so:
+     none of them is parked, and inventing a wait here would make the banner
+     appear on runs that are not waiting for anything. `?demo=waiting` on the
+     run detail page is where the populated state lives. */
+  ["GET", "/api/runs/:id/waits", (_params, init) => paged([], init)],
+
   [
     "GET",
     "/api/workflows",
@@ -1006,6 +1012,12 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
      the provider; a fixture cannot, and pretending otherwise would let a demo
      "verify" a credential that has never been dialled. So it reports success
      and names the reason in the same breath. */
+  [
+    "POST",
+    "/api/connections/test-http-request",
+    () => ({ status: null, latencyMs: 0, headers: {}, body: "", sizeBytes: 0, truncated: false,
+      errorCode: "LIVE_API_REQUIRED", message: "Request sending requires a live API server. No request was sent in demo mode." }),
+  ],
   [
     "POST",
     "/api/connections/test-unsaved",

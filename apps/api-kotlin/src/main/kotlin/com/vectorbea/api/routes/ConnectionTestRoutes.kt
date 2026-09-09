@@ -36,10 +36,18 @@ class ConnectionTestRoutes(
 ) {
     private val log = LoggerFactory.getLogger(ConnectionTestRoutes::class.java)
     private val tester = ConnectionTester(secretService)
+    private val httpRequestTester = com.vectorbea.api.connector.HttpRequestTester()
 
     fun register(router: Router) {
         router.post("/api/connections/:id/test", ::testSaved)
         router.post("/api/connections/test-unsaved", ::testUnsaved)
+        router.post("/api/connections/test-http-request") { req ->
+            req.context()
+            val result = httpRequestTester.test(
+                req.bodyAs<com.vectorbea.api.connector.HttpTestRequest>()
+            )
+            Response.ok(result).copy(headers = mapOf("Content-Type" to "application/json; charset=utf-8", "Cache-Control" to "no-store"))
+        }
         router.post("/api/connections/:id/rotate-secret", ::rotateSecret)
         router.get("/api/connections/:id/list-models", ::listModels)
     }

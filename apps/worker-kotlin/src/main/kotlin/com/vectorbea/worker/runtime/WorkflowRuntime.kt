@@ -157,6 +157,15 @@ class WorkflowRuntime(
      * batch — the conservative default.
      */
     private val runClassLookup: com.vectorbea.worker.queue.RunClassLookup? = null,
+    /**
+     * Delivers signals into a live run at its step boundaries.
+     *
+     * Null disables delivery entirely, which is what every unit test that builds
+     * this runtime directly wants — and is safe, because an undelivered signal
+     * stays unconsumed and the reconciler's `signal_pending` arm still finds it.
+     * A signal is never lost by this being absent, only delayed.
+     */
+    private val signals: com.vectorbea.worker.durable.wait.SignalStore? = null,
 ) {
     private val log      = logger()
     private val registry = NodeExecutorRegistry(
@@ -185,6 +194,20 @@ class WorkflowRuntime(
     companion object {
         /** Safety cap on configured per-node retries. */
         private const val MAX_NODE_RETRIES = 5
+
+        /**
+         * The step output delivered signals accumulate under.
+         *
+         * A reserved id rather than a node in the graph: signals arrive from
+         * outside and belong to no node, but they must be addressable from the
+         * expression language — `steps.__signals__.latest.payload` — and must
+         * survive a checkpoint. Being a step output gets both for free. The
+         * double underscore keeps it out of the space a user's node id can
+         * occupy, which is checked at publish time.
+         */
+        const val SIGNALS_STEP_ID = "__signals__"
+
+        private val mapper = com.fasterxml.jackson.databind.ObjectMapper()
 
         /**
          * Node types that reach outside Vectorbea and cannot be undone.
@@ -296,6 +319,25 @@ class WorkflowRuntime(
 
         data class CeilingExceeded(
             val breach: com.vectorbea.worker.runtime.budget.RunCeilings.Breach,
+        ) : ExecutionResult()
+
+        /**
+         * The run parked on an external event. Progress is checkpointed and the
+         * worker permit is released; the wait row says what wakes it.
+         *
+         * Distinct from [WaitingForApproval] because the run STATUS differs —
+         * approvals keep `waiting_for_approval`, which the Approvals page reads
+         * as "a person must decide", and a video render must not appear there.
+         * Distinct from [Throttled] because the resume is not time-gated: a
+         * callback, a poll or a signal wakes it, and the timeout is a backstop
+         * rather than the plan.
+         */
+        data class Waiting(
+            val waitId: String,
+            val kind: String,
+            val nodeId: String,
+            val label: String,
+            val timeoutAt: java.time.Instant?,
         ) : ExecutionResult()
     }
 
@@ -543,6 +585,22 @@ class WorkflowRuntime(
                 return ExecutionResult.CeilingExceeded(breach)
             }
 
+            /*
+             * ── THE STEP BOUNDARY ───────────────────────────────────────────
+             *
+             * "Delivered to the run at its next step boundary" is this line, and
+             * this is the only place it can be: between finishing whatever ran
+             * last and choosing what runs next. Delivering mid-node would mean a
+             * node's inputs changing underneath it while it executes.
+             *
+             * Checked BEFORE the completion test, so a signal that arrives while
+             * the final node is running is delivered rather than dropped by a run
+             * that was one iteration from finishing. It is a bounded index probe
+             * on a partial index over unconsumed rows — empty for almost every
+             * run, so the cost of asking is a probe, not a scan.
+             */
+            deliverPendingSignals(ctx, source)
+
             // Check for completion
             if (scheduler.isRunComplete(ctx)) {
                 val endNode  = graph.nodes.firstOrNull { it.nodeType == NodeType.END && ctx.isCompleted(it.id) }
@@ -771,6 +829,7 @@ class WorkflowRuntime(
                 status = when (result) {
                     is NodeResult.Completed       -> "ok"
                     is NodeResult.ApprovalPaused  -> "paused"
+                    is NodeResult.Waiting         -> "paused"
                     is NodeResult.Throttled       -> "paused"
                     is NodeResult.Unsupported     -> "skipped"
                     is NodeResult.Failed          -> "error"
@@ -859,7 +918,7 @@ class WorkflowRuntime(
                 // provider told us when to come back; burning attempts against
                 // that clock just fails the node faster.
                 is NodeResult.ApprovalPaused, is NodeResult.Unsupported,
-                is NodeResult.Throttled -> return result
+                is NodeResult.Throttled, is NodeResult.Waiting -> return result
                 is NodeResult.Failed -> {
                     if (guarded) stepGuard.markFailed(ctx.runId, node.id, attempt,
                         """{"reason":${jsonStr(result.reason.take(300))}}""")
@@ -1085,6 +1144,15 @@ class WorkflowRuntime(
                 startedAt = startedAt,
             )
             is NodeResult.ApprovalPaused -> captureDebugSnapshot(
+                node = node, ctx = ctx, status = "running",
+                resolvedInput = resolvedInputs, output = null,
+                startedAt = startedAt,
+            )
+            /* Still `running` in the debugger, exactly as an approval is: the step
+               has not finished, and its resolved inputs are what somebody opening
+               the debugger on a parked run wants to see. Marking it complete would
+               hide the node the run is actually sitting on. */
+            is NodeResult.Waiting -> captureDebugSnapshot(
                 node = node, ctx = ctx, status = "running",
                 resolvedInput = resolvedInputs, output = null,
                 startedAt = startedAt,
@@ -1471,6 +1539,42 @@ class WorkflowRuntime(
 
             ExecutionResult.WaitingForApproval(result.approvalId, node.id)
         }
+
+        is NodeResult.Waiting -> {
+            /* GATED for the same reason an approval is: the ribbon's ember halo is
+               how a reader tells "stopped waiting for something" from "still
+               working", and a six-minute render is exactly the case where those
+               two look identical without it. */
+            recordRibbon(ctx, node.id, RibbonWriter.State.GATED)
+            emitEvent(ctx, EventType.RUN_WAIT_STARTED, "waiting_for_event", source,
+                title   = "Waiting: ${nodeLabel(node)}",
+                summary = result.label,
+                stepId  = node.id,
+                meta    = "{\"waitId\":${jsonStr(result.waitId)}," +
+                          "\"waitKind\":${jsonStr(result.kind)}," +
+                          "\"nodeId\":${jsonStr(node.id)}}")
+
+            /*
+             * The checkpoint is written UNCONDITIONALLY, unlike the approval arm
+             * above which respects `checkpointPolicy.enabled`.
+             *
+             * An approval that skipped its checkpoint still resumes correctly: the
+             * approval node re-executes and reads its decision out of the
+             * database. A wait carries a RESULT — the render's output, the
+             * signal's payload — and resuming with no checkpoint would replay the
+             * node from before it submitted, which for an async tool means
+             * submitting the six-minute job a second time.
+             */
+            writeCheckpoint(node.id, ctx, source)
+
+            ExecutionResult.Waiting(
+                waitId = result.waitId,
+                kind = result.kind,
+                nodeId = node.id,
+                label = result.label,
+                timeoutAt = result.timeoutAt,
+            )
+        }
     } }
 
     // ── Parallel node execution ───────────────────────────────────────────────
@@ -1603,6 +1707,19 @@ class WorkflowRuntime(
                 // compiling instead of silently logging the wrong thing.
                 is ExecutionResult.CeilingExceeded    -> "ceiling: ${result.breach.dimension}"
                 is ExecutionResult.Throttled          -> "throttled by ${result.provider}"
+                /*
+                 * A branch that parks is named here for the same reason the
+                 * ceiling arm above is: so it appears in the log rather than being
+                 * swallowed by an `else`.
+                 *
+                 * It is a real possibility, not a defensive one — an async tool
+                 * inside a parallel fan-out parks its branch, and the branch
+                 * result travels up to `executeParallelNode`, which returns the
+                 * first non-succeeded result. So the wait reaches the top level
+                 * and the run parks, which is correct: the fan-out cannot join
+                 * until that branch has its answer.
+                 */
+                is ExecutionResult.Waiting            -> "waiting on ${result.kind}"
             }
             log.info("[runtime] branch {} → {} [parallelId={}]", entryNodeId, status, parallelNode.id)
         }
@@ -1747,6 +1864,63 @@ class WorkflowRuntime(
      * (regardless of node checkpoint policy) so resume continues exactly here
      * without re-executing completed nodes.
      */
+    /**
+     * Take delivery of anything sent to this run since the last step.
+     *
+     * ── WHERE A DELIVERED SIGNAL LANDS ──────────────────────────────────────
+     * As a step output under [SIGNALS_STEP_ID], so it is addressable from the
+     * expression language the workflow already has — `steps.__signals__.latest`
+     * — and so it survives the checkpoint like every other step output. A
+     * separate side-channel would need its own persistence, its own restore, and
+     * its own syntax, and would be invisible to every existing mapping.
+     *
+     * ── ACCUMULATED, NEVER REPLACED ─────────────────────────────────────────
+     * Three alerts for one incident are three items in order, not the third one.
+     * A run that only ever saw the newest would be unable to say the alert count
+     * went up, which for an incident run is most of the information.
+     *
+     * ── CONSUMED AFTER IT IS VISIBLE, NOT BEFORE ────────────────────────────
+     * The output is written first and the rows marked consumed second. A crash
+     * between them redelivers the signal on the next tick — at-least-once, and
+     * the run sees a duplicate item — where the other order would lose it
+     * silently. For an incident alert, seeing one twice beats never seeing it.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun deliverPendingSignals(ctx: RuntimeContext, source: String) {
+        val store = signals ?: return
+        val pending = try {
+            store.pending(ctx.runId)
+        } catch (e: Exception) {
+            log.warn("[runtime] signal delivery lookup failed [runId={}]: {}", ctx.runId, e.message)
+            return
+        }
+        if (pending.isEmpty()) return
+
+        val existing = ctx.getOutput(SIGNALS_STEP_ID)
+        val items = ((existing["items"] as? List<Map<String, Any?>>) ?: emptyList()).toMutableList()
+        pending.forEach { items += it.asObservation(mapper) }
+
+        ctx.setOutput(SIGNALS_STEP_ID, mapOf(
+            "items" to items,
+            "count" to items.size,
+            "latest" to (items.lastOrNull() ?: emptyMap<String, Any?>()),
+            /* The names seen so far, so a branch can ask "has a `cancel` arrived"
+               without walking the list in an expression. */
+            "names" to items.mapNotNull { it["signal"] as? String }.distinct(),
+        ))
+
+        pending.forEach { signal ->
+            emitEvent(ctx, EventType.SIGNAL_DELIVERED, "running", source,
+                title = "Signal delivered: ${signal.name}",
+                summary = "Signal #${signal.sequence} reached the run at a step boundary.",
+                meta = "{\"signal\":${jsonStr(signal.name)},\"sequence\":${signal.sequence}}")
+        }
+
+        store.consume(pending.map { it.id }, waitId = null)
+        log.info("[runtime] delivered {} signal(s) at step boundary [runId={}]",
+            pending.size, ctx.runId)
+    }
+
     private fun yieldRun(
         ctx: RuntimeContext,
         source: String,

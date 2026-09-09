@@ -52,6 +52,16 @@ class RunProcessor(
      */
     private val childDispatcher: com.vectorbea.worker.agents.orchestration.ChildRunDispatcher? = null,
     /**
+     * Closes any wait a run was still holding when it became terminal.
+     *
+     * Defaulted from [dataSource] rather than injected, because a processor
+     * without it would leave the sweeper polling for jobs on cancelled runs and
+     * the callback endpoint accepting completions for them — a leak with no
+     * upper bound. Overridable so a test can assert the cancellation.
+     */
+    private val waits: com.vectorbea.worker.durable.wait.WaitStore? =
+        com.vectorbea.worker.durable.wait.WaitStore(dataSource),
+    /**
      * Writes what the run consumed to the billing ledger, once, at the terminal
      * transition. Defaulted rather than injected because there is no
      * configuration to make — it needs the same DataSource this processor already
@@ -590,7 +600,11 @@ class RunProcessor(
             status       = "running",
             startedAt    = start,
             workerId     = workerId,
-            fromStatuses = listOf("waiting_for_approval", "recovering", "waiting_for_timer", "yielded", "queued"),
+            /* `waiting_for_event` joins the resumable set — the one state-machine
+               change the wait primitive needs. Every other parked status keeps its
+               meaning, so no existing resume path changes. */
+            fromStatuses = listOf("waiting_for_approval", "waiting_for_event", "recovering",
+                "waiting_for_timer", "yielded", "queued"),
         )
         if (!resumed) {
             log.warn("[processor] RESUME_RUN skipped — run not in a resumable state (current={}) [runId={}]",
@@ -932,6 +946,33 @@ class RunProcessor(
                 WorkerMetrics.runSuspendedTotal.inc("approval")
                 log.info("[processor] run paused for approval [runId={}, approvalId={}]",
                     job.runId, execResult.approvalId)
+            }
+
+            is WorkflowRuntime.ExecutionResult.Waiting -> {
+                /*
+                 * The six-minute render holds no worker: the status moves, the
+                 * permit is released when this returns, and nothing sleeps. The
+                 * run resumes when a callback, a poll or a signal resolves the
+                 * wait, or when its deadline passes.
+                 *
+                 * `waiting_for_event` and not `waiting_for_approval`, because the
+                 * Approvals page reads that status as "a person must decide" and a
+                 * video render appearing in a queue nobody can action would be a
+                 * worse bug than the one being fixed. The wait row carries the
+                 * kind.
+                 */
+                updateRunStatus(
+                    runId = job.runId, status = "waiting_for_event",
+                    startedAt = start, workerId = workerId, fromStatus = "running",
+                )
+                /* Labelled by KIND, so the metric answers "are async tools parking
+                   runs, or are signals" without a join. Same counter as approvals
+                   and budget yields, which is what makes the comparison against
+                   `worker_in_flight` meaningful: all suspension in one series. */
+                WorkerMetrics.runSuspendedTotal.inc(execResult.kind)
+                log.info("[processor] run parked on a wait [runId={}, kind={}, waitId={}, node={}, timeoutAt={}]",
+                    job.runId, execResult.kind, execResult.waitId, execResult.nodeId,
+                    execResult.timeoutAt ?: "none")
             }
 
             is WorkflowRuntime.ExecutionResult.Yielded -> {
@@ -1424,6 +1465,28 @@ class RunProcessor(
          * `children_terminal` arm looks for.
          */
         runCatching { childDispatcher?.onChildTerminal(runId) }
+        /*
+         * ── CLOSE ANY WAIT THIS RUN WAS STILL HOLDING ───────────────────────
+         *
+         * Behind the same CAS, and for a reason that is not tidiness. A run
+         * cancelled while an async tool was rendering leaves a `waiting` row,
+         * and that row is live in three places: the sweeper keeps polling the
+         * provider for a job nobody will collect, the callback endpoint keeps
+         * accepting completions, and the reconciler keeps finding a run whose
+         * wait resolved and re-enqueuing a resume the status CAS then refuses —
+         * forever, until the deadline.
+         *
+         * Cancelling here ends all three at once. It is also the only place that
+         * can: this is the one function that runs exactly once per terminal
+         * transition, however the run got there.
+         */
+        runCatching {
+            val cancelled = waits?.cancelAllForRun(runId, "the run reached $status")
+            if (cancelled != null && cancelled > 0) {
+                log.info("[processor] cancelled {} outstanding wait(s) on terminal run [runId={}, status={}]",
+                    cancelled, runId, status)
+            }
+        }
         /*
          * ── SHIP THE TRACE, ONCE, AFTER THE TREE IS COMPLETE ────────────────
          *

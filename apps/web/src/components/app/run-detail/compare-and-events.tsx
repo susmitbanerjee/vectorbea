@@ -189,12 +189,35 @@ function StateChip({ state }: { state: string | null }) {
 
 /* ── Event history ────────────────────────────────────────────────────────── */
 
-const EVENT_TONE = (type: string) =>
-  type.includes("failed") ? "text-status-failed"
-  : type.includes("committed") || type.includes("succeeded") ? "text-status-success"
-  : type.includes("gate") || type.includes("suspended") ? "text-status-waiting"
-  : type.includes("lease") ? "text-status-live"
-  : "text-fg-secondary";
+/*
+ * ── THIS MATCHED NOTHING ─────────────────────────────────────────────────────
+ * Event types come off the API as written — `NODE_COMMITTED`, `RUN_FAILED`,
+ * `RUN_WAIT_STARTED` — and every branch below tested a lowercase substring, so
+ * the whole column rendered in one grey. A tone table that silently never fires
+ * is worse than none: it reads as "nothing here is remarkable" on a run where a
+ * step failed. Lowercased once, up front.
+ *
+ * The wait events are their own tone rather than borrowing the failure hue.
+ * `RUN_WAIT_TIMED_OUT` is a failure and is drawn as one; `RUN_WAIT_STARTED` and
+ * `RUN_WAIT_RESOLVED` bracket a stretch where the run was parked and healthy,
+ * which is the thing the timeline exists to make visible. See
+ * docs/WAITS-AND-SIGNALS.md.
+ */
+const EVENT_TONE = (rawType: string) => {
+  const type = rawType.toLowerCase();
+  return (
+    type.includes("timed_out") || type.includes("timeout") || type.includes("failed")
+      ? "text-status-failed"
+    : type.includes("committed") || type.includes("succeeded") || type.includes("resolved")
+      ? "text-status-success"
+    : type.includes("wait") || type.includes("signal")
+      || type.includes("gate") || type.includes("approval") || type.includes("suspended")
+      ? "text-status-waiting"
+    : type.includes("lease") || type.includes("started") || type.includes("running")
+      ? "text-status-live"
+    : "text-fg-secondary"
+  );
+};
 
 /**
  * The audit substrate, rendered to feel authoritative.

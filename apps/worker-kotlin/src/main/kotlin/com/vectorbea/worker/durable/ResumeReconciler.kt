@@ -36,6 +36,7 @@ import javax.sql.DataSource
  * | `waiting_for_child` | last child terminal, parent's resume enqueue swallowed |
  * | `recovering` | `CrashRecoveryLoop` marks the status BEFORE it enqueues, and does not scan `recovering` — so the recovery loop can strand the run it is rescuing |
  * | `waiting_for_timer` | `TimerScheduler` marks the timer `fired` BEFORE it enqueues, and `findDueTimers` requires `scheduled` — so a failed enqueue is never retried |
+ * | `waiting_for_event` | a wait resolved, expired, or has a signal waiting for it, and the resume that should have followed was lost |
  *
  * Four bugs, one failure mode: **a durable state change followed by a
  * best-effort enqueue.** One reconciler, because four would drift and because
@@ -97,6 +98,39 @@ class ResumeReconciler(
         CHILDREN_TERMINAL("children_terminal"),
         RECOVERING_STRANDED("recovering_stranded"),
         TIMER_FIRED("timer_fired"),
+
+        /**
+         * A wait was resolved and the resume that should have followed was lost.
+         *
+         * The same durable-state-then-best-effort-enqueue shape as the four
+         * above, arriving from `WaitSweeper` and from the API's callback route.
+         * Covers EVERY wait kind — async tool, signal, agent wait and approval —
+         * because the predicate is about `run_waits.status`, not about what the
+         * run was waiting for. That is the point of having one parking primitive:
+         * the fifth wait kind somebody adds needs no arm here.
+         */
+        WAIT_RESOLVED("wait_resolved"),
+
+        /**
+         * A wait's deadline passed and nothing swept it.
+         *
+         * `WaitSweeper` is what normally notices, so this arm fires when the
+         * sweeper is disabled, has crashed, or is behind. Without it, turning the
+         * sweeper off would silently make every timeout permanent — which is the
+         * "parked forever" failure the timeout exists to prevent, reintroduced by
+         * an environment variable.
+         */
+        WAIT_EXPIRED("wait_expired"),
+
+        /**
+         * A parked run has an unconsumed signal that would resolve its wait.
+         *
+         * The delivery path is: the API accepts the signal, resolves a matching
+         * wait, and enqueues a resume. If that enqueue is lost, the signal sits
+         * unconsumed against a parked run — and unlike the arms above, waiting for
+         * the timeout would be wrong, because the answer has already arrived.
+         */
+        SIGNAL_PENDING("signal_pending"),
     }
 
     data class Stuck(
@@ -159,12 +193,13 @@ class ResumeReconciler(
      */
     fun findStuck(): List<Stuck> = dataSource.connection.use { conn ->
         conn.prepareStatement(SWEEP_SQL).use { st ->
-            st.setLong(1, minParkedMs)
-            st.setLong(2, minParkedMs)
-            st.setLong(3, minParkedMs)
-            st.setLong(4, minParkedMs)
-            st.setInt(5, maxAttempts)
-            st.setInt(6, batchSize)
+            /* One placeholder per arm, in the order they appear in the union.
+               Seven arms now; the count is asserted by `WaitReconciliationTest`,
+               which walks `WaitKind.entries` so an eighth arm added without a
+               binding fails the build rather than the sweep. */
+            for (arm in 1..7) st.setLong(arm, minParkedMs)
+            st.setInt(8, maxAttempts)
+            st.setInt(9, batchSize)
             st.executeQuery().use { rs ->
                 val out = mutableListOf<Stuck>()
                 while (rs.next()) out += Stuck(
@@ -277,7 +312,8 @@ private val SWEEP_SQL = """
 WITH parked AS (
     SELECT r.id, r.workspace_id, r.workflow_id, r.status, r.updated_at
       FROM agent_runs r
-     WHERE r.status IN ('waiting_for_approval','waiting_for_child','recovering','waiting_for_timer')
+     WHERE r.status IN ('waiting_for_approval','waiting_for_child','recovering',
+                        'waiting_for_timer','waiting_for_event')
 ),
 candidates AS (
     -- 1. A decision is on file and the run is still waiting for it.
@@ -327,6 +363,54 @@ candidates AS (
        AND EXISTS (
              SELECT 1 FROM workflow_timers t
               WHERE t.run_id = p.id AND t.status = 'fired')
+
+    UNION ALL
+
+    -- 5. A wait resolved and the resume enqueue was lost. Every kind: the
+    --    predicate is about the WAIT's status, not about what was waited on, so
+    --    a new wait kind is covered the day it is added.
+    --
+    --    `NOT EXISTS ... still waiting` rather than `EXISTS ... resolved`: a run
+    --    holding two waits, one resolved and one still parked, is correctly
+    --    parked and must not be woken. Only a run with nothing left to wait for
+    --    is stuck.
+    SELECT p.id, p.workspace_id, p.workflow_id, 'wait_resolved' AS reason
+      FROM parked p
+     WHERE p.status IN ('waiting_for_event','waiting_for_approval')
+       AND p.updated_at < now() - make_interval(secs => ? / 1000.0)
+       AND EXISTS (
+             SELECT 1 FROM run_waits w
+              WHERE w.run_id = p.id AND w.status <> 'waiting')
+       AND NOT EXISTS (
+             SELECT 1 FROM run_waits w
+              WHERE w.run_id = p.id AND w.status = 'waiting')
+
+    UNION ALL
+
+    -- 6. A wait's deadline passed and nothing swept it. `WaitSweeper` normally
+    --    does; this arm is what stops disabling the sweeper turning every
+    --    timeout into a permanent park.
+    SELECT p.id, p.workspace_id, p.workflow_id, 'wait_expired' AS reason
+      FROM parked p
+     WHERE p.status = 'waiting_for_event'
+       AND p.updated_at < now() - make_interval(secs => ? / 1000.0)
+       AND EXISTS (
+             SELECT 1 FROM run_waits w
+              WHERE w.run_id = p.id AND w.status = 'waiting'
+                AND w.timeout_at IS NOT NULL AND w.timeout_at < now())
+
+    UNION ALL
+
+    -- 7. A signal is sitting unconsumed against a parked run. Unlike every arm
+    --    above, waiting for the deadline would be wrong here: the answer has
+    --    already arrived and is in the table.
+    SELECT p.id, p.workspace_id, p.workflow_id, 'signal_pending' AS reason
+      FROM parked p
+     WHERE p.status IN ('waiting_for_event','waiting_for_approval')
+       AND p.updated_at < now() - make_interval(secs => ? / 1000.0)
+       AND EXISTS (
+             SELECT 1 FROM run_signals s
+              WHERE s.run_id = p.id AND s.consumed_at IS NULL)
 )
 SELECT c.id, c.workspace_id, c.workflow_id, c.reason,
        COALESCE(a.attempts, 0) AS attempts

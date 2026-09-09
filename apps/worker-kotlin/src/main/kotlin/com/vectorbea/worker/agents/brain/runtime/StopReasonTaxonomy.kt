@@ -84,6 +84,12 @@ object StopReasonTaxonomy {
                    one is how "approve this" becomes "why did it break". */
                 Classification.Waiting("a human approval")
 
+            StopReason.WAITING ->
+                /* Same argument, different thing waited on. A six-minute render in
+                   progress is not a failure, and classifying it as one would put a
+                   working run in the failure metrics and on somebody's dashboard. */
+                Classification.Waiting("an external event")
+
             // ── Unambiguous ───────────────────────────────────────────────────
             StopReason.MAX_ITERATIONS ->
                 Classification.Failed(FailureVerdict(FailureClass.MODEL_BEHAVIOR,

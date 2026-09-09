@@ -196,6 +196,14 @@ open class RunEventStore(
         // Parked: the thread stops here and resumes from a different message.
         EventType.RUN_YIELDED, EventType.RUN_REENQUEUED, EventType.RUN_RESUMED,
         EventType.APPROVAL_REQUESTED, EventType.AGENT_APPROVAL_REQUESTED,
+        /* A wait is a park: the thread stops here and the run resumes from a
+           different message, which is precisely the condition this set is for.
+           A dropped RUN_WAIT_STARTED would leave a run that is visibly parked
+           with nothing on its timeline saying why — and a dropped
+           RUN_WAIT_TIMED_OUT would leave the acceptance criterion ("times out
+           with a legible reason") true in the database and false on screen. */
+        EventType.RUN_WAIT_STARTED, EventType.RUN_WAIT_RESOLVED,
+        EventType.RUN_WAIT_TIMED_OUT, EventType.SIGNAL_DELIVERED,
         /* Handed to a successor run. `RUN_CONTINUED_AS_NEW` was already here and
            the three transitions that produce it were not, which made the boundary
            legible from one side only. RECOMMENDED stays out: it is advice, not a
@@ -377,6 +385,43 @@ open class RunEventStore(
          * one.
          */
         RUN_RESUMED("RUN_RESUMED"),
+
+        /**
+         * The run parked on a wait — an async tool, a signal, an agent's own
+         * decision to wait. Approvals keep [APPROVAL_REQUESTED]; these are the
+         * three kinds that are not a person deciding.
+         *
+         * The pair with [RUN_WAIT_RESOLVED] is what lets the timeline draw a
+         * labelled wait SPAN rather than an unexplained gap between two ticks —
+         * which is what a six-minute render looks like without them.
+         */
+        RUN_WAIT_STARTED("RUN_WAIT_STARTED"),
+        RUN_WAIT_RESOLVED("RUN_WAIT_RESOLVED"),
+
+        /**
+         * The wait's deadline passed with nothing arriving.
+         *
+         * Its own type rather than a RESOLVED with a flag, because the timeline
+         * grades severity by name and "the provider never called back" is not the
+         * same event as "the render finished". It is also the acceptance
+         * criterion: a callback that never comes must produce a legible reason,
+         * not a permanently parked run.
+         */
+        RUN_WAIT_TIMED_OUT("RUN_WAIT_TIMED_OUT"),
+
+        /** A signal was accepted for this run. Recorded when it arrives. */
+        SIGNAL_RECEIVED("SIGNAL_RECEIVED"),
+
+        /**
+         * The run actually took delivery — at a step boundary, or by being
+         * resumed from a matching wait.
+         *
+         * Separate from [SIGNAL_RECEIVED] because the gap between them is the
+         * interesting number during an incident review: "the second alert arrived
+         * at 03:14 and the run saw it at 03:19" is a different story from "the run
+         * never saw it".
+         */
+        SIGNAL_DELIVERED("SIGNAL_DELIVERED"),
         // Scheduling-fairness signals. NOTE: these are operational and HIGH-FREQUENCY
         // under load — they are exposed ONLY via metrics/logs (WorkerMetrics.tenantThrottled
         // / poolSaturated) and MUST NOT be appendEvent'd to run_events per poll.

@@ -43,6 +43,12 @@ export interface RunDetailData {
   /** The raw detail response — `outputJson` and `errorJson` live only here. */
   detail: contracts.RunDetail | null;
   events: contracts.RunEvent[];
+  /**
+   * What the run is parked on right now. Empty for a run that is not parked,
+   * and empty for a finished one — its waits are history, and history is in
+   * `events`.
+   */
+  waits: contracts.RunWait[];
   incident: contracts.FailureIncident | null;
   loading: boolean;
   /** True only when the API positively answered 404. */
@@ -63,7 +69,22 @@ export interface RunDetailData {
 const IN_FLIGHT = new Set<contracts.RunStatus>([
   "queued", "running", "recovering", "yielded",
   "waiting_for_approval", "awaiting_approval", "waiting_for_timer",
+  /* Omitting this is how a six-minute render looks like a hung page: the run is
+     parked, more IS going to happen, and the screen would have stopped looking
+     for it until somebody reloaded. */
+  "waiting_for_event",
   "cancellation_requested", "paused",
+]);
+
+/**
+ * Statuses where the run is parked on a wait rather than executing.
+ *
+ * A subset of [IN_FLIGHT], and deliberately not derived from it: `queued` and
+ * `running` are in flight and have nothing to be parked on, and asking the waits
+ * endpoint about them would be a request per poll for an always-empty list.
+ */
+const PARKED = new Set<contracts.RunStatus>([
+  "waiting_for_approval", "awaiting_approval", "waiting_for_event",
 ]);
 
 export function useRunDetailData(runId: string): RunDetailData {
@@ -88,6 +109,25 @@ export function useRunDetailData(runId: string): RunDetailData {
     queryFn: () => api.runs.events(runId, { ...scope, page: 1, pageSize: 200 }),
     // Pointless before the run exists, and pointless if it never did.
     enabled: enabled && Boolean(run.data),
+    freshness: "live",
+  });
+
+  /*
+   * ── WHAT THE RUN IS PARKED ON ────────────────────────────────────────────
+   * Asked only while the run is actually parked. A run that is running has no
+   * active waits, so the request would be a round trip to learn nothing, on a
+   * page that already polls.
+   *
+   * Ten seconds, matching the run-record poll rather than the stream: a wait's
+   * elapsed and remaining are clocks, and nothing emits an event as they tick.
+   * Anything faster would be redrawing a countdown from the server that the
+   * page can just as well not pretend to have to the second.
+   */
+  const parked = run.data ? PARKED.has(run.data.status) : false;
+  const waits = useApiQuery({
+    queryKey: [...queryKeys.runs.detail(keyScope, runId), "waits"],
+    queryFn: () => api.runs.waits(runId, scope),
+    enabled: enabled && parked,
     freshness: "live",
   });
 
@@ -173,15 +213,16 @@ export function useRunDetailData(runId: string): RunDetailData {
        this timer, and the fields it carries change at step boundaries. */
     const timer = window.setInterval(() => {
       void run.refetch();
+      if (parked) void waits.refetch();
     }, 10_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, runId]);
+  }, [live, parked, runId]);
 
   const error = (run.error ?? null) as VectorbeaApiError | null;
   const refetch = React.useCallback(async () => {
-    await Promise.all([run.refetch(), events.refetch()]);
-  }, [run, events]);
+    await Promise.all([run.refetch(), events.refetch(), parked ? waits.refetch() : null]);
+  }, [run, events, waits, parked]);
   const cancel = React.useCallback(async () => {
     await api.runs.cancel(runId, scope);
     await refetch();
@@ -214,6 +255,7 @@ export function useRunDetailData(runId: string): RunDetailData {
     run: uiRun,
     detail: run.data ?? null,
     events: events.data?.items ?? [],
+    waits: parked ? waits.data?.items ?? [] : [],
     incident,
     loading: enabled && run.isPending,
     // Distinguished from any other failure: "this run does not exist" and "the

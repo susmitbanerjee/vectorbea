@@ -37,6 +37,14 @@ data class Request(
      * Null for every browser request, which is the overwhelming majority.
      */
     val apiKeyId: java.util.UUID? = null,
+    /**
+     * The presented key's own requests-per-minute ceiling, when it set one.
+     *
+     * Carried on the request rather than looked up at the rate check, because
+     * the check runs before routing and a second database read there would put a
+     * query in front of every request — including the ones being refused.
+     */
+    val apiKeyRateLimit: Int? = null,
 ) {
     companion object {
         private const val DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024 // 2 MB

@@ -49,6 +49,34 @@ class AuthMiddleware(
            (see `WebhookProcessor`), which is a stronger check than a bearer
            token because it also proves the body was not altered. */
         "/api/billing/webhooks/",
+        /*
+         * Tool completion callbacks, for the same reason as the billing webhooks
+         * above and with a different proof.
+         *
+         * A video-generation service reporting that a six-minute render finished
+         * has no session, no API key, and no workspace — and never will. The
+         * authentication is the token in the PATH: `HMAC(server key, wait_key)`,
+         * unguessable without the server key, naming exactly one wait, which
+         * carries the workspace that scopes everything the route then does.
+         *
+         * A leaked token therefore compromises the completion of one job and
+         * nothing else — it cannot read, cannot list, and cannot reach another
+         * workspace. `ToolCallbackRoutes` rate-limits per token so the endpoint
+         * is not a way to probe for valid ones.
+         */
+        "/api/tool-callbacks/",
+        /*
+         * Workflow webhooks. Stripe, GitHub and a customer's own service have no
+         * session and never will; the 32-byte token in the path addresses one
+         * endpoint and the signature over the raw body authenticates the sender.
+         *
+         * Unlike the billing webhooks above, the signing secret is per endpoint
+         * and chosen by the customer, so a compromise reaches exactly one
+         * workflow in one workspace. `WebhookRoutes` rate-limits per token, and
+         * the delivery still passes the workspace's plan quota underneath —
+         * an unauthenticated path into the run queue is bounded twice.
+         */
+        "/api/hooks/",
     )
 
     /**
@@ -172,7 +200,11 @@ class AuthMiddleware(
         )
 
         log.debug("[auth] authenticated api key {} for workspace {}", resolved.id, resolved.workspaceId)
-        return request.copy(principal = principal, apiKeyId = resolved.id)
+        return request.copy(
+            principal = principal,
+            apiKeyId = resolved.id,
+            apiKeyRateLimit = resolved.rateLimitPerMinute,
+        )
     }
 
     private fun extractBearerToken(req: Request): String? {

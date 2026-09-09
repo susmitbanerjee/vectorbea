@@ -29,6 +29,7 @@ dependencies {
 
     // JSON — Jackson with Kotlin + JSR-310 (java.time) support
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")
 
     /*
@@ -74,6 +75,36 @@ dependencies {
 
     // JWT verification — Auth0 java-jwt + JWKS provider
     // Used to verify Supabase-issued JWTs (RS256 via JWKS, HS256 legacy fallback)
+    /*
+     * ── BROKER CLIENTS, FOR EVENT TRIGGERS ──────────────────────────────────
+     * Consuming from a customer's Kafka, SQS or Pub/Sub. Each is the vendor's
+     * supported client, chosen over hand-rolled protocol code because the part
+     * that matters here is at-least-once semantics under partition rebalance,
+     * visibility-timeout expiry and lease extension — three problems with
+     * subtle, well-documented answers that these libraries already implement
+     * and that a bespoke HTTP client would get wrong quietly.
+     *
+     * All three are lazily constructed: a deployment with no event triggers
+     * never instantiates a client, so the cost is jar size rather than runtime.
+     */
+    implementation("org.apache.kafka:kafka-clients:3.8.1")
+    implementation("software.amazon.awssdk:sqs:2.29.29")
+    implementation("com.google.cloud:google-cloud-pubsub:1.149.0")
+    /*
+     * Pub/Sub's request types are generated protobuf messages, and their
+     * supertype has to be on the COMPILE classpath — it arrives transitively at
+     * runtime, which is not the same thing, and every reference to a
+     * `PullRequest` fails to compile without this line.
+     *
+     * The version is not free choice. `mysql-connector-j` drags in protobuf 4.x
+     * and wins conflict resolution, and protobuf 4 renamed the generated
+     * supertype — so a Pub/Sub client built against protobuf 3 compiles here and
+     * then throws `NoClassDefFoundError` on its first pull, in production, on a
+     * customer's queue. The Pub/Sub version above is chosen to be one built
+     * against protobuf 4 for exactly that reason; these two move together.
+     */
+    implementation("com.google.protobuf:protobuf-java:4.33.2")
+
     implementation("com.auth0:java-jwt:4.4.0")
     implementation("com.auth0:jwks-rsa:0.22.1")
 
@@ -98,7 +129,7 @@ dependencies {
 }
 
 /**
- * FOUR THINGS ARE COMPILED BY BOTH SERVICES, for one reason.
+ * FIVE THINGS ARE COMPILED BY BOTH SERVICES, for one reason.
  *
  * Each is a contract between what the API writes and what the worker later
  * reads. A second implementation of any of them is a second opinion, and every
@@ -123,6 +154,16 @@ dependencies {
  *    handed the wrong JDBC driver, or no timeouts at all. See the header of
  *    DbProviders.kt for the three copies that had already drifted apart.
  *
+ *  · THE WAIT PRIMITIVE. A run parks in the worker and is woken by the API — a
+ *    signal POST, or a provider's completion callback. Both sides read and write
+ *    `run_waits`, and the CAS on `status = 'waiting'` is what makes a duplicated
+ *    callback resolve exactly once. Two implementations of that predicate would
+ *    be two opinions about whether a completion had already been applied, and
+ *    the failure mode is a run resumed twice from one webhook retry.
+ *
+ *    Only the STORES travel. `WaitSweeper` is worker-only — it polls providers
+ *    and holds the outbound HTTP stack — and is excluded below.
+ *
  *  · THE HTTP TOOL SPEC. The API GENERATES these documents from an OpenAPI or
  *    Postman import; the worker EXECUTES them. A second reader would let the
  *    importer emit a body encoding, an auth strategy or a pagination shape the
@@ -140,12 +181,19 @@ sourceSets {
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec")
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/durable/wait")
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging")
         // Only the pure language files travel. ContractValidator is bound to the
         // worker's DataSource and its runtime concerns; the API has no business
         // compiling it, and pulling it in drags worker-only dependencies with it.
         // The pattern is relative to each source root, and the root added above IS
         // .../worker/contract - so the path is the bare filename.
         kotlin.exclude("ContractValidator.kt")
+        /* Worker-only: it drives the outbound HTTP stack, resolves connections
+           and polls providers on a schedule. The API needs the stores, not the
+           sweeper — and compiling it here would drag `OutboundHttp`,
+           `ConnectionResolver` and `WorkerMetrics` onto this classpath. */
+        kotlin.exclude("WaitSweeper.kt")
     }
 }
 
@@ -206,6 +254,37 @@ val integrationTest by tasks.registering(Test::class) {
     if (System.getProperty("os.name").startsWith("Windows") && System.getenv("DOCKER_HOST") == null) {
         environment("DOCKER_HOST", "npipe:////./pipe/dockerDesktopLinuxEngine")
     }
+
+    /*
+     * ── A CALLBACK SECRET, SO THE CALLBACK PATH IS ACTUALLY EXERCISED ───────
+     *
+     * `RunWait.callbackTokenFor` returns NULL when no secret is configured, and
+     * a wait then carries no token — so `withCallback = true` in a test would
+     * silently produce a wait the callback route can never find, and the suite
+     * would go green while testing nothing. The same value the worker's task
+     * uses, and for the same reason: a token is an HMAC over the wait key, so
+     * two computations only agree if the key does.
+     *
+     * Test-only. A worker or API with neither this nor SECRET_ENCRYPTION_KEY
+     * refuses to publish a callback URL at all.
+     */
+    environment("WAIT_CALLBACK_SECRET", "integration-test-callback-secret")
+
+    /*
+     * ── THE TEST JVM RUNS IN UTC ────────────────────────────────────────────
+     * The Postgres JDBC driver sends the JVM's timezone id at connection time,
+     * and a developer machine set to `Asia/Calcutta` — the legacy alias for
+     * Asia/Kolkata — is rejected outright by a Postgres image with current
+     * tzdata: `FATAL: invalid value for parameter "TimeZone"`. Every
+     * container-backed test then fails to connect, which reads as a broken
+     * database rather than a locale.
+     *
+     * Fixing it here rather than asking each developer to change their machine,
+     * and UTC rather than any other zone because a test asserting on a timestamp
+     * should not produce different answers in different offices. Nothing under
+     * test reads the JVM default: schedules carry their own `ZoneId`.
+     */
+    systemProperty("user.timezone", "UTC")
 }
 
 // ── Fat jar via Shadow — merges META-INF/services/* correctly ─────────────────

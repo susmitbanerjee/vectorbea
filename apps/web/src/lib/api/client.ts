@@ -1,4 +1,5 @@
 import { contracts } from "@vectorbea/shared";
+import type { HttpRequestPayload, HttpResponseResult } from "~/lib/tools/http-client";
 import type { Workspace } from "~/mocks/shell";
 import type {
   AnimationStep, ArchitectPlan, ArchitectSession, ArchitectUsage,
@@ -70,6 +71,7 @@ export interface TestConnectionDraftBody {
 
 /** `POST /api/tools/test-unsaved` body, as `ToolRoutes.TestToolBody` declares it. */
 export interface TestToolDraftBody {
+  httpSpec?: Record<string, unknown>;
   type: string;
   connectionId?: string | null;
   inputSchema?: Record<string, unknown>;
@@ -359,6 +361,14 @@ export interface VectorbeaClient {
     list(filters?: RunListFilters, options?: RequestOptions): Promise<Paged<Run>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<RunDetail>;
     queuePosition(id: string, scope?: Scope, options?: RequestOptions): Promise<QueuePosition>;
+    /**
+     * `GET /api/runs/:id/waits` — what the run is parked on, right now.
+     *
+     * Only worth calling while the run is parked; a finished run has no active
+     * waits and the endpoint correctly returns none. The completed spans live in
+     * the event log instead.
+     */
+    waits(id: string, scope?: Scope, options?: RequestOptions): Promise<Paged<contracts.RunWait>>;
     purgeQueued(scope?: Scope, options?: RequestOptions): Promise<{ purged: number; status: string }>;
     cancel(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     retry(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
@@ -626,6 +636,7 @@ export interface VectorbeaClient {
   };
 
   connections: {
+    testHttpRequest(body: HttpRequestPayload, scope?: Scope, options?: RequestOptions): Promise<HttpResponseResult>;
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Connection>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Connection>;
     create(body: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Connection>;
@@ -802,6 +813,11 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<QueuePosition>(
           `/api/runs/${id}/queue-position`,
           req(scope, contracts.queuePosition, options),
+        ),
+      waits: (id, scope, options) =>
+        call<Paged<contracts.RunWait>>(
+          `/api/runs/${id}/waits`,
+          req(scope, contracts.runWaitPage, options),
         ),
       purgeQueued: (scope, options) =>
         call<{ purged: number; status: string }>("/api/runs/purge-queued", {
@@ -1125,6 +1141,10 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         }),
       delete: (id, scope, options) =>
         call<void>(`/api/connections/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      testHttpRequest: (body, scope, options) =>
+        call<HttpResponseResult>("/api/connections/test-http-request", {
+          method: "POST", body, ...req(scope, undefined, { timeoutMs: 35_000, ...options }),
+        }),
       testDraft: (body, scope, options) =>
         call<ConnectionTestResult>("/api/connections/test-unsaved", {
           method: "POST",

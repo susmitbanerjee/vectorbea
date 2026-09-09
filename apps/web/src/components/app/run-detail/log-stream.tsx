@@ -323,8 +323,11 @@ function Highlighted({ text, query }: { text: string; query: string }) {
 /** Event type → severity, using the type's own vocabulary rather than a guess. */
 function levelFor(type: string, status: string | null | undefined): LogLevel {
   const text = `${type} ${status ?? ""}`.toLowerCase();
-  if (/fail|error|timeout|dead|reject/.test(text)) return "error";
-  if (/retry|recover|warn|cancel|skip|yield/.test(text)) return "warn";
+  /* `timed_out` is how every timeout in this system is actually spelled —
+     RUN_TIMED_OUT, RUN_WAIT_TIMED_OUT — and `timeout` alone never matched it,
+     so a wait that blew its deadline was logged as routine information. */
+  if (/fail|error|timeout|timed_out|dead|reject/.test(text)) return "error";
+  if (/retry|recover|warn|cancel|skip|yield|expired/.test(text)) return "warn";
   if (/debug|trace/.test(text)) return "debug";
   return "info";
 }

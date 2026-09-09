@@ -14,6 +14,14 @@ export type RunStatus =
   | "running"
   | "queued"
   | "awaiting-approval"
+  /*
+   * Parked on something outside the run — an async tool still working, a
+   * signal that has not arrived, a timer. Not `queued`, which claims the run
+   * has not started; not `awaiting-approval`, which claims a person must act.
+   * The distinction is what stops a healthy six-minute render from reading as
+   * a backed-up queue. See docs/WAITS-AND-SIGNALS.md.
+   */
+  | "waiting"
   | "cancelled";
 
 export type NodeKind =
@@ -39,7 +47,8 @@ export interface Run {
   workflowName: string;
   status: RunStatus;
   environment: "production" | "staging" | "development" | "unknown";
-  trigger: "schedule" | "webhook" | "manual" | "api";
+  /** Mirrors `contracts.TriggerType` — the door this run came in by. */
+  trigger: "schedule" | "webhook" | "manual" | "api" | "event" | "mcp";
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;

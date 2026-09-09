@@ -54,6 +54,7 @@ internal object HttpToolSpecJson {
                 retry = readRetry(node.get("retry")),
                 idempotency = readIdempotency(node.get("idempotency")),
                 transport = readTransport(node.get("transport")),
+                async = readAsync(node.get("async")),
             )
         } catch (_: Exception) {
             null
@@ -353,6 +354,70 @@ internal object HttpToolSpecJson {
         )
     }
 
+    /**
+     * Read the async protocol, or null.
+     *
+     * ── A SPEC THAT NOTHING COULD RESOLVE IS REFUSED, NOT STORED ────────────
+     * An async tool with neither a poll nor a callback would submit a job, park
+     * the run, and sit there until the timeout — on every call, for every run.
+     * That is a configuration that cannot work, so it is read as "not async" and
+     * the tool behaves as an ordinary request/response call: it will report
+     * whatever the submit returned, which is wrong but visible, rather than
+     * parking runs invisibly.
+     */
+    private fun readAsync(n: JsonNode?): HttpToolSpec.AsyncSpec? {
+        if (n == null || !n.isObject) return null
+        val handlePath = n.get("handlePath")?.asText()?.takeIf { it.isNotBlank() } ?: return null
+
+        val poll = (n.get("poll") as? ObjectNode)?.let { p ->
+            val url = p.get("url")?.asText()?.takeIf { it.isNotBlank() } ?: return@let null
+            HttpToolSpec.PollSpec(
+                url = url,
+                method = p.path("method").asText("GET").uppercase(),
+                /* Floored at five seconds. A tool declaring a 100ms poll would
+                   make one wait into six hundred requests a minute against a
+                   provider that is, by construction, busy doing the work. */
+                intervalMs = p.path("intervalMs").asLong(30_000).coerceIn(5_000, 3_600_000),
+                maxAttempts = p.path("maxAttempts").asInt(60).coerceIn(1, 1_000),
+                statusPath = p.path("statusPath").asText("status"),
+                completedValues = readStrings(p.get("completedValues"))
+                    .ifEmpty { listOf("succeeded", "completed", "success", "done", "finished") },
+                failedValues = readStrings(p.get("failedValues"))
+                    .ifEmpty { listOf("failed", "error", "cancelled", "canceled", "expired") },
+                resultPath = p.get("resultPath")?.asText()?.takeIf { it.isNotBlank() },
+                errorPath = p.get("errorPath")?.asText()?.takeIf { it.isNotBlank() },
+            )
+        }
+
+        val callback = (n.get("callback") as? ObjectNode)?.let { c ->
+            val input = c.get("urlInput")?.asText()?.takeIf { it.isNotBlank() } ?: return@let null
+            HttpToolSpec.CallbackSpec(
+                urlInput = input,
+                statusPath = c.get("statusPath")?.asText()?.takeIf { it.isNotBlank() },
+                completedValues = readStrings(c.get("completedValues"))
+                    .ifEmpty { listOf("succeeded", "completed", "success", "done") },
+                failedValues = readStrings(c.get("failedValues"))
+                    .ifEmpty { listOf("failed", "error", "cancelled") },
+                resultPath = c.get("resultPath")?.asText()?.takeIf { it.isNotBlank() },
+                errorPath = c.get("errorPath")?.asText()?.takeIf { it.isNotBlank() },
+                signatureSecretRef = c.get("signatureSecretRef")?.asText()?.takeIf { it.isNotBlank() },
+                signatureHeader = c.get("signatureHeader")?.asText()?.takeIf { it.isNotBlank() },
+            )
+        }
+
+        if (poll == null && callback == null) return null
+
+        return HttpToolSpec.AsyncSpec(
+            handlePath = handlePath,
+            timeoutMs = n.get("timeoutMs")?.takeIf { it.isNumber }?.asLong(),
+            poll = poll,
+            callback = callback,
+        )
+    }
+
+    private fun readStrings(n: JsonNode?): List<String> =
+        (n as? ArrayNode)?.map { it.asText().lowercase() } ?: emptyList()
+
     private fun readTransport(n: JsonNode?): HttpToolSpec.TransportSpec {
         if (n == null || !n.isObject) return HttpToolSpec.TransportSpec()
         val mtls = n.get("mtls")?.takeIf { it.isObject }?.let { m ->
@@ -432,6 +497,7 @@ internal object HttpToolSpecJson {
         if (!spec.transport.isDefault || spec.transport.hostHeader != null) {
             root.set<JsonNode>("transport", writeTransport(spec.transport))
         }
+        spec.async?.let { root.set<JsonNode>("async", writeAsync(it)) }
         return root
     }
 
@@ -646,6 +712,36 @@ internal object HttpToolSpecJson {
         t.hostHeader?.let { o.put("hostHeader", it) }
         if (t.tlsProtocols.isNotEmpty())
             o.putArray("tlsProtocols").also { a -> t.tlsProtocols.forEach { a.add(it) } }
+        return o
+    }
+
+    private fun writeAsync(a: HttpToolSpec.AsyncSpec): ObjectNode {
+        val o = mapper.createObjectNode()
+        o.put("handlePath", a.handlePath)
+        a.timeoutMs?.let { o.put("timeoutMs", it) }
+        a.poll?.let { p ->
+            o.putObject("poll").apply {
+                put("url", p.url); put("method", p.method)
+                put("intervalMs", p.intervalMs); put("maxAttempts", p.maxAttempts)
+                put("statusPath", p.statusPath)
+                putArray("completedValues").also { arr -> p.completedValues.forEach { arr.add(it) } }
+                putArray("failedValues").also { arr -> p.failedValues.forEach { arr.add(it) } }
+                p.resultPath?.let { put("resultPath", it) }
+                p.errorPath?.let { put("errorPath", it) }
+            }
+        }
+        a.callback?.let { c ->
+            o.putObject("callback").apply {
+                put("urlInput", c.urlInput)
+                c.statusPath?.let { put("statusPath", it) }
+                putArray("completedValues").also { arr -> c.completedValues.forEach { arr.add(it) } }
+                putArray("failedValues").also { arr -> c.failedValues.forEach { arr.add(it) } }
+                c.resultPath?.let { put("resultPath", it) }
+                c.errorPath?.let { put("errorPath", it) }
+                c.signatureSecretRef?.let { put("signatureSecretRef", it) }
+                c.signatureHeader?.let { put("signatureHeader", it) }
+            }
+        }
         return o
     }
 

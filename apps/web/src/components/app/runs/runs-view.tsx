@@ -29,6 +29,7 @@ import { useApi } from "~/lib/api/api-provider";
 import { useRunsData } from "./use-runs-data";
 import {
   DurableRunIcon, IncidentIcon, ApprovalGateIcon, QueueDepthIcon, WorkerIcon,
+  WaitUntilIcon,
 } from "~/components/icons/domain";
 import type { IconComponent } from "~/components/icons/types";
 
@@ -51,6 +52,9 @@ const STATUS_META: Record<RunStatus, { label: string; icon: IconComponent; class
   running: { label: "Running", icon: WorkerIcon, className: "text-status-live border-status-live-border bg-status-live-subtle" },
   queued: { label: "Queued", icon: QueueDepthIcon, className: "text-status-queued border-status-queued-border bg-status-queued-subtle" },
   "awaiting-approval": { label: "Awaiting approval", icon: ApprovalGateIcon, className: "text-status-waiting border-status-waiting-border bg-status-waiting-subtle" },
+  /* The gate glyph would say "somebody has to decide"; nobody does. `wait-until`
+     is the mark for "suspend pending a condition or time", which is the run. */
+  waiting: { label: "Waiting", icon: WaitUntilIcon, className: "text-status-waiting border-status-waiting-border bg-status-waiting-subtle" },
   cancelled: { label: "Cancelled", icon: QueueDepthIcon, className: "text-status-cancelled border-status-cancelled-border bg-status-cancelled-subtle" },
 };
 
@@ -59,6 +63,10 @@ const TRIGGER_GLYPH: Record<Run["trigger"], string> = {
   webhook: "M3 6h6M7 4l2 2-2 2",
   manual: "M6 2.6v6.8M3.4 6.6 6 9.2l2.6-2.6",
   api: "M4 3.4 2 6l2 2.6M8 3.4 10 6l-2 2.6",
+  // A message off a broker: three inbound marks converging on one point.
+  event: "M2.6 4h3M2.6 6h4.4M2.6 8h3M9.4 6l-2-1.6v3.2z",
+  // A tool call from outside: the API glyph's outbound half, plus a socket.
+  mcp: "M3 6h4.4M6.2 4.4 7.8 6l-1.6 1.6M9.4 3.6v4.8",
 };
 
 export interface RunsViewProps {

@@ -31,6 +31,9 @@ const STATUS_STYLE: Record<Run["status"], string> = {
   running: "text-status-live border-status-live-border bg-status-live-subtle",
   queued: "text-status-queued border-status-queued-border bg-status-queued-subtle",
   "awaiting-approval": "text-status-waiting border-status-waiting-border bg-status-waiting-subtle",
+  /* Same ramp as awaiting-approval: both are waiting, and the ramp is six hues
+     by design. The LABEL carries the difference — a person versus a machine. */
+  waiting: "text-status-waiting border-status-waiting-border bg-status-waiting-subtle",
   cancelled: "text-status-cancelled border-status-cancelled-border bg-status-cancelled-subtle",
 };
 
@@ -40,6 +43,7 @@ const STATUS_LABEL: Record<Run["status"], string> = {
   running: "Running",
   queued: "Queued",
   "awaiting-approval": "Awaiting approval",
+  waiting: "Waiting",
   cancelled: "Cancelled",
 };
 

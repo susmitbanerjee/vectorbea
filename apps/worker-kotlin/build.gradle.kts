@@ -239,6 +239,20 @@ tasks.test {
      * which is how a suite passes while never reaching its server at all.
      */
     environment("SSRF_ALLOWED_TEST_HOSTS", "127.0.0.2")
+
+    /*
+     * ── THE TEST JVM RUNS IN UTC ────────────────────────────────────────────
+     * The Postgres JDBC driver sends the JVM's timezone id at connection time,
+     * and a developer machine set to `Asia/Calcutta` — the legacy alias for
+     * Asia/Kolkata — is rejected outright by a Postgres image with current
+     * tzdata: `FATAL: invalid value for parameter "TimeZone"`. Every
+     * container-backed test then fails to connect, which reads as a broken
+     * database rather than a locale.
+     *
+     * UTC rather than any other zone because a test asserting on a timestamp
+     * should not produce different answers in different offices.
+     */
+    systemProperty("user.timezone", "UTC")
 }
 
 val integrationTest by tasks.registering(Test::class) {
@@ -270,6 +284,52 @@ val integrationTest by tasks.registering(Test::class) {
     if (System.getProperty("os.name").startsWith("Windows") && System.getenv("DOCKER_HOST") == null) {
         environment("DOCKER_HOST", "npipe:////./pipe/dockerDesktopLinuxEngine")
     }
+
+    /*
+     * ── A CALLBACK SECRET, SO THE CALLBACK PATH IS ACTUALLY EXERCISED ───────
+     *
+     * `RunWait.callbackTokenFor` returns NULL when no secret is configured, and
+     * the resolver then refuses to offer a callback — correct behaviour, and it
+     * meant `withCallback = true` in a test silently produced a wait with no
+     * token and no callback path. The suite went green while testing the
+     * fallback.
+     *
+     * A fixed value here rather than a random one: a token is an HMAC over the
+     * wait key, and a test that asserts two computations agree needs the key to
+     * be the same on both. Test-only, and never a production default — a worker
+     * with neither variable set refuses to publish a callback URL at all.
+     */
+    environment("WAIT_CALLBACK_SECRET", "integration-test-callback-secret")
+
+    /*
+     * The same loopback exemption `test` grants, for the same reason.
+     *
+     * `integrationTest` runs BOTH tiers, so it runs `HttpToolResolverTest` — and
+     * that suite talks to a real socket on 127.0.0.2, which `SsrfGuard` blocks by
+     * design. Without this the integration tier failed every HTTP tool test on a
+     * guard doing its job, which reads as a broken resolver rather than a missing
+     * variable. Ignored entirely when APP_ENV=production; this is a test task.
+     */
+    environment("SSRF_ALLOWED_TEST_HOSTS", "127.0.0.2")
+
+    /* The public origin a provider would call back on. Nothing dials it — the
+       tests assert the URL the resolver hands out and then resolve the wait
+       directly — but the resolver refuses to offer a callback without it. */
+    environment("PUBLIC_API_BASE_URL", "http://127.0.0.2:9")
+
+    /*
+     * ── THE TEST JVM RUNS IN UTC ────────────────────────────────────────────
+     * The Postgres JDBC driver sends the JVM's timezone id at connection time,
+     * and a developer machine set to `Asia/Calcutta` — the legacy alias for
+     * Asia/Kolkata — is rejected outright by a Postgres image with current
+     * tzdata: `FATAL: invalid value for parameter "TimeZone"`. Every
+     * container-backed test then fails to connect, which reads as a broken
+     * database rather than a locale.
+     *
+     * UTC rather than any other zone because a test asserting on a timestamp
+     * should not produce different answers in different offices.
+     */
+    systemProperty("user.timezone", "UTC")
 }
 
 // ── Fat jar via Shadow — merges service files correctly ───────────────────────
