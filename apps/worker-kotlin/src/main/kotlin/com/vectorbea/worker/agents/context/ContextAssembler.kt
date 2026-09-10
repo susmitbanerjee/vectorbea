@@ -61,6 +61,19 @@ object ContextAssembler {
 
         /** Previous observations — the existing last-10 behaviour. */
         OBSERVATIONS("PREVIOUS OBSERVATIONS", false),
+
+        /**
+         * Free-text guidance a person sent into the run while it was running.
+         *
+         * PROTECTED, unlike observations. A human correcting an agent mid-run —
+         * "the database is the primary, do not fail over" — is the highest-value
+         * context in the prompt and the least reproducible: dropping it under
+         * budget pressure means the agent proceeds to do the thing it was just
+         * told not to, and nobody can tell from the output that the instruction
+         * was ever there. It is also the smallest section, so protecting it
+         * costs almost nothing.
+         */
+        GUIDANCE("GUIDANCE FROM A PERSON", true),
     }
 
     /** One contribution to a section. Several may share a section. */

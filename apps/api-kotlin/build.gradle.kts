@@ -182,6 +182,11 @@ sourceSets {
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/durable/wait")
+        /* Result delivery. The API reads and writes the same ledger the worker's
+           dispatcher does — a redelivery route that reimplemented the claim, the
+           backoff or the idempotency key derivation would be a second answer to
+           the question a receiver dedupes on. */
+        kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/delivery")
         kotlin.srcDir("../worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging")
         // Only the pure language files travel. ContractValidator is bound to the
         // worker's DataSource and its runtime concerns; the API has no business
@@ -194,6 +199,10 @@ sourceSets {
            sweeper — and compiling it here would drag `OutboundHttp`,
            `ConnectionResolver` and `WorkerMetrics` onto this classpath. */
         kotlin.exclude("WaitSweeper.kt")
+        /* Worker-only, for the same reason: it owns an HTTP client, a scheduled
+           executor and the worker's SecretService. The API needs the store and
+           the signer — the parts a route reads — not the loop. */
+        kotlin.exclude("DeliveryDispatcher.kt")
     }
 }
 

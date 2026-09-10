@@ -58,9 +58,15 @@ class NodeExecutorRegistry(
         NodeType.APPROVAL  to ApprovalNodeExecutor(approvalStore),
         NodeType.END       to EndNodeExecutor(),
         // Connector executors (real I/O)
+        /* `pricing` is what makes a customer's negotiated rate reach the cost
+           figure. Built from the DataSource this registry already holds; without
+           it every call through a customer gateway would be priced at our list
+           rate, which over-reports their spend — and over-reporting is the
+           number an enterprise reconciles against their provider invoice first. */
         NodeType.LLM       to LlmNodeExecutor(connectionResolver, eventStore,
                                   circuit = circuit, recorder = recorder, replay = replay,
-                                  contracts = contracts, capacity = capacity),
+                                  contracts = contracts, capacity = capacity,
+                                  pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource)),
         NodeType.HTTP      to HttpNodeExecutor(connectionResolver, eventStore, sideEffects = sideEffects),
         NodeType.DB_QUERY  to DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore),
         NodeType.DB_WRITE  to DbWriteNodeExecutor(connectionResolver, dbPoolManager, approvalStore, eventStore),

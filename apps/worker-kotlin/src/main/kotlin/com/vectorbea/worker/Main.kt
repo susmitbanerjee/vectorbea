@@ -644,6 +644,25 @@ fun main() {
     waitSweeper.start()
 
     /*
+     * ── RESULT DELIVERY ─────────────────────────────────────────────────────
+     * Everything that happens AFTER a run is terminal: calling a customer's
+     * endpoint, pushing to a destination, backing off, dead-lettering.
+     *
+     * In the worker rather than the API because it is a background loop with a
+     * long, durable retry schedule, and because the API's instances are sized
+     * for request latency — a fleet of them each holding HTTP connections open
+     * to somebody's slow endpoint is a worse place for this than the pool that
+     * already exists for long work.
+     */
+    val deliveryDispatcher = com.vectorbea.worker.delivery.DeliveryDispatcher(
+        dataSource = database.dataSource,
+        store = com.vectorbea.worker.delivery.DeliveryStore(database.dataSource),
+        secrets = secretService,
+        events = eventStore,
+    )
+    deliveryDispatcher.start()
+
+    /*
      * Partition maintenance — creates next month's partitions before anything needs
      * to write into them, for BOTH run_events and run_spans.
      *
@@ -740,6 +759,10 @@ fun main() {
         heartbeat.drain()
         timerScheduler.stop()
         waitSweeper.stop()
+        /* Before the pool closes. A dispatcher mid-attempt would otherwise write
+           its outcome against a closing datasource and leave the row `delivering`
+           until the claim TTL — a five-minute delay on every deploy. */
+        deliveryDispatcher.stop()
         resumeReconciler.stop()
         crashRecovery.stop()
         /* Stopped early and without waiting: a sweep interrupted mid-batch loses

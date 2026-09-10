@@ -12,6 +12,7 @@ import { ReplayProvider, useReplay } from "./replay";
 import { RunHeader } from "./run-header";
 import { RecoveryCard } from "./recovery-card";
 import { WaitBanner } from "./wait-banner";
+import { DeliveryPanel } from "./delivery-panel";
 import { StepTimeline } from "./step-timeline";
 import { CanvasMirror } from "./canvas-mirror";
 import { Inspector } from "./inspector";
@@ -124,6 +125,8 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
         frozen={frozen}
         incident={data.incident}
         waits={waits}
+        deliveries={data.deliveries}
+        onRedeliver={data.redeliver}
         onCancel={data.cancel}
         onRetryStep={data.retryStep}
         onRetryRun={data.retryRun}
@@ -134,12 +137,15 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
 }
 
 function RunDetailBody({
-  run, frozen, incident, waits, onCancel, onRetryStep, onRetryRun, stream,
+  run, frozen, incident, waits, deliveries, onRedeliver,
+  onCancel, onRetryStep, onRetryRun, stream,
 }: {
   run: Run;
   frozen: boolean;
   incident: contracts.FailureIncident | null;
   waits: contracts.RunWait[];
+  deliveries: contracts.RunDelivery[];
+  onRedeliver: (deliveryId: string) => Promise<void>;
   onCancel: () => Promise<void>;
   onRetryStep: (nodeId: string) => Promise<void>;
   onRetryRun: () => Promise<void>;
@@ -248,6 +254,11 @@ function RunDetailBody({
           run this is the only thing on the page that has changed, and it is the
           answer to the question that brought the operator here. */}
       <WaitBanner waits={waits} />
+
+      {/* Under the header for the same reason the recovery card is: a run that
+          produced the right answer and failed to deliver it is not a success,
+          and putting that on a tab means the person closes the page first. */}
+      <DeliveryPanel deliveries={deliveries} onRedeliver={onRedeliver} />
 
       {comparing ? <CompareView run={run} onClose={() => setComparing(false)} /> : null}
 

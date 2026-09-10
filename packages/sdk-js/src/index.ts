@@ -28,6 +28,18 @@ export type { PromptPayload } from "./models.js";
 export { Prompts, TraceSession } from "./resources/prompts.js";
 export type { LogAuditOptions, TraceOptions } from "./resources/prompts.js";
 export { buildTraceMetadataV1, TRACE_METADATA_SCHEMA_VERSION } from "./trace-metadata.js";
+
+// Result delivery — verifying a callback came from us.
+export {
+  verifyDelivery,
+  deliveryIdempotencyKey,
+  DeliverySignatureError,
+  DELIVERY_SIGNATURE_HEADER,
+  DELIVERY_IDEMPOTENCY_HEADER,
+  DELIVERY_ID_HEADER,
+  DELIVERY_ATTEMPT_HEADER,
+} from "./deliveries.js";
+export type { DeliveryPayload, VerifyOptions } from "./deliveries.js";
 export type { TraceMetadataV1, TraceStatus, CacheStatus } from "./trace-metadata.js";
 
 // Errors — export every class so callers can use instanceof checks

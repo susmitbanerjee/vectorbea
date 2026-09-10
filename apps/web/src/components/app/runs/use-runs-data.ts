@@ -67,6 +67,7 @@ export function toUiRun(run: contracts.RunSummary, incident?: contracts.FailureI
     tokens: run.totalTokens ?? 0,
     nodes,
     incidentId: run.incidentId ?? incident?.id,
+    delivery: run.deliveryStatus,
   };
 }
 

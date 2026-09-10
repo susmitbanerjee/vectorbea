@@ -61,6 +61,8 @@ class RunProcessor(
      */
     private val waits: com.vectorbea.worker.durable.wait.WaitStore? =
         com.vectorbea.worker.durable.wait.WaitStore(dataSource),
+    /** The downward walk of `parent_run_id`. See [RunSubtree]. */
+    private val subtree: RunSubtree = RunSubtree(dataSource),
     /**
      * Writes what the run consumed to the billing ledger, once, at the terminal
      * transition. Defaulted rather than injected because there is no
@@ -68,6 +70,16 @@ class RunProcessor(
      * holds, and a null one would silently stop billing.
      */
     private val usageMeter: RunUsageMeter = RunUsageMeter(dataSource),
+    /**
+     * Queues the run's result deliveries at the terminal transition.
+     *
+     * Defaulted from [dataSource] for the same reason [waits] is: a processor
+     * without it would leave every configured callback and destination silently
+     * unqueued, and the symptom — a run that succeeded and delivered nothing —
+     * is one nobody notices until a customer asks where their result went.
+     */
+    private val deliveries: com.vectorbea.worker.delivery.DeliveryStore? =
+        com.vectorbea.worker.delivery.DeliveryStore(dataSource),
     private val leaseManager: RunLeaseManager = RunLeaseManager(dataSource),
     /**
      * Durably re-enqueue a continuation job after a cooperative yield. Default is
@@ -1362,6 +1374,50 @@ class RunProcessor(
         }.onFailure { log.debug("[root-cause] failure class not recorded for {}: {}", runId, it.message) }
     }
 
+    /**
+     * Cancel a run's delegated descendants, all the way down.
+     *
+     * ── WHY CANCELLING A PARENT HAS TO REACH THEM ────────────────────
+     * Nothing did this before. A run with three delegated children, cancelled,
+     * left three runs executing — each still calling models, still holding a
+     * provider capacity reservation, still holding an unsettled budget
+     * reservation against a parent that had stopped caring. The children had no
+     * way to notice: `parent_run_id` points UP, and nothing walked it down.
+     *
+     * The result of a child exists only to be returned to its parent. Once the
+     * parent is cancelled there is nowhere for it to go, so continuing is pure
+     * spend on an answer nobody will read.
+     *
+     * The walk itself lives in [RunSubtree], where it can be exercised without
+     * standing up a heartbeat, a runtime and a lease manager. What stays here is
+     * the terminal transition applied to each descendant, and it is deliberately
+     * the SAME [updateRunCompleted] every other terminal path uses: one UPDATE
+     * over the subtree would be shorter and would leak everything
+     * [onTerminalTransition] does — the child's waits, its budget reservation,
+     * its own children and its deliveries.
+     *
+     * @return how many descendants this cancelled.
+     */
+    internal fun cancelSubtree(rootRunId: UUID, why: String): Int =
+        subtree.cancelDescendants(rootRunId) { childId ->
+            /*
+             * The child's own terminal path, so it settles its budget, closes its
+             * waits, releases its capacity reservation and wakes ITS parent —
+             * which is this cancelled run, whose join is now moot but whose
+             * bookkeeping still has to balance.
+             */
+            updateRunCompleted(
+                runId = childId,
+                status = "cancelled",
+                completedAt = Instant.now(),
+                durationMs = 0L,
+                outputJson = null,
+                errorJson = com.fasterxml.jackson.databind.ObjectMapper()
+                    .writeValueAsString(mapOf(
+                        "reason" to why.take(500), "cancelledBy" to "parent")),
+            )
+        }
+
     private fun updateRunCompleted(
         runId: UUID,
         status: String,
@@ -1480,6 +1536,35 @@ class RunProcessor(
          * can: this is the one function that runs exactly once per terminal
          * transition, however the run got there.
          */
+        /*
+         * ── TAKE THE DELEGATED SUBTREE WITH IT ──────────────────────────────
+         *
+         * Only for a cancellation. A run that SUCCEEDED has already joined its
+         * children — they are terminal by the time the parent finishes — and a
+         * run that FAILED may still be waiting on children whose results the
+         * failure path wants; killing those would destroy the evidence.
+         *
+         * A cancellation is different: the parent's result has nowhere to go, so
+         * a child still calling models is spending on an answer nobody will read,
+         * while holding a provider capacity reservation and an unsettled budget
+         * reservation against a parent that stopped caring.
+         *
+         * Behind the same CAS as everything else here, so a redelivered message
+         * cannot walk the tree twice — and each child goes through its own CAS
+         * too, so even if it did, each descendant cancels exactly once.
+         */
+        if (status == "cancelled") {
+            runCatching {
+                val n = cancelSubtree(runId, "the parent run was cancelled")
+                if (n > 0) {
+                    log.info("[processor] cancellation reached {} delegated descendant(s) " +
+                        "[runId={}]", n, runId)
+                }
+            }.onFailure {
+                log.error("[processor] could not cancel the subtree of {}: {} — those " +
+                    "children keep running and keep spending", runId, it.message)
+            }
+        }
         runCatching {
             val cancelled = waits?.cancelAllForRun(runId, "the run reached $status")
             if (cancelled != null && cancelled > 0) {
@@ -1527,6 +1612,32 @@ class RunProcessor(
          * exactly one.
          */
         runCatching { usageMeter.meterTerminal(runId) }
+        /*
+         * ── QUEUE THE RESULT DELIVERIES ─────────────────────────────────────
+         *
+         * Behind the same CAS as everything else here, so a redelivered message
+         * cannot send a customer's callback twice — and the enqueue's own
+         * `ON CONFLICT` is the second wall, because the CAS is a runtime property
+         * a refactor could weaken and a unique constraint is not.
+         *
+         * This INSERTs and returns. It does not deliver: the receiver's endpoint
+         * is somebody else's HTTP, its retry schedule is hours long, and putting
+         * either on the completion path would hold a worker on a stranger's
+         * availability. `DeliveryDispatcher` owns everything after this line.
+         *
+         * `runCatching` for the same reason the trace export has it: a delivery
+         * that could not be QUEUED must not turn a succeeded run into a failed
+         * one. The run's output is already durable, and the reconciler's
+         * equivalent for deliveries is that a run with targets and no delivery
+         * rows shows `delivery_status = 'none'` — visible, and fixable by hand.
+         */
+        runCatching {
+            val queued = deliveries?.enqueueForRun(runId, status) ?: 0
+            if (queued > 0) {
+                log.info("[processor] queued {} result deliver(ies) [runId={}, status={}]",
+                    queued, runId, status)
+            }
+        }
 }
 
     private fun markRunFailed(job: WorkflowRunJob, sanitizedMessage: String, start: Instant) {

@@ -75,6 +75,24 @@ class RunIngress(
     private val rateLimiter: TokenBucket? = null,
     private val entitlements: EntitlementGuard? = null,
     private val usageMeter: UsageMeter? = null,
+    /**
+     * One live run per dedup key.
+     *
+     * Null disables singleton handling entirely, which is the pre-V068
+     * behaviour — kept so a test that builds an ingress by hand does not have to
+     * care, and so a deployment mid-migration degrades to "no deduplication"
+     * rather than to "every run refused".
+     */
+    private val dedup: RunDedup? = null,
+    /**
+     * Delivers a joined input to the run that already holds the key.
+     *
+     * Injected because signalling lives in the worker's `SignalStore`, which the
+     * API shares but the ingress should not reach into directly — a null one
+     * makes `join` degrade to `reject` with a message saying so, rather than
+     * silently dropping the second alert.
+     */
+    private val joinSignal: JoinSignalSender? = null,
     /** Per-workspace run-creation rate, as (perMinute, burst). */
     private val rateFor: (UUID) -> Pair<Int, Int> = { DEFAULT_RATE },
 ) {
@@ -84,6 +102,30 @@ class RunIngress(
     companion object {
         /** Generous enough that no legitimate client notices; tight enough to stop a loop. */
         val DEFAULT_RATE = 60 to 120
+
+        /**
+         * The highest priority a workspace without the priority-lane entitlement
+         * may reach.
+         *
+         * Below 100 on purpose: an ordinary workspace's Sev1 must outrank ITS OWN
+         * batch work — which 99 does — without outranking a workspace that pays
+         * for the lane. Priority orders within the platform, and a field any
+         * caller can set to the maximum orders nothing.
+         */
+        const val DEFAULT_PRIORITY_CEILING: Short = 99
+    }
+
+    /**
+     * Delivers a joined input into a run that already exists.
+     *
+     * A one-method interface so the ingress does not grow a second copy of
+     * signal delivery — the semantics (durable, ordered, deduplicated, delivered
+     * at a step boundary) are `SignalStore`'s and belong there.
+     */
+    fun interface JoinSignalSender {
+        /** @return true when the signal was accepted by the live run. */
+        fun send(runId: UUID, workspaceId: UUID, environmentId: UUID,
+                 name: String, payloadJson: String, dedupeKey: String?): Boolean
     }
 
     /**
@@ -101,6 +143,22 @@ class RunIngress(
         val source: TriggerSource,
         val actor: TriggerActor = TriggerActor(),
         val idempotencyKey: String? = null,
+        /**
+         * At most one LIVE run per (workspace, workflow, key).
+         *
+         * The caller supplies it — an alert's service name, a deploy's commit sha
+         * — because only the caller knows what "the same thing" means. What
+         * happens on a collision is the WORKFLOW's choice, not theirs.
+         */
+        val dedupKey: String? = null,
+        /**
+         * 0–100, or null to take the workflow's default.
+         *
+         * A Sev1 alert into a workflow whose default is 50. Clamped to the
+         * workspace's plan ceiling, so priority cannot be self-granted by a
+         * caller who has read the API docs.
+         */
+        val priority: Short? = null,
         /** Where the run came from, for the event summary. Written for a person. */
         val reason: String? = null,
         val debugMode: Boolean = false,
@@ -115,6 +173,16 @@ class RunIngress(
         val admitted: AdmissionControl.Admitted?,
         /** True when an existing run was returned instead of a new one being made. */
         val idempotentHit: Boolean = false,
+        /**
+         * True when this input was delivered to a run that already held the
+         * dedup key, rather than starting a run of its own.
+         *
+         * The caller gets the LIVE run's id, which is the right answer: their
+         * alert is being worked, by that run. Distinguished from
+         * [idempotentHit] because the two mean different things — one says "you
+         * already asked for this", the other says "something is already on it".
+         */
+        val joinedExisting: Boolean = false,
     )
 
     /**
@@ -137,6 +205,29 @@ class RunIngress(
             "This workflow has no published version yet. Publish it, then run it."
         )
         val environmentId = request.environmentId ?: wf.environmentId
+
+        /*
+         * ── 0. IS SOMETHING ALREADY WORKING ON THIS? ────────────────────
+         *
+         * BEFORE the idempotency claim, deliberately. They answer different
+         * questions — "is this the same request" versus "is something already on
+         * this thing" — and the singleton one has to come first, because a
+         * `join` does not create a run at all and burning an idempotency key on
+         * a request that started nothing would make the caller's own retry look
+         * like a duplicate.
+         *
+         * The check here is ADVISORY. Two alerts for one service in the same
+         * second is the normal case, so the authority is the partial unique
+         * index, and the losing INSERT below is handled the same way.
+         */
+        if (request.dedupKey != null && dedup != null) {
+            val policy = RunDedup.Policy.of(wf.dedupPolicy)
+            val holder = dedup.holderOf(request.workspaceId, wf.id, request.dedupKey)
+            if (holder != null) {
+                resolveCollision(request, wf, environmentId, policy, holder.runId)
+                    ?.let { return it }
+            }
+        }
 
         // ── 1. Claim the key, before anything that can be retried into ────────
         var claimed: String? = null
@@ -179,7 +270,7 @@ class RunIngress(
 
         // From here on, every exit that is not a started run gives the key back.
         try {
-            return admitAndCreate(request, wf.id, versionId, environmentId, claimed)
+            return admitAndCreate(request, wf, versionId, environmentId, claimed)
         } catch (e: Throwable) {
             claimed?.let { idempotency?.release(request.workspaceId, it) }
             throw e
@@ -188,12 +279,13 @@ class RunIngress(
 
     private fun admitAndCreate(
         request: Request,
-        workflowId: UUID,
+        workflow: com.vectorbea.api.repository.Workflow,
         versionId: UUID,
         environmentId: UUID,
         claimedKey: String?,
     ): Started {
         val workspaceId = request.workspaceId
+        val workflowId = workflow.id
 
         // ── 2. Rate limit ────────────────────────────────────────────────────
         rateLimiter?.let { bucket ->
@@ -235,26 +327,55 @@ class RunIngress(
 
         // ── 4. Class and place, before the row exists ────────────────────────
         val executionClass = classResolver?.resolve(versionId) ?: ExecutionClass.SHORT
-        val placement = dataSource?.let { FairOrdering.placeAndAdvance(it, workspaceId, executionClass) }
-            ?: FairOrdering.Placement(System.currentTimeMillis() / 1000.0, 0)
+        /* Priority weights the fair-queue clock as well as ordering the claim: a
+           Sev1 advances its workspace's vclock by a fraction of what a batch run
+           does, so it goes to the front repeatedly and cheaply WITHOUT starving
+           the work behind it. See `run_priority_weight` in V068. */
+        val priority = priorityFor(request, workflow)
+        val placement = dataSource
+            ?.let { FairOrdering.placeAndAdvance(it, workspaceId, executionClass, priority) }
+            ?: FairOrdering.Placement(System.currentTimeMillis() / 1000.0, priority)
 
         // ── 5. Admission ─────────────────────────────────────────────────────
         val admitted = admission?.admit(workspaceId, executionClass, placement.priority, effective?.plan)
 
-        // ── 6. The run ───────────────────────────────────────────────────────
-        val run = runRepo.create(CreateRunRequest(
-            workspaceId = workspaceId,
-            environmentId = environmentId,
-            workflowId = workflowId,
-            workflowVersionId = versionId,
-            triggerType = request.source.wire,
-            inputJson = request.inputJson,
-            idempotencyKey = request.idempotencyKey,
-            debugMode = request.debugMode,
-            executionClass = executionClass.wire,
-            fairVtime = placement.fairVtime,
-            priority = placement.priority,
-        ))
+        // ── 6. The run — and the only AUTHORITATIVE dedup check ────────
+        /*
+         * The lookup in step 0 is advisory and can be beaten. Two alerts for one
+         * service in the same second is the NORMAL case, which is precisely when
+         * a read-then-write loses, so `agent_runs_dedup_live_unique` is what
+         * actually holds the invariant. Its refusal is translated into the same
+         * answer step 0 would have given, rather than reaching the caller as a
+         * 500 reading `duplicate key value violates unique constraint`.
+         */
+        val run = try {
+            runRepo.create(CreateRunRequest(
+                workspaceId = workspaceId,
+                environmentId = environmentId,
+                workflowId = workflowId,
+                workflowVersionId = versionId,
+                triggerType = request.source.wire,
+                inputJson = request.inputJson,
+                idempotencyKey = request.idempotencyKey,
+                dedupKey = request.dedupKey,
+                /* Copied from the workflow, not asked of the caller: "this
+                   workflow executes inside our network" is a property of the
+                   work, and a trigger must not be able to move a run out of a
+                   customer's perimeter by asking nicely. */
+                runnerPoolId = workflow.runnerPoolId,
+                debugMode = request.debugMode,
+                executionClass = executionClass.wire,
+                fairVtime = placement.fairVtime,
+                priority = placement.priority,
+            ))
+        } catch (e: Exception) {
+            if (dedup != null && request.dedupKey != null && dedup.isDedupCollision(e)) {
+                throw dedup.onCollision(
+                    RunDedup.Policy.of(workflow.dedupPolicy),
+                    workspaceId, workflowId, request.dedupKey)
+            }
+            throw e
+        }
 
         claimedKey?.let { idempotency?.complete(workspaceId, it, run.id) }
         attribute(run.id, request.actor)
@@ -266,7 +387,36 @@ class RunIngress(
         appendEvent(run.id, workspaceId, environmentId, "RUN_QUEUED", "queued", source,
             "Run queued", "Job placed on workflow queue")
 
-        // ── 7. Enqueue ───────────────────────────────────────────────────────
+        /*
+         * ── 7. Enqueue — UNLESS THE RUN BELONGS TO SOMEBODY ELSE'S NETWORK ──
+         *
+         * A run pinned to a self-hosted pool is left `queued` in Postgres and
+         * put on no stream. Its runner leases it over HTTPS from inside the
+         * customer's perimeter (`POST /api/runner/lease`).
+         *
+         * This is the second of two doors and the easier one to miss.
+         * `PostgresClaim` skips pinned runs, but the Redis path never reads
+         * `agent_runs` at all — it reads a job off a stream — so enqueueing one
+         * would hand it to a platform worker through the side the claim
+         * predicate cannot see, and the customer's prompts would execute on our
+         * infrastructure with nothing anywhere saying so.
+         */
+        if (workflow.runnerPoolId != null) {
+            appendEvent(run.id, workspaceId, environmentId, "RUN_QUEUED", "queued", source,
+                "Waiting for a self-hosted runner",
+                "This workflow runs inside your own network. A runner in the pool will pick " +
+                    "it up; if nothing does, check that a runner is alive and can reach us.")
+            log.info("[ingress] run {} pinned to runner pool {} — not enqueued",
+                run.id, workflow.runnerPoolId)
+            return Started(
+                runId = run.id,
+                workflowVersionId = versionId,
+                environmentId = environmentId,
+                executionClass = executionClass,
+                admitted = admitted,
+            )
+        }
+
         val q = queue ?: run {
             runCatching { runRepo.updateStatus(run.id, workspaceId, "enqueue_failed") }
             throw ApiError.ServiceUnavailable("The run queue is not available.")
@@ -294,8 +444,8 @@ class RunIngress(
             throw ApiError.ServiceUnavailable("Failed to enqueue the run: the queue is unavailable.")
         }
 
-        log.info("[ingress] started run={} workflow={} source={} class={}",
-            run.id, workflowId, request.source.wire, executionClass.wire)
+        log.info("[ingress] started run={} workflow={} source={} class={} priority={}",
+            run.id, workflowId, request.source.wire, executionClass.wire, placement.priority)
 
         return Started(
             runId = run.id,
@@ -305,6 +455,146 @@ class RunIngress(
             admitted = admitted,
         )
     }
+
+    /**
+     * Act on a dedup collision, or fall through to starting a run.
+     *
+     * Returns non-null when the caller's answer is the EXISTING run — which is
+     * every case except `supersede`, whose whole point is that a new run follows.
+     */
+    private fun resolveCollision(
+        request: Request,
+        wf: com.vectorbea.api.repository.Workflow,
+        environmentId: UUID,
+        policy: RunDedup.Policy,
+        holderId: UUID,
+    ): Started? = when (policy) {
+
+        RunDedup.Policy.REJECT -> throw ApiError.Conflict(
+            "A run is already working on '${request.dedupKey}' ($holderId). This " +
+                "workflow's deduplication policy is `reject`, so no second run was " +
+                "started — set it to `join` to deliver this input to that run instead.")
+
+        RunDedup.Policy.JOIN -> {
+            /*
+             * The second alert becomes more information about the incident
+             * already being worked. This is the case the whole feature exists
+             * for: an SRE watching one incident channel, not forty.
+             */
+            val sender = joinSignal ?: throw ApiError.ServiceUnavailable(
+                "This workflow deduplicates by joining, but signal delivery is not " +
+                    "configured on this deployment, so the input would have been lost.")
+
+            val accepted = try {
+                sender.send(
+                    runId = holderId,
+                    workspaceId = request.workspaceId,
+                    environmentId = environmentId,
+                    name = wf.dedupJoinSignal,
+                    payloadJson = request.inputJson,
+                    /* The idempotency key when there is one, so an alerting
+                       system retrying a delivery does not signal the run twice
+                       with the same alert. */
+                    dedupeKey = request.idempotencyKey,
+                )
+            } catch (e: ApiError) {
+                /*
+                 * An answer, not a failure. The signal rate limiter refusing a
+                 * flood is the one that matters: falling through here would
+                 * answer an alert storm by starting a run per alert, which is
+                 * the exact failure this feature exists to prevent.
+                 */
+                throw e
+            } catch (e: Exception) {
+                log.warn("[ingress] join to {} failed: {}", holderId, e.message)
+                false
+            }
+
+            if (!accepted) {
+                /*
+                 * The holder finished, or is terminal, between the lookup and
+                 * the send. Falling through to start a fresh run is correct —
+                 * the key is free now, and the alert still needs working.
+                 */
+                log.info("[ingress] join to {} was refused; starting a new run for key '{}'",
+                    holderId, request.dedupKey)
+                null
+            } else {
+                log.info("[ingress] joined key '{}' into live run {} as signal '{}'",
+                    request.dedupKey, holderId, wf.dedupJoinSignal)
+                val existing = runRepo.findById(holderId, request.workspaceId)
+                Started(
+                    runId = holderId,
+                    workflowVersionId = existing?.workflowVersionId ?: wf.currentVersionId!!,
+                    environmentId = existing?.environmentId ?: environmentId,
+                    executionClass = ExecutionClass.fromWire(
+                        runCatching { runRepo.findExecutionClass(holderId) }.getOrNull()),
+                    admitted = null,
+                    joinedExisting = true,
+                )
+            }
+        }
+
+        RunDedup.Policy.SUPERSEDE -> {
+            /*
+             * Cancel and continue. `cancellation_requested` rather than a
+             * straight terminal write, because the holder may be mid-tick on a
+             * worker: that flag is what the worker (and, since T5, the agent
+             * loop inside it) checks, and its own terminal transition is what
+             * closes its waits, settles its budget and cancels its delegated
+             * children.
+             *
+             * The key is NOT free until it does. So the new run's insert may
+             * still lose the index race, and that is handled where every other
+             * collision is — the caller is told to retry rather than being given
+             * a second live run.
+             */
+            runCatching { runRepo.updateStatus(holderId, request.workspaceId, "cancellation_requested") }
+                .onFailure { log.warn("[ingress] could not supersede {}: {}", holderId, it.message) }
+            log.info("[ingress] superseding run {} for key '{}'", holderId, request.dedupKey)
+            null
+        }
+    }
+
+    /**
+     * The run's priority: the caller's, the workflow's, or none — clamped.
+     *
+     * ── CLAMPED TO THE WORKSPACE, SO IT CANNOT BE SELF-GRANTED ──────────
+     * A trigger may raise ONE run above the workflow's default — a Sev1 into a
+     * workflow whose normal priority is 50 — but never above what the workspace
+     * is entitled to. Without the ceiling, "priority" is a field any caller can
+     * set to 100, which makes it meaningless within a minute of somebody reading
+     * the API documentation.
+     */
+    private fun priorityFor(request: Request, wf: com.vectorbea.api.repository.Workflow): Short {
+        val requested = request.priority ?: wf.defaultPriority
+        val ceiling = workspaceCeiling(request.workspaceId)
+        return requested.toInt().coerceIn(0, ceiling.toInt()).toShort()
+    }
+
+    /**
+     * The highest priority this workspace may use.
+     *
+     * The priority lane is a plan feature, so a workspace without it tops out
+     * below it — a Sev1 still preempts that workspace's own batch work, which is
+     * the requirement, without preempting a paying tenant's interactive runs.
+     */
+    private fun workspaceCeiling(workspaceId: UUID): Short = dataSource?.let { ds ->
+        runCatching {
+            ds.connection.use { c ->
+                c.prepareStatement(
+                    "SELECT COALESCE(bool_or(priority_lane), false) AS lane " +
+                        "FROM workspace_usage_policies WHERE workspace_id = ?"
+                ).use { st ->
+                    st.setObject(1, workspaceId)
+                    st.executeQuery().use { rs ->
+                        if (rs.next() && rs.getBoolean("lane")) 100.toShort()
+                        else DEFAULT_PRIORITY_CEILING
+                    }
+                }
+            }
+        }.getOrDefault(DEFAULT_PRIORITY_CEILING)
+    } ?: DEFAULT_PRIORITY_CEILING
 
     /**
      * Record who is accountable, and what produced the run.

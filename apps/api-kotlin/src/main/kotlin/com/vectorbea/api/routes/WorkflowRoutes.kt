@@ -41,10 +41,18 @@ private data class CreateWorkflowBody(
     val status: String? = null,
 )
 
+private val DEDUP_POLICIES = setOf("reject", "join", "supersede")
+
 private data class UpdateWorkflowBody(
     val name: String? = null,
     val description: String? = null,
     val status: String? = null,
+    /** `reject` | `join` | `supersede`. What a second start does when the key is taken. */
+    val dedupPolicy: String? = null,
+    /** The signal name a `join` arrives under. The run must be listening for it. */
+    val dedupJoinSignal: String? = null,
+    /** 0–100. Where this workflow's runs start before a trigger raises them. */
+    val defaultPriority: Int? = null,
 )
 
 private data class CreateVersionBody(
@@ -91,6 +99,9 @@ private fun Workflow.toResponse(graphJson: String? = null): Map<String, Any?> {
         "description" to description,
         "creationMode" to creationMode,
         "status" to status,
+        "dedupPolicy" to dedupPolicy,
+        "dedupJoinSignal" to dedupJoinSignal,
+        "defaultPriority" to defaultPriority.toInt(),
         "currentVersionId" to currentVersionId?.toString(),
         "stepCount"  to stepCount,
         "agentCount" to agentCount,
@@ -207,6 +218,19 @@ class WorkflowRoutes(
         val body = req.bodyAs<UpdateWorkflowBody>()
 
         if (body.status != null) requireOneOf(body.status, "status", WORKFLOW_STATUSES)
+        if (body.dedupPolicy != null) requireOneOf(body.dedupPolicy, "dedupPolicy", DEDUP_POLICIES)
+        if (body.defaultPriority != null && body.defaultPriority !in 0..100) {
+            throw ApiError.ValidationError(
+                "`defaultPriority` must be between 0 and 100. 0 is batch, 50 is normal, 100 is " +
+                    "the priority lane."
+            )
+        }
+        if (body.dedupJoinSignal != null && body.dedupJoinSignal.isBlank()) {
+            throw ApiError.ValidationError(
+                "`dedupJoinSignal` names the signal a joined input arrives under, so it cannot " +
+                    "be empty — the run has to be able to wait for it."
+            )
+        }
 
         val wf = repo.update(
             id = id,
@@ -215,6 +239,9 @@ class WorkflowRoutes(
                 name = body.name?.trim()?.takeIf { it.isNotBlank() },
                 description = body.description,
                 status = body.status,
+                dedupPolicy = body.dedupPolicy,
+                dedupJoinSignal = body.dedupJoinSignal?.trim(),
+                defaultPriority = body.defaultPriority?.toShort(),
             )
         ) ?: throw ApiError.NotFound("Workflow")
 

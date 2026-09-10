@@ -331,7 +331,16 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       id: "status", header: "Status", width: 128, minWidth: 92,
       sortValue: (r) => r.status,
       skeletonWidth: 80,
-      cell: (run) => <StatusBadge status={run.status} />,
+      cell: (run) => (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <StatusBadge status={run.status} />
+          {/* The second axis. A run that produced the right answer and could not
+              deliver it is `succeeded` AND undelivered, and the list has to show
+              both — folding it into the badge would either paint a correct run
+              red or hide the failure entirely. */}
+          <UndeliveredMark delivery={run.delivery} />
+        </span>
+      ),
     },
     {
       // The point of the page.
@@ -648,6 +657,41 @@ function exportCsv(runs: Run[]) {
 }
 
 /* ── Cells ────────────────────────────────────────────────────────────────── */
+
+/**
+ * Shown only when the result did NOT get where it was going.
+ *
+ * ── AND NOTHING WHEN IT DID ─────────────────────────────────────────────────
+ * A green tick beside every successful run would be noise on the overwhelming
+ * majority of rows and would make the failing ones harder to find, which is the
+ * opposite of the point. Absence means "nothing to say"; presence always means
+ * "look at this".
+ *
+ * `partial` gets the same mark as `failed`: from the customer's side a result
+ * that reached one of three destinations did not arrive, and the run page says
+ * which one.
+ */
+function UndeliveredMark({ delivery }: { delivery?: Run["delivery"] }) {
+  if (delivery !== "failed" && delivery !== "partial") return null;
+  const label = delivery === "failed"
+    ? "The result was not delivered"
+    : "Some destinations did not receive the result";
+  return (
+    <span
+      title={label}
+      className={cn(
+        "font-ui text-caption inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5",
+        "text-status-failed border-status-failed-border bg-status-failed-subtle",
+      )}
+    >
+      <IncidentIcon size={11} aria-hidden="true" className="shrink-0" />
+      {/* Read out by a screen reader; the title alone is not announced
+          reliably, and this row's whole meaning turns on it. */}
+      <span className="sr-only">{label}</span>
+      <span aria-hidden="true">Undelivered</span>
+    </span>
+  );
+}
 
 function StatusBadge({ status }: { status: RunStatus }) {
   const meta = STATUS_META[status];

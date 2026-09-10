@@ -119,6 +119,9 @@ class HttpNodeExecutor(
         // ── Optional: resolve connection ──────────────────────────────────────
         val connectionIdStr = cfg["connectionId"] as? String
         var allowedHosts    = emptyList<String>()
+        /* Public until a connection says otherwise: a node with no connection has
+           nothing that could have authorised private egress. */
+        var egressPolicy    = SsrfGuard.EgressPolicy.PUBLIC
         var allowedPaths    = emptyList<String>()
         var baseUrl: String? = null
         var authHeader: Pair<String, String>? = null
@@ -142,6 +145,7 @@ class HttpNodeExecutor(
                 summary = "provider=${resolved.record.provider}")
 
             allowedHosts = resolved.record.allowedHosts
+            egressPolicy = resolved.record.egressPolicy
             allowedPaths = resolved.record.allowedPaths
             baseUrl      = resolved.record.configJson["baseUrl"] as? String
 
@@ -178,7 +182,7 @@ class HttpNodeExecutor(
 
         // ── SSRF check ────────────────────────────────────────────────────────
         try {
-            SsrfGuard.checkUrl(rawUrl, allowedHosts)
+            SsrfGuard.checkUrl(rawUrl, allowedHosts, egressPolicy)
         } catch (e: SsrfException) {
             emitEvent(context, node.id, EventType.HTTP_REQUEST_PREPARED, "blocked",
                 title = "SSRF blocked", summary = e.message?.take(200))

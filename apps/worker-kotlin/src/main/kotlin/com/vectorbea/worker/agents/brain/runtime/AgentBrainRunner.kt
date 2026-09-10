@@ -171,6 +171,19 @@ class AgentBrainRunner(
          */
         internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
 
+        /** The signal name free-text guidance arrives under. */
+        internal const val GUIDANCE_SIGNAL = "guidance"
+
+        /**
+         * How long one piece of guidance may be.
+         *
+         * A sentence or two of correction, not a document. Capped because this
+         * is the one part of the prompt written by a person while the run is in
+         * flight, and an uncapped one is a way to spend a workspace's own token
+         * budget from outside its graph.
+         */
+        internal const val MAX_GUIDANCE_CHARS = 2_000
+
         /** Matches the truncation notice `AgentSafetyGuard` appends. */
         internal const val TRUNCATION_MARKER = "… [truncated"
 
@@ -771,9 +784,11 @@ class AgentBrainRunner(
            than being stubbed out and therefore untested. Null in production, where
            LlmNodeExecutor's own default (the shared, bounded OutboundHttp client)
            applies and this construction is byte-for-byte what it always was. */
-        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity)
+        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity,
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
         else LlmNodeExecutor(connectionResolver, eventStore, httpClient = llmHttpClient,
-            capacity = capacity)
+            capacity = capacity,
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
     }
 
     data class RunResult(
@@ -1064,6 +1079,32 @@ class AgentBrainRunner(
                 budget.iterationStarted()
                 state.iteration++
 
+                /*
+                 * ── HAS SOMEBODY ASKED US TO STOP? ───────────────────────
+                 *
+                 * `WorkflowRuntime` checks cancellation BETWEEN nodes, which is
+                 * the right granularity for a node that finishes in one bounded
+                 * operation. An agent loop is not that: thirty iterations is
+                 * thirty LLM calls inside ONE node, so before this check a
+                 * cancelled incident kept paying a model to reason about a
+                 * problem that had already been resolved — until the loop
+                 * decided to stop on its own.
+                 *
+                 * EVERY iteration, not every fifth. The check is one indexed
+                 * read; the thing it might save is an LLM call, and the ratio is
+                 * not close. Placed before the budget check so a cancelled run
+                 * stops rather than being reported as over budget.
+                 */
+                if (runtimeCtx.cancellationCheck()) {
+                    state.stopReason = AgentLoopState.StopReason.CANCELLED
+                    retryable = false
+                    emitEvent(config, RunEventStore.EventType.AGENT_CANCELLED, "cancelled",
+                        "Stopped at iteration ${state.iteration}: the run was cancelled.")
+                    log.info("[brain] cancelled at iteration {} [run={}, step={}]",
+                        state.iteration, runtimeCtx.runId, config.stepId)
+                    break
+                }
+
                 // Hard budget check before each iteration
                 try { budgetGuard.checkOrThrow(budget, "before iteration ${state.iteration}") }
                 catch (e: BudgetExceededException) {
@@ -1075,6 +1116,16 @@ class AgentBrainRunner(
                         "Budget exceeded: ${e.message}")
                     break
                 }
+
+                /*
+                 * ── WHAT A PERSON HAS SAID SINCE THE LAST ITERATION ─────────
+                 * Read here, before the prompt is built, so guidance sent while
+                 * the previous LLM call was in flight is in front of the model on
+                 * the very next iteration rather than one later. An agent that
+                 * acts on a correction one step after being given it is, from the
+                 * outside, an agent that ignored it.
+                 */
+                drainGuidance(config, runtimeCtx, state)
 
                 log.info("[brain] iteration {}/{} runId={}", state.iteration, config.maxIterations, config.runId)
                 emitEvent(config, RunEventStore.EventType.AGENT_ITERATION_STARTED, "running",
@@ -1696,6 +1747,103 @@ class AgentBrainRunner(
         )
     }
 
+    /**
+     * Take delivery of any guidance a person has sent, and put it in context.
+     *
+     * ── A SIGNAL PLUS A CONTEXT WRITE, AND NOTHING ELSE ────────────────
+     * Everything durable here already exists: `run_signals` stores it in order,
+     * deduplicated and workspace-scoped, and the rate limit that stops an
+     * unbounded signal stream from starving one run covers this too. What is new
+     * is one read at the iteration boundary and one write into [AgentLoopState].
+     * A separate "guidance" table with its own delivery semantics would be a
+     * second signal system, and only one of them would be tested.
+     *
+     * ── WHY THE AGENT DOES NOT HAVE TO BE WAITING ───────────────────
+     * `openAgentWait` reads signals too, but only the one the model asked for,
+     * and only when it chose to stop. The case this exists for is the opposite:
+     * an agent working happily down the wrong path, and an engineer who can see
+     * it. Redirecting that agent must not require it to have predicted that it
+     * would need redirecting.
+     *
+     * Consumed as it is read, so the same instruction is never delivered twice —
+     * an agent told the same thing at four consecutive iterations reads it as
+     * four separate insistences.
+     */
+    private fun drainGuidance(
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        state: AgentLoopState,
+    ) {
+        val signals = signalStore ?: return
+        val pending = runCatching { signals.pending(runtimeCtx.runId) }.getOrElse {
+            /* Never fatal. Guidance not arriving is a degraded run; a run that
+               dies because a guidance read failed is an outage. */
+            log.warn("[brain] could not read guidance [run={}]: {}", runtimeCtx.runId, it.message)
+            return
+        }
+
+        val guidance = pending.filter { isGuidanceSignal(it.name) }
+        if (guidance.isEmpty()) return
+
+        for (signal in guidance.take(AgentLoopState.MAX_GUIDANCE)) {
+            val text = guidanceTextOf(signal) ?: continue
+            state.addGuidance(AgentLoopState.Guidance(
+                iterationNumber = state.iteration,
+                text = text,
+                from = signal.sentBy,
+            ))
+            emitEvent(config, RunEventStore.EventType.AGENT_GUIDANCE_RECEIVED, "running",
+                "Guidance received at iteration ${state.iteration}: ${text.take(160)}")
+            log.info("[brain] guidance at iteration {} [run={}, step={}, chars={}]",
+                state.iteration, runtimeCtx.runId, config.stepId, text.length)
+        }
+
+        /* Consumed even when the text was unusable, so a malformed payload is not
+           re-read at every iteration for the rest of the run. */
+        runCatching { signals.consume(guidance.map { it.id }, waitId = null) }
+            .onFailure { log.warn("[brain] guidance consume failed: {}", it.message) }
+    }
+
+    /** `guidance`, or anything under `guidance:` — so it can be addressed per agent. */
+    private fun isGuidanceSignal(name: String): Boolean =
+        name == GUIDANCE_SIGNAL || name.startsWith("$GUIDANCE_SIGNAL:")
+
+    /**
+     * The instruction inside a guidance signal, sanitized and capped.
+     *
+     * Accepts `{"text": "..."}`, `{"guidance": "..."}` or `{"message": "..."}`
+     * because all three are what somebody types first, and a signal whose
+     * payload shape was almost right is worse than one that was rejected.
+     */
+    private fun guidanceTextOf(signal: com.vectorbea.worker.durable.wait.SignalStore.Signal): String? {
+        val raw = runCatching {
+            val tree = mapper.readTree(signal.payloadJson)
+            listOf("text", "guidance", "message", "instruction")
+                .firstNotNullOfOrNull { field ->
+                    tree.get(field)?.takeIf { it.isTextual }?.asText()
+                }
+        }.getOrNull() ?: return null
+
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        return sanitizeGuidance(trimmed).take(MAX_GUIDANCE_CHARS)
+    }
+
+    /**
+     * Flatten guidance to one paragraph of plain text.
+     *
+     * Newlines and the model's own action-format markers are collapsed, because
+     * this text is concatenated into a prompt whose sections are separated by
+     * blank lines and whose contract is JSON: a caller who sends a payload
+     * containing what looks like a section heading, or a complete action object,
+     * should not be able to end the guidance section early and start something
+     * that reads as though the platform wrote it.
+     */
+    private fun sanitizeGuidance(text: String): String =
+        text.replace(Regex("[\\r\\n]+"), " ")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+
     /** What happened when the agent asked to wait. */
     private sealed class AgentWaitOutcome {
         data class Parked(val wait: NodeResult.Waiting) : AgentWaitOutcome()
@@ -1858,6 +2006,9 @@ class AgentBrainRunner(
         AgentLoopState.StopReason.WAITING ->
             "The agent is waiting for an external event. The run is parked and will " +
             "resume when it arrives, or when the wait's deadline passes."
+        AgentLoopState.StopReason.CANCELLED ->
+            "The run was cancelled, so the agent stopped between iterations. Work " +
+            "already committed stands; nothing further was attempted."
         AgentLoopState.StopReason.TOOL_NOT_ALLOWED ->
             "The agent tried to call a tool that is not in its allowed tool list."
         AgentLoopState.StopReason.SCHEMA_INVALID ->

@@ -204,6 +204,14 @@ open class RunEventStore(
            with a legible reason") true in the database and false on screen. */
         EventType.RUN_WAIT_STARTED, EventType.RUN_WAIT_RESOLVED,
         EventType.RUN_WAIT_TIMED_OUT, EventType.SIGNAL_DELIVERED,
+        /* A delivery that ran out of attempts is the run's real outcome from the
+           customer's side, and it is the only record that it happened at all —
+           the run itself already said SUCCEEDED. Dropping it would leave a run
+           reported as delivered that was not, which is the failure this whole
+           feature exists to prevent. The intermediate attempts are not here:
+           they are frequent, they are recoverable, and the dead one summarises
+           them. */
+        EventType.DELIVERY_DEAD,
         /* Handed to a successor run. `RUN_CONTINUED_AS_NEW` was already here and
            the three transitions that produce it were not, which made the boundary
            legible from one side only. RECOMMENDED stays out: it is advice, not a
@@ -422,6 +430,48 @@ open class RunEventStore(
          * never saw it".
          */
         SIGNAL_DELIVERED("SIGNAL_DELIVERED"),
+
+        /**
+         * Result delivery, after the run is terminal.
+         *
+         * ── ON THE RUN'S TIMELINE, NOT A SEPARATE LOG ───────────────────────
+         * A run that produced the right answer and failed to deliver it is not a
+         * success from the customer's side, and a delivery status kept somewhere
+         * else is a status nobody looks at. These events sit on the same timeline
+         * as the run's execution, after it, so "what happened to my result" is
+         * answered where the question is asked.
+         *
+         * They arrive AFTER `RUN_SUCCEEDED`, which is correct and worth knowing:
+         * the sequence is monotonic and a reader paging with `?afterSequence=`
+         * will see them arrive minutes or hours later, as retries land.
+         */
+        /**
+         * An agent loop stopped because the run was cancelled.
+         *
+         * Distinct from `RUN_CANCELLED`, which is the run's own transition. This
+         * one says WHERE it stopped — which iteration, in which step — and that
+         * is the difference between "we cancelled it" and "we cancelled it and it
+         * kept spending for another four minutes".
+         */
+        AGENT_CANCELLED("AGENT_CANCELLED"),
+
+        /**
+         * A person sent free-text guidance into a running agent.
+         *
+         * Its own type rather than a generic signal event, because "who told
+         * this agent to change course, and when" is the first question asked
+         * about a run that did something surprising — and an answer that
+         * requires correlating a signal row with an iteration number is an
+         * answer nobody finds.
+         */
+        AGENT_GUIDANCE_RECEIVED("AGENT_GUIDANCE_RECEIVED"),
+
+        DELIVERY_QUEUED("DELIVERY_QUEUED"),
+        DELIVERY_ATTEMPTED("DELIVERY_ATTEMPTED"),
+        DELIVERY_SUCCEEDED("DELIVERY_SUCCEEDED"),
+        DELIVERY_FAILED("DELIVERY_FAILED"),
+        /** Out of attempts. The one that must never be dropped. */
+        DELIVERY_DEAD("DELIVERY_DEAD"),
         // Scheduling-fairness signals. NOTE: these are operational and HIGH-FREQUENCY
         // under load — they are exposed ONLY via metrics/logs (WorkerMetrics.tenantThrottled
         // / poolSaturated) and MUST NOT be appendEvent'd to run_events per poll.

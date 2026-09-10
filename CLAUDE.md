@@ -115,7 +115,8 @@ Design docs: docs/AGENT-HARNESS-ARCHITECTURE.md, docs/AGENT-TRACE-AND-DEBUGGER.m
 docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md,
 docs/PLANS-AND-ENTITLEMENTS.md, docs/RETENTION.md,
 docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md, docs/HTTP-TOOLS.md,
-docs/WAITS-AND-SIGNALS.md, docs/INGRESS.md.
+docs/WAITS-AND-SIGNALS.md, docs/INGRESS.md, docs/RESULT-DELIVERY.md,
+docs/SRE-AND-INCIDENT-RESPONSE.md, docs/ENTERPRISE-CONNECTIVITY.md.
 Read the relevant sections before changing runtime code. The docs explain WHY
 each guard exists; most were written after a production bug.
 
@@ -219,6 +220,89 @@ each guard exists; most were written after a production bug.
    by every refusal, because a run that was refused did not happen and its key
    must still work. See docs/INGRESS.md.
 
+17. DELIVERY IS A SECOND AXIS, NOT A RUN STATUS. A run that produced the right
+   answer and could not deliver it did not fail: its output is correct, its cost
+   was real, and retrying the RUN would re-execute every side effect. So
+   `agent_runs.delivery_status` is its own column, on the LIST response as well
+   as the detail one, and the UI shows both facts at once. Delivery happens
+   after the terminal transition, so it has its own retry, its own dead-letter
+   queue (`run_deliveries.status = 'dead'`, redeliverable in place) and its own
+   loop — `onTerminalTransition` INSERTs a row and returns, because that
+   function is on the completion path and somebody else's HTTP does not belong
+   on it. The idempotency key a receiver deduplicates on is DERIVED from
+   `(run, target, sequence)`, so every retry and every operator redelivery
+   carries the key the first attempt carried; a per-attempt key would make each
+   retry a new event to them and our logs would still say "delivered". A
+   destination is a TOOL — it reuses that tool's connection, credential,
+   approval policy and audit trail — and a caller blocked on a sync or streamed
+   run is NOT a delivery target, because it has no endpoint to retry against.
+   See docs/RESULT-DELIVERY.md.
+
+18. A RUN IS A SINGLETON ON ITS DEDUP KEY, AND THE INDEX SAYS SO. Two alerts
+   for one service must not start two incident runs, and the case that matters —
+   two arriving in the same second — is exactly the one a read-then-write loses,
+   because it is what a flapping check produces.
+   `agent_runs_dedup_live_unique` is the enforcement; the lookup in `RunIngress`
+   exists only so a policy can be acted on and the holding run named, and the
+   index's refusal is translated into the same answer that lookup would have
+   given. This is a DIFFERENT question from idempotency: a `dedup_key` asks "is
+   something already working on this thing" and is freed when the run ends,
+   while an `idempotency_key` asks "is this the same request" and expires on a
+   clock. The dedup check sits BEFORE the idempotency claim, because a `join`
+   starts no run and burning a key on it would make the caller's own retry look
+   like a duplicate. `cancellation_requested` is NOT live for this purpose — a
+   run on its way out has no claim on the key, and treating it as live makes
+   `supersede` lose the race to the run it has just cancelled, every time.
+   Priority weights the fair-queue clock as well as ordering the claim, because
+   `priority DESC` alone is a strict lane and a trickle of Sev1s would starve
+   batch work completely; and a requested priority is clamped to the workspace's
+   plan ceiling, because a field any caller can set to 100 orders nothing.
+   Cancelling a run walks `parent_run_id` DOWNWARDS and takes each descendant
+   through the same terminal CAS — one bulk UPDATE would be one statement and
+   would leak every child's waits, budget, children and deliveries.
+   See docs/SRE-AND-INCIDENT-RESPONSE.md.
+
+19. WHAT LEAVES THE CUSTOMER'S PERIMETER IS AN ALLOW-LIST, ENFORCED AT OUR
+   END. A self-hosted runner exists so a customer can tell their own security
+   review that prompts and tool results never leave their network. Everything
+   else about it — the pool, the token, the lease — is plumbing;
+   `RunnerReport` is the sentence they are buying, and it has to be true by
+   construction rather than by care. An ALLOW-LIST because a deny-list is a list
+   of the leaks somebody thought of: an unnamed field that gets dropped is a
+   degraded feature, and an unnamed field that passes through is their data in
+   our database. AT OUR END because a runner is software the customer deploys
+   and may be an old build — a guarantee that depends on the remote side having
+   redacted correctly is a hope with a version number. Titles and summaries are
+   payloads: a summary is generated from the thing it summarises. A run's OUTPUT
+   has no policy that admits it. A run pinned to a pool must be unclaimable
+   through BOTH doors — `PostgresClaim` carries `runner_pool_id IS NULL`, and
+   `RunIngress` does not enqueue it, because the Redis path never reads
+   `agent_runs` and would hand it to a platform worker through the side the
+   claim predicate cannot see. `payloads_withheld` is set at CREATION and stored
+   rather than derived, because the Debug tab has to say "withheld by policy"
+   while the run is still going and years after the pool is deleted — an empty
+   panel reads as a product that lost your data.
+   See docs/ENTERPRISE-CONNECTIVITY.md.
+
+20. A CUSTOMER'S PRICE IS NOT OUR LIST PRICE, AND EGRESS IS NOT A GLOBAL
+   SWITCH. `connections.provider` says WHOSE capacity, credential, breaker and
+   price; `connections.protocol` says what the wire looks like. Conflating them
+   worked only while every connection pointed at the vendor it was named after.
+   An enterprise runs a negotiated rate, so `connection_model_prices` overrides
+   per CONNECTION (the credential is what the contract attaches to), quotes
+   input and output SEPARATELY (output is 3-5x input, so a blend is right at one
+   ratio only), and resolves LONGEST-PATTERN-FIRST so a catch-all cannot
+   silently override the specific rates configured before it. The list path is
+   untouched, because generalising it would move every historical figure on
+   every dashboard. Reaching a private address is per connection, off by
+   default, and USELESS WITHOUT AN ALLOW-LIST — `private_allowed` with no
+   `allowed_hosts` reaches nothing, refused by the schema and by the guard,
+   because "allow private" and "these three hostnames" are one decision and
+   splitting them is how a temporary allowance becomes a permanent hole. Cloud
+   metadata addresses are refused under EVERY policy. There is no
+   `insecureSkipVerify` anywhere in the TLS path and the omission is the
+   feature. See docs/ENTERPRISE-CONNECTIVITY.md.
+
 ### Conventions
 
 - Migrations: Flyway, in apps/api-kotlin/src/main/resources/db/migration.
@@ -240,7 +324,21 @@ Ask before proceeding if a change would touch:
 - idempotency key derivation, including `RunWait.keyFor` and the callback
   token derived from it
 - the order of checks in `RunIngress.start`, or where the idempotency claim
-  sits within it
+  sits within it — including where the DEDUP check sits relative to it
+- the status list in `agent_runs_dedup_live_unique`, `RunDedup.LIVE_STATUSES`
+  or `SignalStore.LIVE_STATUSES`. All three must agree; if they do not, a
+  `join` can be told a run holds the key and then be refused a signal by that
+  same run, which is an alert silently dropped
+- `RunDelivery.keyFor`, or anything else a receiver deduplicates on — a wrong
+  guess produces duplicate side effects in somebody else's system, where we
+  cannot see them
+- `RunnerReport.ALLOWED_EVENT_FIELDS`, or anything else that widens what a
+  self-hosted runner may send us — every addition has to be a number, an
+  identifier or an enum, and a field that can carry a fragment of a prompt or a
+  tool result breaks a commitment a customer made to their own security review
+- the `runner_pool_id IS NULL` predicate in `PostgresClaim`, or the ingress
+  branch that declines to enqueue a pinned run. Either one alone lets a
+  customer's prompts execute on our infrastructure, silently
 - anything that alters what happens on resume
 
 These are the places where a plausible-looking change causes duplicate side

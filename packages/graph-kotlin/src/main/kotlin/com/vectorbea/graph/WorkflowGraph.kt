@@ -386,7 +386,10 @@ data class WorkflowGraph(
         private fun readFailurePolicy(config: Map<String, Any>, data: Map<String, Any?>): FailurePolicy {
             val raw = (config["errorPolicy"] ?: config["onFailure"] ?: data["errorPolicy"])
                 ?.toString()?.lowercase()?.replace('-', '_')
-                ?: return FailurePolicy()
+                /* Not an early return any more: a PARALLEL node commonly declares
+                   `branchFailure` and nothing else, and returning the default
+                   here would read that as having declared nothing at all. */
+                ?: return FailurePolicy(branchFailure = readBranchFailure(config, data))
             val normalised = when (raw) {
                 "continue", "ignore", "skip"        -> "continue"
                 /*
@@ -403,9 +406,40 @@ data class WorkflowGraph(
                  * worse than following the edge the author drew.
                  */
                 "follow_failure_edge", "failure_edge", "error_path", "fallback" -> "follow_failure_edge"
+                /* Park and ask a person. The synonyms are what the inspector and
+                   the Architect each call it; all three mean the same thing and
+                   falling through to `fail_run` would be the same silent
+                   downgrade "error-path" suffered above. */
+                "escalate", "ask_human", "escalate_to_human" -> "escalate"
                 else                                 -> "fail_run"
             }
-            return FailurePolicy(onFailure = normalised)
+            return FailurePolicy(
+                onFailure = normalised,
+                escalationSignal = (config["escalationSignal"] ?: data["escalationSignal"])
+                    ?.toString()?.takeIf { it.isNotBlank() },
+                escalationTimeoutMs = (config["escalationTimeoutMs"] ?: data["escalationTimeoutMs"])
+                    ?.toString()?.toLongOrNull()?.takeIf { it > 0 },
+                branchFailure = readBranchFailure(config, data),
+            )
+        }
+
+        /**
+         * How many branches of a fan-out have to survive.
+         *
+         * Defaults to `require_one`, which is exactly what the runtime did
+         * before this was declarable — so a graph that says nothing behaves
+         * identically, and only a graph that asks for something else changes.
+         */
+        private fun readBranchFailure(config: Map<String, Any>, data: Map<String, Any?>): String {
+            val raw = (config["branchFailure"] ?: config["branchFailurePolicy"]
+                ?: data["branchFailure"] ?: data["branchFailurePolicy"])
+                ?.toString()?.lowercase()?.replace('-', '_')
+                ?: return FailurePolicy.BRANCH_REQUIRE_ONE
+            return when (raw) {
+                "all_must_succeed", "all", "strict" -> FailurePolicy.BRANCH_ALL_MUST_SUCCEED
+                "tolerate_all", "any", "best_effort" -> FailurePolicy.BRANCH_TOLERATE_ALL
+                else -> FailurePolicy.BRANCH_REQUIRE_ONE
+            }
         }
 
         /**
@@ -553,11 +587,82 @@ data class CheckpointPolicy(
     val enabled: Boolean = true,
 )
 
+/**
+ * What a failure does to the rest of the run.
+ *
+ * ── FOUR ANSWERS, AND THE FOURTH IS THE ONE SRE WORK NEEDS ─────────────
+ * A workflow that pages someone, restarts a service and posts a summary has
+ * three nodes with three different right answers to "it failed":
+ *
+ *   abort     — `fail_run`. Stop. The default, because it is the only one that
+ *               cannot silently produce a wrong result.
+ *   continue  — the summary did not post; the incident is still handled.
+ *   retry     — [RetryPolicy], which is a different axis and composes with all
+ *               of these: retries are exhausted BEFORE the failure policy is
+ *               consulted at all.
+ *   escalate  — park and ask a person. The restart failed; a human decides
+ *               whether to retry it, skip it, or stop the run. Aborting throws
+ *               away a run that has already paged and diagnosed; continuing
+ *               pretends a service was restarted when it was not.
+ *
+ * `escalate` is a SIGNAL WAIT, not a new mechanism (invariant 15). The run
+ * parks on `escalation:<nodeId>` and any of the existing ways to signal a run —
+ * the API, the UI, an on-call bot — answers it with
+ * `{"decision": "retry" | "skip" | "abort"}`. A second parking mechanism would
+ * mean a second timeout policy and a second way to be stuck forever.
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class FailurePolicy(
-    /** "fail_run" | "continue" | "follow_failure_edge" */
+    /** "fail_run" | "continue" | "follow_failure_edge" | "escalate" */
     val onFailure: String = "fail_run",
-)
+    /**
+     * The signal that answers an escalation.
+     *
+     * Defaults to `escalation:<nodeId>` at the point of use, so two escalating
+     * nodes in one run cannot answer each other's question — which is what a
+     * single shared name would do, silently, and only under the concurrency that
+     * makes it hardest to reproduce.
+     */
+    val escalationSignal: String? = null,
+    /**
+     * How long a person has before the escalation times out, in milliseconds.
+     *
+     * Null takes the wait primitive's default. The deadline is never absent:
+     * a run parked forever on a question nobody was told about is the failure
+     * mode every wait in this system is clamped to avoid.
+     */
+    val escalationTimeoutMs: Long? = null,
+    /**
+     * On a PARALLEL node: how many branches have to survive.
+     *
+     * ── THIS WAS ALWAYS A POLICY; IT JUST WAS NOT DECLARED ──────────────
+     * The runtime already had a rule — tolerate partial failures, fail only if
+     * every branch failed — hard-coded, undeclared and unchangeable. That is
+     * right for "check five services", and wrong for "drain the node, then
+     * update DNS, then verify", where a branch failing silently means the run
+     * reports success having done two thirds of the work.
+     *
+     *   require_one       — today's behaviour, and the default so nothing moves.
+     *   all_must_succeed  — any failed branch fails the fan-out.
+     *   tolerate_all      — the join proceeds even if every branch failed.
+     *
+     * Read from the PARALLEL node, not from the branches: it is a statement
+     * about the fan-out as a whole, and putting it on the branches would raise
+     * the question of which branch's copy wins.
+     */
+    val branchFailure: String = "require_one",
+) {
+    companion object {
+        const val ABORT = "fail_run"
+        const val CONTINUE = "continue"
+        const val FAILURE_EDGE = "follow_failure_edge"
+        const val ESCALATE = "escalate"
+
+        const val BRANCH_REQUIRE_ONE = "require_one"
+        const val BRANCH_ALL_MUST_SUCCEED = "all_must_succeed"
+        const val BRANCH_TOLERATE_ALL = "tolerate_all"
+    }
+}
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 

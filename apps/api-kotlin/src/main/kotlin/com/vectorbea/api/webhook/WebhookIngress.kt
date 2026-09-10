@@ -199,6 +199,15 @@ class WebhookIngress(
                  * several do — still cannot produce two runs.
                  */
                 idempotencyKey = deliveryId?.let { "webhook:$it" },
+                /*
+                 * The THING, not the message. `dedupeKeyFor` above stops one
+                 * delivery running twice; this stops two different alerts about
+                 * the same service starting two incident runs, which is the case
+                 * that actually reaches an on-call engineer at 3am.
+                 */
+                dedupKey = PayloadMapper.stringAt(body, webhook.runDedupPath)
+                    ?.takeIf { it.isNotBlank() },
+                priority = webhook.runPriority,
                 reason = "Delivered by ${webhook.name}" +
                     (eventType?.let { " ($it)" } ?: ""),
             ))

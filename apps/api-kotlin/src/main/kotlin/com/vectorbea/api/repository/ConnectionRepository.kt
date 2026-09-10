@@ -28,6 +28,20 @@ data class Connection(
     val allowedPaths: String,
     val allowedSchemas: String,
     val allowedTables: String,
+    /**
+     * How far this connection may reach: `public` or `private_allowed`.
+     *
+     * Meaningless without [allowedHosts], and the schema refuses the
+     * combination — see V071. The two are one decision.
+     */
+    val egressPolicy: String = "public",
+    /**
+     * The wire shape, when it differs from what [provider] implies.
+     *
+     * Null for every connection that points at the vendor whose name it
+     * carries, which is all of them until a customer runs their own gateway.
+     */
+    val protocol: String? = null,
     val lastTestedAt: Instant?,
     val lastTestStatus: String?,
     val lastTestLatencyMs: Int?,
@@ -59,7 +73,9 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
     private val cols = """
         id, workspace_id, environment_id, name, slug, type, provider, status, network_status,
         auth_type, secret_ref, config_json, allowed_hosts, allowed_paths, allowed_schemas,
-        allowed_tables, last_tested_at, last_test_status, last_test_latency_ms,
+        allowed_tables,
+        COALESCE(egress_policy, 'public') AS egress_policy, protocol,
+        last_tested_at, last_test_status, last_test_latency_ms,
         last_test_error_code, last_test_error_message_sanitized, created_at, updated_at
     """.trimIndent()
 
@@ -140,6 +156,18 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
         status: String? = null,
         /** Opaque secret ref — stored as-is, never the plaintext */
         secretRef: String? = null,
+        /**
+         * `public` | `private_allowed`. Widens what this connection may reach.
+         *
+         * Takes the person who set it, because this is the one setting that lets
+         * the platform talk to a customer's internal network, and "who decided
+         * that, and when" is a question a security review asks and an incident
+         * asks louder.
+         */
+        egressPolicy: String? = null,
+        egressPolicySetBy: UUID? = null,
+        /** `openai` | `anthropic` | `gemini`, when it differs from the provider. */
+        protocol: String? = null,
     ): Connection? {
         val setClauses = buildList {
             if (name != null) add("name = ?")
@@ -150,6 +178,14 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
             if (allowedTables != null) add("allowed_tables = ?")
             if (status != null) add("status = ?")
             if (secretRef != null) add("secret_ref = ?")
+            if (egressPolicy != null) {
+                add("egress_policy = ?")
+                /* Stamped in the same UPDATE, so there is no window where the
+                   policy is on and nobody owns it. */
+                add("egress_policy_set_by_user_id = ?")
+                add("egress_policy_set_at = now()")
+            }
+            if (protocol != null) add("protocol = ?")
             add("updated_at = now()")
         }
         if (setClauses.size == 1) return findById(id, workspaceId)
@@ -165,6 +201,11 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
                 if (allowedTables != null) setJsonb(i++, allowedTables)
                 if (status != null) setString(i++, status)
                 if (secretRef != null) setString(i++, secretRef)
+                if (egressPolicy != null) {
+                    setString(i++, egressPolicy)
+                    setUuidOrNull(i++, egressPolicySetBy)
+                }
+                if (protocol != null) setString(i++, protocol)
                 setUuid(i++, id)
                 setUuid(i, workspaceId)
             },
@@ -232,6 +273,8 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
         allowedPaths = rs.getJsonbString("allowed_paths"),
         allowedSchemas = rs.getJsonbString("allowed_schemas"),
         allowedTables = rs.getJsonbString("allowed_tables"),
+        egressPolicy = rs.getString("egress_policy") ?: "public",
+        protocol = rs.getString("protocol"),
         lastTestedAt = rs.instantOrNull("last_tested_at"),
         lastTestStatus = rs.getString("last_test_status"),
         lastTestLatencyMs = rs.getObject("last_test_latency_ms") as? Int,

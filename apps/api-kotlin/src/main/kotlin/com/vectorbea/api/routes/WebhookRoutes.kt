@@ -148,6 +148,17 @@ class WebhookRoutes(
         val eventTypes: List<String> = emptyList(),
         val dedupeHeader: String? = null,
         val dedupePath: String? = null,
+        /**
+         * A path naming the THING the run works — `alert.labels.service` — as
+         * opposed to `dedupePath`/`dedupeHeader`, which name the delivery.
+         *
+         * The first two stop one delivery running twice. This stops two
+         * different alerts about one service starting two incident runs, and
+         * what happens instead is the workflow's `dedupPolicy`.
+         */
+        val runDedupPath: String? = null,
+        /** 0–100, or absent to take the workflow's default. */
+        val runPriority: Int? = null,
     )
 
     private fun create(req: Request): Response {
@@ -157,6 +168,13 @@ class WebhookRoutes(
         val workflowId = body.workflowId?.let {
             runCatching { UUID.fromString(it) }.getOrNull()
         } ?: throw ApiError.ValidationError("`workflowId` is required and must be a UUID.")
+
+        if (body.runPriority != null && body.runPriority !in 0..100) {
+            throw ApiError.ValidationError(
+                "`runPriority` must be between 0 and 100. 0 is batch, 50 is normal, 100 is the " +
+                    "priority lane; a workspace without that entitlement is clamped below it."
+            )
+        }
 
         if (body.signatureScheme !in VALID_SCHEMES) {
             throw ApiError.ValidationError(
@@ -197,6 +215,8 @@ class WebhookRoutes(
             eventTypes = body.eventTypes,
             dedupeHeader = body.dedupeHeader,
             dedupePath = body.dedupePath,
+            runDedupPath = body.runDedupPath?.takeIf { it.isNotBlank() },
+            runPriority = body.runPriority?.toShort(),
             createdByUserId = req.principal?.appUserId,
         )
 
@@ -349,6 +369,8 @@ class WebhookRoutes(
         put("eventTypes", eventTypes)
         put("dedupeHeader", dedupeHeader)
         put("dedupePath", dedupePath)
+        put("runDedupPath", runDedupPath)
+        put("runPriority", runPriority?.toInt())
         put("enabled", enabled)
         put("createdAt", createdAt.toString())
         // The token is a live credential. It appears once, on create, and on

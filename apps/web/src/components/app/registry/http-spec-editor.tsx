@@ -10,7 +10,7 @@ import { Text } from "~/components/ui/text";
 import { Icon } from "~/components/ui/icon";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
-import { Input } from "~/components/ui/input";
+import { Input, Textarea } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Checkbox } from "~/components/ui/choice";
 import * as spec from "~/lib/tools/http-spec";
@@ -494,6 +494,7 @@ function BodySection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
   const contentType = spec.contentType(doc);
   const bodyInputs = spec.inputs(doc).filter((i) => i.in === "body");
   const isRead = ["GET", "HEAD"].includes(spec.method(doc));
+  const template = (spec.request(doc).body as Record<string, unknown> | undefined)?.template;
 
   return (
     <Section
@@ -546,6 +547,9 @@ function BodySection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
         </Note>
       ) : null}
 
+      {template !== undefined ? <Field label="Request template" description="Placeholders are filled from agent inputs at runtime. This template is preserved when saving.">
+        <Textarea mono readOnly autoGrow={false} minRows={5} value={typeof template === "string" ? template : JSON.stringify(template, null, 2)} />
+      </Field> : null}
       {encoding !== "none" ? (
         <div className="border-subtle bg-surface-sunken rounded-sm border px-3 py-2">
           <Text variant="caption" tone="muted">

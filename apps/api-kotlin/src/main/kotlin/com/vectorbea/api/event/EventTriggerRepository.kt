@@ -26,6 +26,16 @@ data class EventTrigger(
     val filterPath: String?,
     val filterValues: List<String>,
     val dedupePath: String?,
+    /**
+     * The path naming the THING the run works, not the message that reported it.
+     *
+     * `dedupePath` deduplicates a broker REDELIVERY of one message. This
+     * deduplicates the WORK: two different messages about the same service would
+     * otherwise start two runs. What happens instead is `workflows.dedup_policy`.
+     */
+    val runDedupPath: String? = null,
+    /** 0–100, or null to take the workflow's default. */
+    val runPriority: Short? = null,
     val maxInFlight: Int,
     val batchSize: Int,
     val enabled: Boolean,
@@ -67,13 +77,15 @@ open class EventTriggerRepository(dataSource: DataSource) : BaseRepository(dataS
         name: String, broker: String, connectionId: UUID?, source: String,
         consumerGroup: String?, inputMapping: Map<String, String>,
         filterPath: String?, filterValues: List<String>, dedupePath: String?,
+        runDedupPath: String?, runPriority: Short?,
         maxInFlight: Int, batchSize: Int, createdByUserId: UUID?,
     ): EventTrigger = executeReturning(
         """INSERT INTO event_triggers
              (workspace_id, environment_id, workflow_id, name, broker, connection_id,
               source, consumer_group, input_mapping, filter_path, filter_values,
-              dedupe_path, max_in_flight, batch_size, created_by_user_id)
-           VALUES (?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?)
+              dedupe_path, run_dedup_path, run_priority,
+              max_in_flight, batch_size, created_by_user_id)
+           VALUES (?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?,?)
            RETURNING $COLUMNS""",
         {
             setUuid(1, workspaceId); setUuid(2, environmentId); setUuid(3, workflowId)
@@ -83,9 +95,12 @@ open class EventTriggerRepository(dataSource: DataSource) : BaseRepository(dataS
             setString(10, filterPath)
             setArray(11, connection.createArrayOf("text", filterValues.toTypedArray()))
             setString(12, dedupePath)
-            setInt(13, maxInFlight.coerceIn(1, 1_000))
-            setInt(14, batchSize.coerceIn(1, 100))
-            setUuidOrNull(15, createdByUserId)
+            setString(13, runDedupPath)
+            if (runPriority != null) setShort(14, runPriority)
+            else setNull(14, java.sql.Types.SMALLINT)
+            setInt(15, maxInFlight.coerceIn(1, 1_000))
+            setInt(16, batchSize.coerceIn(1, 100))
+            setUuidOrNull(17, createdByUserId)
         }, ::map)
 
     open fun setEnabled(id: UUID, workspaceId: UUID, enabled: Boolean): Boolean = execute(
@@ -211,6 +226,11 @@ open class EventTriggerRepository(dataSource: DataSource) : BaseRepository(dataS
         filterPath = rs.getString("filter_path"),
         filterValues = readTextArray(rs, "filter_values"),
         dedupePath = rs.getString("dedupe_path"),
+        /* Tolerated missing, for the same schema-skew reason as the webhook. */
+        runDedupPath = runCatching { rs.getString("run_dedup_path") }.getOrNull(),
+        runPriority = runCatching {
+            rs.getShort("run_priority").takeIf { !rs.wasNull() }
+        }.getOrNull(),
         maxInFlight = rs.getInt("max_in_flight"),
         batchSize = rs.getInt("batch_size"),
         enabled = rs.getBoolean("enabled"),
@@ -241,5 +261,6 @@ open class EventTriggerRepository(dataSource: DataSource) : BaseRepository(dataS
 private const val COLUMNS = """
     id, workspace_id, environment_id, workflow_id, name, broker, connection_id,
     source, consumer_group, input_mapping, filter_path, filter_values, dedupe_path,
+    run_dedup_path, run_priority,
     max_in_flight, batch_size, enabled, disabled_reason, last_error,
     last_message_at, messages_consumed, created_at"""

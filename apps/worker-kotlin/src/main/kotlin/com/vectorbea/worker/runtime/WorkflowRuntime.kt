@@ -61,6 +61,44 @@ import javax.sql.DataSource
 class WorkflowRuntime(
     private val dataSource: DataSource,
     private val eventStore: RunEventStore,
+    /**
+     * Streams partial results as nodes commit, for targets that ask.
+     *
+     * Defaulted from [dataSource] rather than injected: the only configuration
+     * is the DataSource this class already holds, and a null one would silently
+     * turn streaming off for every workspace that enabled it — a feature that
+     * appears configured and does nothing.
+     */
+    private val deliveries: com.vectorbea.worker.delivery.DeliveryStore? =
+        com.vectorbea.worker.delivery.DeliveryStore(dataSource),
+    /**
+     * The one parking mechanism, for `onFailure: escalate`.
+     *
+     * Defaulted from [dataSource] for the same reason [deliveries] is: a null one
+     * would turn a declared escalation into a silent `fail_run`, which is exactly
+     * the outcome the policy exists to avoid.
+     */
+    private val waits: com.vectorbea.worker.durable.wait.WaitStore =
+        com.vectorbea.worker.durable.wait.WaitStore(dataSource),
+    /**
+     * Whether `onFailure: escalate` actually parks.
+     *
+     * Off by default, per the feature-flag convention. With it off a node that
+     * declares `escalate` fails the run and says so in the log — the pre-T5
+     * behaviour, loudly, rather than a run parked on a question nobody knows to
+     * answer on a deployment whose operators have not been told about it.
+     */
+    private val escalationEnabled: Boolean =
+        System.getenv("WORKER_FAILURE_ESCALATION")?.lowercase() in setOf("1", "true", "on", "yes"),
+    /**
+     * How many times one node may be escalated before the run fails.
+     *
+     * A person answering "retry" ten times is not a workflow that will ever
+     * succeed, and each escalation is a durable wait row — unbounded, this is a
+     * way to accumulate them forever on one node.
+     */
+    private val maxEscalations: Int =
+        (System.getenv("WORKER_maxEscalations")?.toIntOrNull() ?: 10).coerceIn(1, 100),
     private val checkpointStore: CheckpointStore,
     private val approvalStore: ApprovalStore,
     private val stepOutputStore: StepOutputStore,
@@ -394,6 +432,11 @@ class WorkflowRuntime(
             tracer = tracerFor(runId, workspaceId),
             tickDeadlineAtMs = tickDeadline(),
             executionLane = laneOf(runId),
+            /* The SAME check `runDag` uses between nodes, handed down so an agent
+               loop can stop between ITERATIONS. Without it, cancelling a run with
+               a thirty-iteration agent inside it kept paying for a model to
+               reason about a problem that had already been resolved. */
+            cancellationCheck = cancellationCheck,
         )
 
         // 4. Build per-run output view for cross-step template resolution
@@ -458,6 +501,11 @@ class WorkflowRuntime(
             tracer = tracerFor(runId, workspaceId),
             tickDeadlineAtMs = tickDeadline(),
             executionLane = laneOf(runId),
+            /* The SAME check `runDag` uses between nodes, handed down so an agent
+               loop can stop between ITERATIONS. Without it, cancelling a run with
+               a thirty-iteration agent inside it kept paying for a model to
+               reason about a problem that had already been resolved. */
+            cancellationCheck = cancellationCheck,
         )
 
         // Restore node statuses from snapshot (nodes in pendingNodeIds stay PENDING for re-run)
@@ -654,6 +702,22 @@ class WorkflowRuntime(
             // Execute sequential nodes one by one
             for (node in sequential) {
                 if (!ctx.isPending(node.id)) continue // may have been marked during parallel
+
+                /*
+                 * A node that was escalated must not run again until the answer
+                 * has been read. Checked HERE rather than after execution,
+                 * because "skip" and "abort" both mean the node's side effect
+                 * must not happen — and a step that restarts a service would
+                 * have restarted it before anyone looked at the decision.
+                 */
+                when (val gate = escalationGate(node, ctx, source)) {
+                    is EscalationGate.Proceed -> {}
+                    is EscalationGate.Stop -> {
+                        if (gate.result != null) return gate.result
+                        continue
+                    }
+                }
+
                 val result = executeSingleNode(node, scheduler, ctx, source, stepOutputView)
                 if (result != null) return result
                 // Count this node against the per-tick budget; yield (checkpoint +
@@ -1438,6 +1502,19 @@ class WorkflowRuntime(
             // Persist to DB (non-fatal if fails)
             persistStepOutput(node, result, ctx)
 
+            /*
+             * ── STREAM THIS NODE, IF ANYBODY ASKED ─────────────────────
+             * A six-hour pipeline that emits nothing until it finishes is
+             * indistinguishable from one that is stuck, and the customer cannot
+             * start on the first half of a result they will not see for hours.
+             *
+             * Here rather than at the checkpoint because THIS is the point where
+             * the node's output is durable and correct. It queues a row and
+             * returns — the dispatcher does the sending, so a slow receiver
+             * cannot slow the run that is producing their data.
+             */
+            streamPartial(node, result, ctx)
+
             // Select outgoing edges based on output
             val selectedEdges = scheduler.selectEdgesAfterNode(node, result.output, ctx)
 
@@ -1493,9 +1570,17 @@ class WorkflowRuntime(
                 error   = """{"reason":${jsonStr(result.reason)},"nodeType":"${node.type}"}""")
 
             when {
-                node.failurePolicy.onFailure == "continue" -> {
+                node.failurePolicy.onFailure == FailurePolicy.CONTINUE -> {
                     null // keep going, ignore this failure
                 }
+                /*
+                 * Checked BEFORE the failure edge: a node declaring both is
+                 * asking a person to choose between them, and an edge silently
+                 * winning would make the escalation setting look broken rather
+                 * than overridden.
+                 */
+                node.failurePolicy.onFailure == FailurePolicy.ESCALATE ->
+                    openEscalation(node, ctx, source, result.reason)
                 failEdges.isNotEmpty() -> {
                     null // follow failure edge, continue
                 }
@@ -1576,6 +1661,236 @@ class WorkflowRuntime(
             )
         }
     } }
+
+    // ── Escalation ───────────────────────────────────────────────
+
+    /*
+     * A NODE FAILED AND ITS POLICY SAYS TO ASK A PERSON.
+     *
+     * ── WHY THIS IS A SIGNAL AND NOT A NEW KIND OF PAUSE ───────────────
+     * Invariants 9 and 15. A second parking mechanism means a second timeout
+     * policy, a second reconciler arm and a second way for a run to be stuck
+     * forever — and only one of those would be tested. An escalation is a
+     * question with a deadline, which is precisely a signal wait, so it parks
+     * through the same primitive and is answered through the endpoint that
+     * already exists:
+     *
+     *     POST /api/runs/:id/signals
+     *     {"name": "escalation:<nodeId>", "payload": {"decision": "retry"}}
+     *
+     * ── AND WHY THE ANSWER IS READ BEFORE THE NODE RUNS, NOT AFTER ───────
+     * Two of the three decisions — skip and abort — mean the node's side effect
+     * must NOT happen. Reading the answer after re-executing would restart the
+     * service a person had just said to leave alone. So the node is parked in
+     * PENDING (not FAILED) and the decision is a gate in front of it.
+     */
+
+    /** What the gate decided about a node that is about to run. */
+    private sealed class EscalationGate {
+        object Proceed : EscalationGate()
+        /** Do not run the node. A null [result] continues the DAG without it. */
+        data class Stop(val result: ExecutionResult?) : EscalationGate()
+    }
+
+    /**
+     * Read this node's outstanding escalation, if it has one.
+     *
+     * Cheap for the overwhelming majority of nodes: one indexed lookup on a
+     * derived key, and only for nodes whose policy is `escalate`.
+     */
+    private fun escalationGate(
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+        source: String,
+    ): EscalationGate {
+        if (node.failurePolicy.onFailure != FailurePolicy.ESCALATE) return EscalationGate.Proceed
+        if (!escalationEnabled) return EscalationGate.Proceed
+
+        val last = latestEscalation(ctx.runId, node.id) ?: return EscalationGate.Proceed
+
+        if (last.status == com.vectorbea.worker.durable.wait.RunWait.Status.WAITING) {
+            /* Still open. The run was woken by something else — another branch's
+               signal, a reconciler sweep — and this node is still owed an answer,
+               so it re-parks on the wait it already has rather than asking twice. */
+            return EscalationGate.Stop(ExecutionResult.Waiting(
+                waitId = last.id.toString(),
+                kind = "signal",
+                nodeId = node.id,
+                label = last.label ?: "Escalated: ${nodeLabel(node)}",
+                timeoutAt = last.timeoutAt,
+            ))
+        }
+
+        return when (val decision = decisionOf(last)) {
+            /* Fall through and run it. If it fails again, the failure handler
+               opens the NEXT escalation — the attempt number advances, so a
+               resolved wait is never read twice and "retry" cannot loop. */
+            "retry" -> {
+                emitEvent(ctx, EventType.RUN_WAIT_RESOLVED, "running", source,
+                    title  = "Escalation answered: retry ${nodeLabel(node)}",
+                    stepId = node.id,
+                    meta   = "{\"decision\":\"retry\",\"waitId\":${jsonStr(last.id.toString())}}")
+                EscalationGate.Proceed
+            }
+            "skip" -> {
+                ctx.markSkipped(node.id)
+                recordRibbon(ctx, node.id, RibbonWriter.State.SKIPPED)
+                emitEvent(ctx, EventType.STEP_SKIPPED, "running", source,
+                    title   = "Escalation answered: skip ${nodeLabel(node)}",
+                    summary = "A person chose to continue past this failure.",
+                    stepId  = node.id,
+                    meta    = "{\"decision\":\"skip\",\"waitId\":${jsonStr(last.id.toString())}}")
+                EscalationGate.Stop(null)
+            }
+            else -> {
+                /* `abort`, and also what a TIMED-OUT escalation reads as. Nobody
+                   answered, so continuing would carry on as though a failed step
+                   had succeeded. */
+                emitEvent(ctx, EventType.RUN_WAIT_RESOLVED, "running", source,
+                    title  = "Escalation answered: $decision — ${nodeLabel(node)}",
+                    stepId = node.id,
+                    meta   = "{\"decision\":${jsonStr(decision)}," +
+                             "\"waitId\":${jsonStr(last.id.toString())}}")
+                EscalationGate.Stop(ExecutionResult.Failed(
+                    "Node ${node.id} (${node.type}) failed and its escalation was answered " +
+                        "with `$decision`."))
+            }
+        }
+    }
+
+    /**
+     * Ask, and park.
+     *
+     * The node is left PENDING rather than FAILED, so the gate above sees it on
+     * the next tick and the answer is read before the node can run again.
+     */
+    private fun openEscalation(
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+        source: String,
+        reason: String,
+    ): ExecutionResult? {
+        if (!escalationEnabled) {
+            log.warn("[runtime] node {} asked to escalate but escalation is off — failing " +
+                "the run instead [runId={}]", node.id, ctx.runId)
+            return ExecutionResult.Failed("Node ${node.id} (${node.type}) failed: $reason")
+        }
+
+        val attempt = escalationCount(ctx.runId, node.id)
+        if (attempt >= maxEscalations) {
+            log.error("[runtime] node {} escalated {} times [runId={}]",
+                node.id, maxEscalations, ctx.runId)
+            return ExecutionResult.Failed(
+                "Node ${node.id} failed and was escalated $maxEscalations times without " +
+                    "succeeding. The last failure was: $reason")
+        }
+
+        val signalName = node.failurePolicy.escalationSignal ?: "escalation:${node.id}"
+        val opened = waits.open(com.vectorbea.worker.durable.wait.WaitStore.OpenRequest(
+            workspaceId = ctx.workspaceId,
+            environmentId = ctx.environmentId,
+            runId = ctx.runId,
+            workflowId = ctx.workflowId,
+            nodeId = escalationNodeId(node.id),
+            attemptGroup = attempt,
+            kind = com.vectorbea.worker.durable.wait.WaitKind.SIGNAL,
+            label = "Escalated: ${nodeLabel(node)}",
+            signalName = signalName,
+            timeoutMs = node.failurePolicy.escalationTimeoutMs,
+            /* Already sanitized — `reason` came through `sanitizeError`.
+               Invariant 4: the store writes what it is given. */
+            metadata = mapOf(
+                "escalation" to true,
+                "nodeId" to node.id,
+                "nodeType" to node.type,
+                "attempt" to attempt,
+                "reason" to reason.take(500),
+                "signalName" to signalName,
+                "decisions" to listOf("retry", "skip", "abort"),
+            ),
+        ))
+
+        /* PENDING, not FAILED: the gate has to see this node again to read the
+           answer, and a failed node is never scheduled. */
+        ctx.markPending(node.id)
+        recordRibbon(ctx, node.id, RibbonWriter.State.GATED)
+
+        emitEvent(ctx, EventType.RUN_WAIT_STARTED, "waiting_for_event", source,
+            title   = "Escalated: ${nodeLabel(node)}",
+            summary = "This step failed and its policy asks a person to decide. Send the " +
+                "signal '$signalName' with a decision of retry, skip or abort.",
+            stepId  = node.id,
+            meta    = "{\"waitId\":${jsonStr(opened.wait.id.toString())}," +
+                      "\"waitKind\":\"signal\",\"escalation\":true," +
+                      "\"signalName\":${jsonStr(signalName)}," +
+                      "\"attempt\":$attempt,\"nodeId\":${jsonStr(node.id)}}")
+
+        /* Unconditional, like every other wait: resuming without one would
+           replay the node from before it failed and lose the answer. */
+        writeCheckpoint(node.id, ctx, source)
+
+        return ExecutionResult.Waiting(
+            waitId = opened.wait.id.toString(),
+            kind = "signal",
+            nodeId = node.id,
+            label = "Escalated: ${nodeLabel(node)}",
+            timeoutAt = opened.wait.timeoutAt,
+        )
+    }
+
+    /**
+     * The node id an escalation's wait is filed under.
+     *
+     * Suffixed so it cannot collide with the node's OWN wait — an async tool
+     * that parks and then fails would otherwise reuse the same derived key and
+     * the escalation would silently resolve against the tool's answer.
+     */
+    private fun escalationNodeId(nodeId: String) = "$nodeId#escalation"
+
+    /** How many times this node has been escalated. Probes the derived keys. */
+    private fun escalationCount(runId: java.util.UUID, nodeId: String): Int {
+        var n = 0
+        while (n < maxEscalations) {
+            val key = com.vectorbea.worker.durable.wait.RunWait.keyFor(
+                runId, escalationNodeId(nodeId), n)
+            if (runCatching { waits.findByKey(runId, key) }.getOrNull() == null) return n
+            n++
+        }
+        return n
+    }
+
+    /** The most recent escalation wait for a node, or null if it has never had one. */
+    private fun latestEscalation(
+        runId: java.util.UUID,
+        nodeId: String,
+    ): com.vectorbea.worker.durable.wait.RunWait? {
+        val count = escalationCount(runId, nodeId)
+        if (count == 0) return null
+        val key = com.vectorbea.worker.durable.wait.RunWait.keyFor(
+            runId, escalationNodeId(nodeId), count - 1)
+        return runCatching { waits.findByKey(runId, key) }.getOrNull()
+    }
+
+    /**
+     * The decision a person gave, defaulting to `abort`.
+     *
+     * A TIMED-OUT escalation has no payload, and `abort` is the right reading of
+     * "nobody answered": continuing would report a failed step as done, and
+     * retrying unanswered is what [maxEscalations] exists to stop. Anything
+     * outside the three words is treated the same way — an unrecognised decision
+     * is not a licence to guess.
+     */
+    private fun decisionOf(wait: com.vectorbea.worker.durable.wait.RunWait): String {
+        val payload = wait.resolutionJson ?: return "abort"
+        val found = runCatching {
+            val tree = mapper.readTree(payload)
+            listOf("/payload/decision", "/decision")
+                .map { tree.at(it) }
+                .firstOrNull { !it.isMissingNode && it.isTextual }
+                ?.asText()?.lowercase()?.trim()
+        }.getOrNull()
+        return if (found in setOf("retry", "skip", "abort")) found!! else "abort"
+    }
 
     // ── Parallel node execution ───────────────────────────────────────────────
 
@@ -1724,14 +2039,41 @@ class WorkflowRuntime(
             log.info("[runtime] branch {} → {} [parallelId={}]", entryNodeId, status, parallelNode.id)
         }
 
-        // If ALL branches failed, the parallel itself fails
-        val allFailed = branchResults.all { it.third is ExecutionResult.Failed }
-        if (allFailed) {
-            val firstReason = (branchResults.first().third as ExecutionResult.Failed).reason
-            log.error("[runtime] all {} branches failed for parallel node {} — aborting",
-                branchResults.size, parallelNode.id)
+        /*
+         * ── HOW MANY BRANCHES HAVE TO SURVIVE IS NOW DECLARED ─────────────
+         *
+         * This was a hard-coded rule — tolerate partial failures, fail only when
+         * every branch failed — and it is right for "check five services" and
+         * wrong for "drain the node, update DNS, verify", where one branch
+         * failing quietly means the run reports success having done two thirds
+         * of the work. `require_one` is the default, so a graph that says
+         * nothing behaves exactly as it did.
+         */
+        val failedBranches = branchResults.filter { it.third is ExecutionResult.Failed }
+        val branchPolicy = parallelNode.failurePolicy.branchFailure
+        val fanOutFailed = when (branchPolicy) {
+            FailurePolicy.BRANCH_ALL_MUST_SUCCEED -> failedBranches.isNotEmpty()
+            FailurePolicy.BRANCH_TOLERATE_ALL -> false
+            else -> failedBranches.size == branchResults.size   // require_one
+        }
+        if (fanOutFailed) {
+            val firstReason = (failedBranches.first().third as ExecutionResult.Failed).reason
+            val which = failedBranches.joinToString { it.first }
+            log.error("[runtime] {}/{} branches failed for parallel node {} under policy {} — " +
+                "aborting [failed={}]",
+                failedBranches.size, branchResults.size, parallelNode.id, branchPolicy, which)
+            emitEvent(ctx, EventType.STEP_FAILED, "running", source,
+                title   = "Fan-out failed: ${nodeLabel(parallelNode)}",
+                summary = "${failedBranches.size} of ${branchResults.size} branches failed, and " +
+                    "this fan-out's policy is `$branchPolicy`.",
+                stepId  = parallelNode.id,
+                error   = """{"reason":${jsonStr(firstReason)},"branchFailure":${jsonStr(branchPolicy)},
+                             "failedBranches":${jsonStr(which)}}""".trimIndent())
+            ctx.markFailed(parallelNode.id)
+            recordRibbon(ctx, parallelNode.id, RibbonWriter.State.FAILED)
             return ExecutionResult.Failed(
-                "All parallel branches failed for node ${parallelNode.id}. First reason: $firstReason"
+                "${failedBranches.size} of ${branchResults.size} parallel branches failed for " +
+                    "node ${parallelNode.id} under policy `$branchPolicy`. First reason: $firstReason"
             )
         }
 
@@ -1820,6 +2162,65 @@ class WorkflowRuntime(
             ))
         }.onFailure { e ->
             log.warn("[runtime] failed to emit event [type={}, runId={}]: {}", type, ctx.runId, e.message)
+        }
+    }
+
+    /**
+     * Queue a partial delivery for a node that just committed.
+     *
+     * ── THE SEQUENCE IS THE PARTIAL COUNT, NOT THE NODE INDEX ──────────
+     * It has to be stable across re-execution, because a resumed run re-enters
+     * this path and the idempotency key is derived from it — a sequence that
+     * shifted would make a receiver see the same partial twice under two keys.
+     * Deriving it from the node's position in the graph gives exactly that
+     * stability, and the `ON CONFLICT` on `(run, target, sequence)` makes a
+     * re-execution a no-op rather than a duplicate.
+     *
+     * Sequence 0 is the terminal delivery, so partials start at 1.
+     *
+     * `runCatching` throughout: streaming is a courtesy on top of a run that is
+     * going fine, and a failure to queue a partial must never fail the node that
+     * produced it.
+     */
+    private fun streamPartial(
+        node: WorkflowNode,
+        result: NodeResult.Completed,
+        ctx: RuntimeContext,
+    ) {
+        val store = deliveries ?: return
+        runCatching {
+            val targets = store.streamingTargetsFor(
+                ctx.workspaceId, ctx.environmentId, ctx.workflowId)
+            if (targets.isEmpty()) return
+
+            /* +1 so the first partial is sequence 1. `indexOf` on the graph's own
+               node order is the stable position; a node not in the graph (which
+               should not happen) falls back to a hash so the key is still
+               deterministic rather than colliding on 1. */
+            val position = ctx.graph.nodes.indexOfFirst { it.id == node.id }
+                .let { if (it >= 0) it + 1 else (node.id.hashCode() and 0x7fff) + 1 }
+
+            val outputJson = runCatching {
+                jacksonObjectMapper().writeValueAsString(result.output)
+            }.getOrDefault("{}")
+
+            for (target in targets) {
+                /* An empty `streamNodes` means every committed node. Named nodes
+                   are the shape to encourage — a wide graph streaming every node
+                   is a lot of deliveries for a receiver who wanted three. */
+                if (target.streamNodes.isNotEmpty() && node.id !in target.streamNodes) continue
+                store.enqueuePartial(
+                    workspaceId = ctx.workspaceId,
+                    environmentId = ctx.environmentId,
+                    runId = ctx.runId,
+                    target = target,
+                    sequence = position,
+                    nodeId = node.id,
+                    outputJson = outputJson,
+                )
+            }
+        }.onFailure {
+            log.warn("[runtime] could not stream partial for node {}: {}", node.id, it.message)
         }
     }
 
@@ -1957,7 +2358,23 @@ class WorkflowRuntime(
                 stepId = nodeId,
                 meta   = """{"checkpointId":"$cpId","sequence":${snap.sequence}}""")
         }.onFailure { e ->
-            log.warn("[runtime] checkpoint write failed [nodeId={}, runId={}]: {}", nodeId, ctx.runId, e.message)
+            /*
+             * ── STILL SWALLOWED, BUT NO LONGER QUIETLY ───────────────────
+             * A checkpoint that cannot be written must not fail a run — the work
+             * is done and the outputs are durable; what is lost is the ability to
+             * resume cheaply. But `warn` was too quiet for what it was reporting:
+             * this line fired on EVERY checkpoint of EVERY run for as long as
+             * `run_checkpoints` had two conflicting definitions (see V069), and a
+             * warning that always fires is a warning nobody reads.
+             *
+             * `error`, and it says what the consequence is, because "checkpoint
+             * write failed" does not tell an operator that their long runs are
+             * silently replaying from the start.
+             */
+            log.error("[runtime] CHECKPOINT NOT WRITTEN [nodeId={}, runId={}]: {} — this run " +
+                "will resume by replaying from its first node, re-executing every step " +
+                "before this one", nodeId, ctx.runId, e.message)
+            com.vectorbea.worker.metrics.WorkerMetrics.checkpointWriteFailures.inc()
         }
     }
 

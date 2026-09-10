@@ -123,7 +123,11 @@ class AgentNodeExecutor(
     }
 
     private val llmExecutor by lazy {
-        LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity)
+        /* An agent loop is where one run becomes twenty provider calls, so it is
+           where a wrong price multiplies twentyfold. `pricing` is not optional
+           here for the same reason `capacity` is not. */
+        LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity,
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
     }
 
     override suspend fun execute(

@@ -77,6 +77,36 @@ class AuthMiddleware(
          * an unauthenticated path into the run queue is bounded twice.
          */
         "/api/hooks/",
+        /*
+         * The link a large result travels as.
+         *
+         * Fetched by whoever received the callback, who has no Vectorbea account
+         * and never will — the same situation as a webhook sender, with the same
+         * answer. The token is 32 random bytes naming exactly ONE payload, it
+         * expires, and `DeliveryRoutes` rate-limits per token so a leaked link is
+         * not a way to hammer the database. A leaked token exposes one run's
+         * output and nothing else: it cannot list, cannot read another run, and
+         * cannot reach another workspace.
+         */
+        "/api/delivery-payloads/",
+        /*
+         * Self-hosted runners.
+         *
+         * A runner has no session and no API key: it is a process inside the
+         * CUSTOMER's network, and the whole design is that they connect outbound
+         * to us and we hold nothing that can reach in. It authenticates with a
+         * runner token — a separate table from `api_keys`, deliberately, because
+         * that token lives on a machine we cannot see and its blast radius has
+         * to be "somebody can lease our queued runs", not "somebody can read
+         * everything we have ever run".
+         *
+         * `RunnerRoutes` resolves the token itself on every request and derives
+         * the workspace from the token's POOL rather than from a request
+         * context, so there is no path here that reaches another workspace's
+         * data. Bypassing this middleware is what lets it: a runner has nothing
+         * this middleware knows how to check.
+         */
+        "/api/runner/",
     )
 
     /**

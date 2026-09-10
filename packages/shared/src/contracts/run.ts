@@ -94,6 +94,23 @@ export const runSummary = z.object({
   currentStepId: z.string().nullish(),
   currentAgentId: uuid.nullish(),
   idempotencyKey: z.string().nullish(),
+  /**
+   * The live-singleton key this run holds, if any.
+   *
+   * A DIFFERENT question from `idempotencyKey`, and the difference is at the
+   * boundary: an idempotency key asks "is this the same request" and expires on
+   * a 24-hour clock, while a dedup key asks "is something already working on
+   * this thing" and is freed the moment the run ends — because a new alert for
+   * a service whose incident just closed should open a new incident.
+   */
+  dedupKey: z.string().nullish(),
+  /**
+   * 0–100. Orders the claim, and discounts the fair-queue clock.
+   *
+   * Both halves matter: `priority DESC` alone is a strict lane that a trickle of
+   * Sev1s would use to starve batch work completely.
+   */
+  priority: z.number().int().min(0).max(100).nullish(),
   startedAt: isoDateTime.nullish(),
   completedAt: isoDateTime.nullish(),
   durationMs: z.number().nullish(),
@@ -109,7 +126,39 @@ export const runSummary = z.object({
   nodeCommitted: z.number().int().nonnegative(),
   /** Compact worker-maintained JSON: [{n,s,ms}]. */
   ribbonJson: z.string(),
+  /**
+   * Whether the run's result reached where it was meant to go.
+   *
+   * Separate from `status`, and that separation is the point: a run that
+   * produced the right answer and could not deliver it is not a failed run —
+   * its output is correct, its cost was real, and retrying the RUN would
+   * re-execute every side effect. It is a successful run with an undelivered
+   * result, and the two facts need two fields to stay distinguishable.
+   *
+   * `.catch()` because the API and the web deploy separately: a browser a
+   * deploy ahead reading a response without the field must not fail validation
+   * for the whole runs list.
+   */
+  deliveryStatus: z
+    .enum(["none", "pending", "delivered", "partial", "failed"])
+    .catch("none")
+    .default("none"),
   incidentId: uuid.nullish(),
+  /**
+   * True when this run executed on a self-hosted runner and its payloads never
+   * left the customer's network.
+   *
+   * On the SUMMARY, not only the detail: somebody scanning a list of runs needs
+   * to know which of them they can expect to inspect. Finding out only after
+   * opening one, and finding an empty panel, is the experience this flag exists
+   * to replace.
+   *
+   * `.catch(false)` for the same reason `deliveryStatus` has one — a browser a
+   * deploy ahead of the API must not fail validation for the whole list.
+   */
+  payloadsWithheld: z.boolean().catch(false).default(false),
+  /** Which self-hosted pool executed it, when one did. */
+  runnerPoolId: uuid.nullish(),
 });
 export type RunSummary = z.infer<typeof runSummary>;
 
@@ -132,6 +181,66 @@ export const runDetail = runSummary.extend({
 export type RunDetail = z.infer<typeof runDetail>;
 
 export const runPage = page(runSummary);
+
+/**
+ * `GET /api/runs/:id/deliveries` (`routes/DeliveryRoutes.kt`).
+ *
+ * Where a run's result went, and whether it got there. The rows a customer
+ * reads when asking "my workflow ran, so where is the output" — which is a
+ * different question from "did my workflow run", and the reason delivery has
+ * its own status rather than being folded into the run's.
+ */
+export const runDelivery = z.object({
+  id: uuid,
+  runId: uuid,
+  targetId: uuid,
+  targetName: maybe(z.string()),
+  /**
+   * The key the receiver deduplicates on.
+   *
+   * Identical on every retry and on an operator's redelivery, because it is
+   * derived from (run, target, sequence). Shown in the UI so a support
+   * conversation can match our row to their log line.
+   */
+  idempotencyKey: z.string(),
+  status: z.enum([
+    "pending", "delivering", "delivered", "retrying", "dead", "cancelled", "skipped",
+  ]).catch("pending"),
+  /** True for a streamed partial; the final result is false. */
+  partial: z.boolean().default(false),
+  /** 0 for the final result; 1..n for partials, in order. */
+  sequence: z.number().default(0),
+  attempts: z.number(),
+  maxAttempts: z.number(),
+  /** Only while retrying. Null once it has landed or died. */
+  nextAttemptAt: maybe(isoDateTime),
+  /**
+   * Which shape actually went out.
+   *
+   * Null before the first attempt. `url` means the result was over the
+   * target's size limit and travelled as a signed link — said explicitly,
+   * because a receiver that got a link where it expected a body needs to know
+   * it was a size decision and not a missing field.
+   */
+  payloadMode: maybe(z.enum(["full", "url"])),
+  payloadBytes: z.number().nullish(),
+  payloadUrl: maybe(z.string()),
+  lastError: maybe(z.string()),
+  deliveredAt: maybe(isoDateTime),
+  createdAt: isoDateTime,
+  /** Whether the UI should offer a redelivery button. */
+  redeliverable: z.boolean().default(false),
+});
+export type RunDelivery = z.infer<typeof runDelivery>;
+
+/** `GET /api/runs/:id/deliveries` — the rows plus the run's roll-up. */
+export const runDeliveryList = z.object({
+  items: z.array(runDelivery),
+  total: z.number(),
+  deliveryStatus: z
+    .enum(["none", "pending", "delivered", "partial", "failed"])
+    .catch("none"),
+});
 
 /**
  * `GET /api/runs/:id/waits` (`routes/SignalRoutes.kt`, reading the

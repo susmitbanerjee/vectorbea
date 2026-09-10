@@ -50,6 +50,11 @@ private data class CreateConnectionBody(
     val plaintextSecret: String? = null,
 )
 
+private val EGRESS_POLICIES = setOf("public", "private_allowed")
+
+/** Mirrors `LlmNodeExecutor.PROTOCOLS`. Three shapes, and deliberately not more. */
+private val PROTOCOLS = setOf("openai", "anthropic", "gemini")
+
 private data class UpdateConnectionBody(
     val name: String? = null,
     val config: Map<String, Any>? = null,
@@ -58,6 +63,19 @@ private data class UpdateConnectionBody(
     val allowedSchemas: List<String>? = null,
     val allowedTables: List<String>? = null,
     val status: String? = null,
+    /**
+     * `public` | `private_allowed`.
+     *
+     * Turning this on without also supplying `allowedHosts` — here or already
+     * stored — is refused, by the route and by the schema. "Allow private" and
+     * "these hosts" are one decision.
+     */
+    val egressPolicy: String? = null,
+    /**
+     * `openai` | `anthropic` | `gemini`. The wire shape a customer gateway
+     * speaks, when it differs from what the provider name implies.
+     */
+    val protocol: String? = null,
     /**
      * Plaintext secret accepted on patch (rotate in place).
      * Immediately encrypted — NEVER stored, logged, or returned.
@@ -84,6 +102,10 @@ private data class ConnectionResponse(
     val allowedPaths: List<String>,
     val allowedSchemas: List<String>,
     val allowedTables: List<String>,
+    /** `public` or `private_allowed`. See V071. */
+    val egressPolicy: String,
+    /** The wire shape, when it differs from what `provider` implies. */
+    val protocol: String?,
     val lastTestedAt: String?,
     val lastTestStatus: String?,
     val lastTestLatencyMs: Int?,
@@ -111,6 +133,8 @@ private fun Connection.toResponse() = ConnectionResponse(
     allowedPaths = runCatching { mapper.readValue(allowedPaths, List::class.java) as List<String> }.getOrDefault(emptyList()),
     allowedSchemas = runCatching { mapper.readValue(allowedSchemas, List::class.java) as List<String> }.getOrDefault(emptyList()),
     allowedTables = runCatching { mapper.readValue(allowedTables, List::class.java) as List<String> }.getOrDefault(emptyList()),
+    egressPolicy = egressPolicy,
+    protocol = protocol,
     lastTestedAt = lastTestedAt?.toString(),
     lastTestStatus = lastTestStatus,
     lastTestLatencyMs = lastTestLatencyMs,
@@ -236,6 +260,12 @@ class ConnectionRoutes(
         "allowedPaths" to c.allowedPaths,
         "allowedSchemas" to c.allowedSchemas,
         "allowedTables" to c.allowedTables,
+        /* The single most consequential field on this record: it is what lets
+           the platform reach inside a customer's network. A change to it must
+           be readable in the audit trail beside the host list it is paired
+           with, because neither means anything alone. */
+        "egressPolicy" to c.egressPolicy,
+        "protocol" to c.protocol,
     )
 
     private fun getById(req: Request): Response {
@@ -257,6 +287,48 @@ class ConnectionRoutes(
 
         if (body.config != null) validateConfigJsonNotContainsSecrets(body.config, "config")
 
+        if (body.egressPolicy != null) {
+            if (body.egressPolicy !in EGRESS_POLICIES) {
+                throw ApiError.ValidationError(
+                    "`egressPolicy` must be one of ${EGRESS_POLICIES.joinToString(", ")}. " +
+                        "`private_allowed` lets this connection reach RFC1918 and loopback " +
+                        "addresses — but only the hosts named in `allowedHosts`, and never a " +
+                        "cloud metadata address."
+                )
+            }
+            /*
+             * Refused here as well as in the schema, so the caller gets a
+             * sentence rather than a constraint name. The stored list counts:
+             * a PATCH that only flips the policy is fine if the hosts are
+             * already there.
+             */
+            if (body.egressPolicy == "private_allowed") {
+                val hosts = body.allowedHosts
+                    ?: prior?.let {
+                        runCatching {
+                            @Suppress("UNCHECKED_CAST")
+                            mapper.readValue(it.allowedHosts, List::class.java) as List<String>
+                        }.getOrDefault(emptyList())
+                    }
+                    ?: emptyList()
+                if (hosts.isEmpty()) {
+                    throw ApiError.ValidationError(
+                        "Private egress needs an allow-list. Set `allowedHosts` to the internal " +
+                            "hostnames this connection should be able to reach — without them, " +
+                            "`private_allowed` would mean any internal address, which is the " +
+                            "hole this setting is shaped to avoid."
+                    )
+                }
+            }
+        }
+        if (body.protocol != null && body.protocol !in PROTOCOLS) {
+            throw ApiError.ValidationError(
+                "`protocol` must be one of ${PROTOCOLS.joinToString(", ")}. It is the wire " +
+                    "shape a customer-hosted gateway speaks; leave it out when the connection " +
+                    "points at the vendor its provider names."
+            )
+        }
+
         // Encrypt plaintextSecret if provided on PATCH
         val secretRef = encryptSecretIfPresent(
             plaintext = body.plaintextSecret,
@@ -275,6 +347,9 @@ class ConnectionRoutes(
             allowedTables = body.allowedTables,
             status = body.status,
             secretRef = secretRef?.ref,
+            egressPolicy = body.egressPolicy,
+            egressPolicySetBy = req.principal?.appUserId,
+            protocol = body.protocol,
         ) ?: throw ApiError.NotFound("Connection")
 
         audit?.recordUserAction(

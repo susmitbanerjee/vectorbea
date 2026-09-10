@@ -394,6 +394,14 @@ fun main() {
             environmentRepo,
         ).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
+        /* A customer's negotiated rate, per connection. Without it every call
+           through their own gateway is priced at our list rate, which
+           over-reports their spend — the first number a finance team reconciles
+           against the provider invoice. */
+        ds?.let {
+            com.vectorbea.api.routes.ConnectionPriceRoutes(it, connectionRepo, auditLog)
+                .register(router)
+        }
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
     } else log.warn("ConnectionRoutes disabled — no database")
 
@@ -462,6 +470,25 @@ fun main() {
      * that the four other ingress paths below cannot accidentally build their
      * own.
      */
+    /*
+     * ── THE WAIT PRIMITIVE, BUILT ONCE AND SHARED ───────────────────────
+     * Constructed up here rather than beside its routes because `RunIngress`
+     * needs the same `SignalDelivery`: a workflow whose deduplication policy is
+     * `join` turns a second alert into a signal on the run already working the
+     * incident, and that has to be the SAME delivery — same rate limit, same
+     * wait resolution, same resume enqueue. Invariant 15, from the other side.
+     */
+    val waitStore = ds?.let { com.vectorbea.worker.durable.wait.WaitStore(it) }
+    val signalStore = ds?.let { com.vectorbea.worker.durable.wait.SignalStore(it) }
+    val signalDelivery = if (ds != null && waitStore != null && signalStore != null)
+        com.vectorbea.api.signals.SignalDelivery(
+            dataSource = ds,
+            signals = signalStore,
+            waits = waitStore,
+            queue = workflowQueue,
+            rateLimiter = rateLimiter,
+        ) else null
+
     val runIngress = if (runRepo != null && runEventRepo != null && workflowRepo != null)
         com.vectorbea.api.ingress.RunIngress(
             runRepo = runRepo,
@@ -476,7 +503,46 @@ fun main() {
             entitlements = entitlementGuard,
             usageMeter = usageMeter,
             rateFor = { ws -> com.vectorbea.api.ingress.WorkspaceRunRate.of(ds, ws) },
+            dedup = ds?.let { com.vectorbea.api.ingress.RunDedup(it) },
+            /*
+             * `join` in one line: deliver the second alert to the live run, and
+             * say whether it landed. A `false` — the holder finished underneath
+             * us — makes the ingress fall through and start a fresh run, which is
+             * correct: the key is free now and the alert still needs working.
+             */
+            joinSignal = signalDelivery?.let { sd ->
+                com.vectorbea.api.ingress.RunIngress.JoinSignalSender {
+                    runId, workspaceId, environmentId, name, payloadJson, dedupeKey ->
+                    sd.deliver(
+                        runId = runId,
+                        workspaceId = workspaceId,
+                        environmentId = environmentId,
+                        name = name,
+                        payloadJson = payloadJson,
+                        source = "dedup_join",
+                        dedupeKey = dedupeKey,
+                    ).delivered
+                }
+            },
         ) else null
+
+    /*
+     * ── SELF-HOSTED RUNNERS ─────────────────────────────────────
+     * Two surfaces, deliberately separate. `RunnerPoolRoutes` is the customer's
+     * browser managing pools and tokens, behind the ordinary auth. `RunnerRoutes`
+     * is the machine protocol, authenticated by a runner token and exempt from
+     * that middleware — see the `/api/runner/` note in `AuthMiddleware`.
+     */
+    if (ds != null && runEventRepo != null) {
+        val runnerStore = com.vectorbea.api.runner.RunnerStore(ds)
+        com.vectorbea.api.routes.RunnerPoolRoutes(runnerStore, auditLog).register(router)
+        com.vectorbea.api.routes.RunnerRoutes(
+            dataSource = ds,
+            runners = runnerStore,
+            events = runEventRepo,
+            queue = workflowQueue,
+        ).register(router)
+    } else log.warn("Self-hosted runners disabled — no database")
 
     if (runRepo != null && runEventRepo != null) {
         val betaRepoForRuns = ds?.let { com.vectorbea.api.beta.BetaAccessRepository(it) }
@@ -533,16 +599,12 @@ fun main() {
      * both services, so the CAS that makes a duplicated callback resolve exactly
      * once has one implementation.
      */
-    if (ds != null) {
-        val waitStore = com.vectorbea.worker.durable.wait.WaitStore(ds)
-        val signalStore = com.vectorbea.worker.durable.wait.SignalStore(ds)
-
+    if (ds != null && waitStore != null && signalStore != null && signalDelivery != null) {
         com.vectorbea.api.routes.SignalRoutes(
             dataSource = ds,
             signals = signalStore,
             waits = waitStore,
-            queue = workflowQueue,
-            rateLimiter = rateLimiter,
+            delivery = signalDelivery,
         ).register(router)
 
         com.vectorbea.api.routes.ToolCallbackRoutes(
@@ -590,6 +652,22 @@ fun main() {
             )
         ).register(router)
     } else log.warn("MCP server mode disabled — requires workflows + run ingress")
+
+    /*
+     * ── RESULT DELIVERY ─────────────────────────────────────────────────────
+     * The read and control surface. The DELIVERING happens in the worker's
+     * dispatcher — a long, durable retry schedule belongs on the pool sized for
+     * long work, not on instances sized for request latency.
+     */
+    if (ds != null) {
+        com.vectorbea.api.routes.DeliveryRoutes(
+            ds = ds,
+            store = com.vectorbea.worker.delivery.DeliveryStore(ds),
+            secrets = secretService,
+            rateLimiter = rateLimiter,
+            audit = auditLog,
+        ).register(router)
+    } else log.warn("Result delivery disabled — no database")
 
     /*
      * ── EVENT TRIGGERS ──────────────────────────────────────────────────────

@@ -201,8 +201,7 @@ export function inputSchema(spec: SpecDocument): Record<string, unknown> {
  * informative way to learn that an input was not mapped.
  */
 export function pathPlaceholders(template: string): string[] {
-  const found = template.match(/\{([^}]+)\}/g) ?? [];
-  return Array.from(new Set(found.map((raw) => raw.slice(1, -1))));
+  return [...new Set([...template.matchAll(/\{\{([A-Za-z_][A-Za-z0-9_.]*)\}\}|\{([A-Za-z_][A-Za-z0-9_.]*)\}/g)].map((match) => match[1] ?? match[2]!))];
 }
 
 /** Placeholders with no input mapped to them. Empty means the path is complete. */
@@ -254,12 +253,6 @@ export function specProblems(spec: SpecDocument | null | undefined): string[] {
     problems.push(
       `${method(spec)} requests do not carry a body. Change the method, or set the ` +
         "body encoding to None.",
-    );
-  }
-  if (encoding === "multipart" && !inputs(spec).some((i) => i.in === "body" && i.isFile)) {
-    problems.push(
-      "The body is multipart but no input is marked as a file. Mark the file input, " +
-        "or use form encoding.",
     );
   }
 

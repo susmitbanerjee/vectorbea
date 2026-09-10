@@ -118,6 +118,9 @@ class HttpToolResolver(
         // ── 1. Connection ─────────────────────────────────────────────────────
         val connectionIdStr = node.config["connectionId"] as? String
         var allowedHosts = emptyList<String>()
+        /* Public until a connection says otherwise. A tool with no connection
+           behind it has nothing that could have authorised private egress. */
+        var egressPolicy = SsrfGuard.EgressPolicy.PUBLIC
         var allowedPaths = emptyList<String>()
         var baseUrl: String? = null
         var connectionId: UUID? = null
@@ -139,6 +142,7 @@ class HttpToolResolver(
                     "This tool's connection cannot be used: ${e.message}", retryable = false)
             }
             allowedHosts = resolved.record.allowedHosts
+            egressPolicy = resolved.record.egressPolicy
             allowedPaths = resolved.record.allowedPaths
             baseUrl = resolved.record.configJson["baseUrl"] as? String
 
@@ -297,7 +301,7 @@ class HttpToolResolver(
 
         // ── 4. Egress checks, on the URL that will be sent ────────────────────
         try {
-            SsrfGuard.checkUrl(finalUrl, allowedHosts)
+            SsrfGuard.checkUrl(finalUrl, allowedHosts, egressPolicy)
         } catch (e: SsrfException) {
             emit(ctx, node.id, EventType.HTTP_REQUEST_PREPARED, "blocked",
                 "Request blocked", scope.scrub(e.message?.take(200)))
@@ -386,7 +390,7 @@ class HttpToolResolver(
                response redirect the runtime at an internal address — the SSRF
                the guard exists for, arriving one hop later than expected. */
             try {
-                SsrfGuard.checkUrl(target, allowedHosts)
+                SsrfGuard.checkUrl(target, allowedHosts, egressPolicy)
             } catch (e: SsrfException) {
                 log.warn("[http-tool] pagination target blocked [node={}]: {}", node.id, e.message)
                 return null

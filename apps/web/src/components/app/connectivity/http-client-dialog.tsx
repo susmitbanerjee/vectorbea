@@ -12,14 +12,18 @@ import { useApi } from "~/lib/api/api-provider";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { emptyHttpDraft, field, importCurl, isSecretName, requestPayload, splitRequestUrl,
   type HttpDraft, type HttpResponseResult, type RequestField, type BodyType } from "~/lib/tools/http-client";
+import { variableNames, resolveTestDraft, agentToolSpec, type AgentVariables, type AgentVariable } from "~/lib/tools/http-template";
+import type { SpecDocument } from "~/lib/tools/http-spec";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
-const TABS = ["Query", "Headers", "Authorization", "Body", "Import cURL"] as const;
+const TABS = ["Query", "Headers", "Authorization", "Body", "Agent inputs", "Import cURL"] as const;
 
-export function HttpClientDialog({ onClose }: { onClose: () => void }) {
+export function HttpClientDialog({ onClose, onCreateTool }: { onClose: () => void; onCreateTool?: (spec: SpecDocument) => void }) {
   const api = useApi();
   const { workspaceId } = useScope();
   const [draft, setDraft] = React.useState<HttpDraft>(emptyHttpDraft);
+  const [variables, setVariables] = React.useState<AgentVariables>({});
+  const discovered = variableNames(draft);
   const [tab, setTab] = React.useState<(typeof TABS)[number]>("Authorization");
   const [curl, setCurl] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -33,7 +37,7 @@ export function HttpClientDialog({ onClose }: { onClose: () => void }) {
   async function send() {
     setError(null); setResult(null);
     let payload;
-    try { payload = requestPayload(draft); } catch (error) { setError(error instanceof Error ? error.message : "Check the request."); return; }
+    try { payload = requestPayload(resolveTestDraft(draft, variables)); } catch (error) { setError(error instanceof Error ? error.message : "Check the request."); return; }
     const pending = new AbortController(); controller.current = pending; setBusy(true);
     try {
       const response = await api.connections.testHttpRequest(payload, { workspaceId, environmentId: null }, { signal: pending.signal });
@@ -44,7 +48,7 @@ export function HttpClientDialog({ onClose }: { onClose: () => void }) {
   }
   function stop() { controller.current?.abort(); controller.current = null; setBusy(false); setError("Stopped waiting. The remote API may still process the request."); }
   function loadCurl(value: string) {
-    try { const parsed = importCurl(value); update(parsed); setCurl(""); setTab("Body"); }
+    try { const parsed = importCurl(value); update(parsed); setVariables({}); setCurl(""); setTab(variableNames(parsed).length ? "Agent inputs" : "Body"); }
     catch (error) { setError(error instanceof Error ? error.message : "Could not import cURL."); }
   }
   const prettyBody = React.useMemo(() => {
@@ -53,7 +57,7 @@ export function HttpClientDialog({ onClose }: { onClose: () => void }) {
   }, [result]);
 
   return <Modal open onOpenChange={(open) => { if (!open) { controller.current?.abort(); onClose(); } }} size="xl">
-    <ModalHeader eyebrow="Integrations · Generic HTTP" title="HTTP request client" description="Compose and send a real API request. Requests and credentials stay in this session and are not saved." />
+    <ModalHeader eyebrow="Integrations · Generic HTTP" title="HTTP request client" description="Test a request, then create a reusable agent tool. Test values and credentials are never copied into the tool definition." />
     <ModalBody>
       <div className="grid gap-4">
         <fieldset disabled={busy || fileBusy} className="grid min-w-0 gap-4">
@@ -65,6 +69,20 @@ export function HttpClientDialog({ onClose }: { onClose: () => void }) {
           <div className="flex flex-wrap gap-2" role="group" aria-label="Request sections">
             {TABS.map((name) => <Button key={name} size="sm" variant={tab === name ? "primary" : "secondary"} aria-pressed={tab === name} onClick={() => { setTab(name); setError(null); }}>{name}</Button>)}
           </div>
+          {tab === "Agent inputs" ? <div className="grid gap-3">
+            <Text variant="body-sm">Use {"{{name}}"} in query values, headers or body strings, and {"{id}"} in paths. Each input is required at runtime. The API host and credentials stay fixed.</Text>
+            <Text variant="caption" tone="muted">Example JSON body: {`{"source":"{{source}}","target":"{{target}}"}`}. An agent supplies source and target; the values below are only for this test.</Text>
+            {discovered.length === 0 ? <Text variant="body-sm" tone="muted">Add placeholders to the request or import a cURL command containing them.</Text> : null}
+            {discovered.map((name) => {
+              const value = variables[name] ?? { type: "string", description: "", testValue: "" };
+              const change = (patch: Partial<AgentVariable>) => { setVariables((previous) => ({ ...previous, [name]: { ...value, ...patch } })); setResult(null); setError(null); };
+              return <section key={name} className="border-subtle grid gap-3 rounded-md border p-3 sm:grid-cols-2">
+                <Field label={`Type for ${name}`}><Select value={value.type} onValueChange={(type) => change({ type: type as AgentVariable["type"] })} options={["string", "integer", "number", "boolean", "array", "object"].map((type) => ({ value: type, label: type }))} /></Field>
+                <Field label={`Test value for ${name}`} description="Temporary; not saved as a default."><Input value={value.testValue} onChange={(event) => change({ testValue: event.target.value })} autoComplete="off" /></Field>
+                <Field label={`Description for ${name}`} description="Explains this argument to the agent."><Input value={value.description} onChange={(event) => change({ description: event.target.value })} /></Field>
+              </section>;
+            })}
+          </div> : null}
           {tab === "Query" ? <>
             <Text variant="caption" tone="muted">Enabled rows are appended to the URL, including repeated parameter names.</Text>
             <Button size="sm" variant="secondary" onClick={() => { try { const parsed = splitRequestUrl(draft.url); update({ url: parsed.url, query: [...draft.query, ...parsed.query] }); } catch { setError("Enter a valid HTTP(S) URL first."); } }}>Move URL parameters into rows</Button>
@@ -116,6 +134,9 @@ export function HttpClientDialog({ onClose }: { onClose: () => void }) {
     <ModalFooter>
       <Text variant="caption" tone="muted" className="mr-auto max-w-lg">Send executes a real request and may change remote data. Redirects are shown without following them. Private hosts require a private runner.</Text>
       {busy ? <Button variant="secondary" onClick={stop}>Stop waiting</Button> : null}
+      {onCreateTool ? <Button variant="secondary" disabled={busy || fileBusy || !draft.url.trim()} onClick={() => {
+        try { onCreateTool(agentToolSpec(draft, variables)); } catch (error) { setError(error instanceof Error ? error.message : "Check the request template."); }
+      }}>Create agent tool</Button> : null}
       <Button variant="primary" loading={busy} disabled={!draft.url.trim() || fileBusy} onClick={() => void send()}>Send request</Button>
     </ModalFooter>
   </Modal>;

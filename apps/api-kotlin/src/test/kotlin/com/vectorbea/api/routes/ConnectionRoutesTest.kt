@@ -321,12 +321,15 @@ class ConnectionRoutesTest {
             id: UUID, workspaceId: UUID, name: String?, configJson: Map<String, Any>?,
             allowedHosts: List<String>?, allowedPaths: List<String>?,
             allowedSchemas: List<String>?, allowedTables: List<String>?, status: String?,
-            secretRef: String?,
+            secretRef: String?, egressPolicy: String?, egressPolicySetBy: UUID?,
+            protocol: String?,
         ): Connection? {
             val existing = store[id]?.takeIf { it.workspaceId == workspaceId } ?: return null
             val updated = existing.copy(
                 name = name ?: existing.name,
                 status = status ?: existing.status,
+                egressPolicy = egressPolicy ?: existing.egressPolicy,
+                protocol = protocol ?: existing.protocol,
                 updatedAt = Instant.now(),
             )
             store[id] = updated

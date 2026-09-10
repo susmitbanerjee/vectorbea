@@ -38,10 +38,18 @@ open class CheckpointStore(private val dataSource: DataSource) {
         val snapshotJson = mapper.writeValueAsString(snapshot)
 
         dataSource.connection.use { conn ->
+            /*
+             * `step_id` and `workflow_version_id` are written alongside the
+             * columns this class actually reads back. They are V001's spelling
+             * of the same two facts, and populating them costs one bind each —
+             * cheaper than leaving a column that looks like it means something
+             * permanently null for anyone who joins against it later.
+             */
             conn.prepareStatement(
                 """INSERT INTO run_checkpoints
-                       (id, run_id, workspace_id, environment_id, node_id, sequence, snapshot_json, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?)"""
+                       (id, run_id, workspace_id, environment_id, node_id, sequence,
+                        snapshot_json, created_at, step_id, workflow_version_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?)"""
             ).use { stmt ->
                 stmt.setObject(1, id)
                 stmt.setObject(2, runId)
@@ -51,6 +59,8 @@ open class CheckpointStore(private val dataSource: DataSource) {
                 stmt.setInt(6, snapshot.sequence)
                 stmt.setString(7, snapshotJson)
                 stmt.setTimestamp(8, Timestamp.from(Instant.now()))
+                stmt.setString(9, nodeId)
+                stmt.setObject(10, snapshot.workflowVersionId)
                 stmt.executeUpdate()
             }
         }

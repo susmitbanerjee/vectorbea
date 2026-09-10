@@ -49,6 +49,16 @@ export interface RunDetailData {
    * `events`.
    */
   waits: contracts.RunWait[];
+  /**
+   * Where the result went, and whether it got there.
+   *
+   * Read for FINISHED runs, not only failed ones — "delivered" is the answer
+   * somebody is looking for as often as "not delivered", and a panel that only
+   * appeared on failure would leave every successful run silently unconfirmed.
+   */
+  deliveries: contracts.RunDelivery[];
+  /** Requeue a delivery. It carries the same idempotency key it was born with. */
+  redeliver: (deliveryId: string) => Promise<void>;
   incident: contracts.FailureIncident | null;
   loading: boolean;
   /** True only when the API positively answered 404. */
@@ -128,6 +138,21 @@ export function useRunDetailData(runId: string): RunDetailData {
     queryKey: [...queryKeys.runs.detail(keyScope, runId), "waits"],
     queryFn: () => api.runs.waits(runId, scope),
     enabled: enabled && parked,
+    freshness: "live",
+  });
+
+  /*
+   * ── WHERE THE RESULT WENT ─────────────────────────────────
+   * Asked once the run has finished, because nothing is delivered before then.
+   * Kept live while anything is still retrying: a delivery's backoff is minutes
+   * long, so a page opened on a failing callback should show it landing without
+   * a manual refresh.
+   */
+  const finished = run.data ? !IN_FLIGHT.has(run.data.status) : false;
+  const deliveries = useApiQuery({
+    queryKey: [...queryKeys.runs.detail(keyScope, runId), "deliveries"],
+    queryFn: () => api.runs.deliveries(runId, scope),
+    enabled: enabled && finished,
     freshness: "live",
   });
 
@@ -246,6 +271,19 @@ export function useRunDetailData(runId: string): RunDetailData {
     await refetch();
   }, [api, runId, scope, refetch]);
 
+  /**
+   * Requeue a delivery.
+   *
+   * Refetches afterwards rather than optimistically flipping the row to
+   * `pending`: the API decides whether the delivery was in a requeueable state
+   * at all, and painting a state the server may refuse is how a UI ends up
+   * disagreeing with the thing it is showing.
+   */
+  const redeliverDelivery = React.useCallback(async (deliveryId: string) => {
+    await api.runs.redeliver(deliveryId, scope);
+    await deliveries.refetch();
+  }, [api, scope, deliveries]);
+
   const retryRun = React.useCallback(async () => {
     await api.runs.retry(runId, scope);
     await refetch();
@@ -256,6 +294,8 @@ export function useRunDetailData(runId: string): RunDetailData {
     detail: run.data ?? null,
     events: events.data?.items ?? [],
     waits: parked ? waits.data?.items ?? [] : [],
+    deliveries: deliveries.data?.items ?? [],
+    redeliver: redeliverDelivery,
     incident,
     loading: enabled && run.isPending,
     // Distinguished from any other failure: "this run does not exist" and "the

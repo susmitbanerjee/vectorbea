@@ -63,7 +63,9 @@ class SignalAndCallbackRoutesTest {
         limiter = CountingLimiter()
         queue = CapturingQueue()
         router = Router()
-        SignalRoutes(ds, signals, waits, queue, limiter).register(router)
+        SignalRoutes(ds, signals, waits,
+            com.vectorbea.api.signals.SignalDelivery(ds, signals, waits, queue, limiter),
+        ).register(router)
         ToolCallbackRoutes(ds, waits, queue, limiter).register(router)
         w = seed()
     }

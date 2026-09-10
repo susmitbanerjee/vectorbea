@@ -50,6 +50,17 @@ class EventTriggerRoutes(
         val filterPath: String? = null,
         val filterValues: List<String> = emptyList(),
         val dedupePath: String? = null,
+        /**
+         * A path naming the THING the run works — `alert.labels.service` — as
+         * opposed to `dedupePath`, which names the message.
+         *
+         * The first stops a broker's redelivery running twice. This stops two
+         * different messages about one service starting two runs, and what
+         * happens instead is the workflow's `dedupPolicy`.
+         */
+        val runDedupPath: String? = null,
+        /** 0–100, or absent to take the workflow's default. */
+        val runPriority: Int? = null,
         val maxInFlight: Int = 10,
         val batchSize: Int = 10,
     )
@@ -57,6 +68,13 @@ class EventTriggerRoutes(
     private fun create(req: Request): Response {
         val ctx = req.context()
         val body = req.bodyAs<CreateBody>()
+
+        if (body.runPriority != null && body.runPriority !in 0..100) {
+            throw ApiError.ValidationError(
+                "`runPriority` must be between 0 and 100. 0 is batch, 50 is normal, 100 is the " +
+                    "priority lane; a workspace without that entitlement is clamped below it."
+            )
+        }
 
         val workflowId = body.workflowId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: throw ApiError.ValidationError("`workflowId` is required and must be a UUID.")
@@ -101,6 +119,8 @@ class EventTriggerRoutes(
             filterPath = body.filterPath,
             filterValues = body.filterValues,
             dedupePath = body.dedupePath,
+            runDedupPath = body.runDedupPath?.takeIf { it.isNotBlank() },
+            runPriority = body.runPriority?.toShort(),
             maxInFlight = body.maxInFlight,
             batchSize = body.batchSize,
             createdByUserId = req.principal?.appUserId,
@@ -172,6 +192,8 @@ class EventTriggerRoutes(
         "filterPath" to filterPath,
         "filterValues" to filterValues,
         "dedupePath" to dedupePath,
+        "runDedupPath" to runDedupPath,
+        "runPriority" to runPriority?.toInt(),
         "maxInFlight" to maxInFlight,
         "batchSize" to batchSize,
         "enabled" to enabled,

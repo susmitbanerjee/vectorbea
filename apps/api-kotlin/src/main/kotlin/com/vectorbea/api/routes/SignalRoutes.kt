@@ -8,13 +8,8 @@ import com.vectorbea.api.http.Request
 import com.vectorbea.api.http.Response
 import com.vectorbea.api.http.Router
 import com.vectorbea.api.http.mapper
-import com.vectorbea.api.queue.WorkflowQueue
-import com.vectorbea.api.rate.RateLimitResult
-import com.vectorbea.api.rate.RateLimiter
 import com.vectorbea.worker.durable.wait.SignalStore
 import com.vectorbea.worker.durable.wait.WaitStore
-import com.vectorbea.api.queue.JobType
-import com.vectorbea.api.queue.WorkflowRunJob
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -39,14 +34,116 @@ class SignalRoutes(
     private val dataSource: DataSource,
     private val signals: SignalStore,
     private val waits: WaitStore,
-    private val queue: WorkflowQueue?,
-    private val rateLimiter: RateLimiter?,
+    /**
+     * The delivery itself — append, resolve, wake, rate-limit.
+     *
+     * Shared with `RunIngress`, whose `join` deduplication policy performs the
+     * same delivery from a completely different entry point. This route is the
+     * HTTP shape around it and nothing more.
+     */
+    private val delivery: com.vectorbea.api.signals.SignalDelivery,
 ) {
 
     fun register(router: Router) {
         router.post("/api/runs/:id/signals", ::send)
+        router.post("/api/runs/:id/guidance", ::guidance)
         router.get("/api/runs/:id/signals", ::list)
         router.get("/api/runs/:id/waits", ::listWaits)
+    }
+
+    private data class GuidanceBody(
+        /** What to tell the agent. One or two sentences of correction. */
+        val text: String? = null,
+        /**
+         * Which agent, when a run has several.
+         *
+         * Omitted, the guidance goes to every agent in the run — the right
+         * default for "stop, the database is the primary", and the wrong one for
+         * a note meant for one member of a team, which is why it can be named.
+         */
+        val agent: String? = null,
+        /** Makes a retried POST the same guidance rather than a second one. */
+        val dedupeKey: String? = null,
+    )
+
+    /**
+     * Say something to a running agent.
+     *
+     * ── A SIGNAL, WEARING A NAME PEOPLE WILL FIND ────────────────────
+     * Identical in every durable respect to `POST /api/runs/:id/signals` with
+     * `{"name": "guidance"}`, and deliberately so: the storage, ordering,
+     * deduplication, rate limit and workspace scoping are the signal system's,
+     * because a second delivery path for human text would be a second thing to
+     * get wrong. What this adds is discoverability — nobody looking for "how do
+     * I tell a running agent something" searches for `signals`.
+     *
+     * The agent takes delivery at its next iteration boundary, not immediately:
+     * it may be mid-call to a provider, and interrupting that would abandon
+     * tokens already paid for.
+     */
+    private fun guidance(req: Request): Response {
+        val ctx = req.context()
+        val runId = req.pathUUID("id")
+        val body = req.bodyAs<GuidanceBody>()
+
+        val text = requireField(body.text, "text").trim()
+        if (text.isEmpty() || text.length > MAX_GUIDANCE_CHARS) {
+            throw ApiError.ValidationError(
+                "`text` must be between 1 and $MAX_GUIDANCE_CHARS characters. Guidance is a " +
+                    "correction to a running agent, not a document — put anything longer " +
+                    "somewhere the agent can fetch it and tell it where."
+            )
+        }
+        if (body.agent != null && (body.agent.isBlank() || body.agent.length > MAX_NAME_LENGTH)) {
+            throw ApiError.ValidationError(
+                "`agent` names one agent in the run. Leave it out to reach all of them."
+            )
+        }
+
+        val environmentId = ctx.environmentId
+            ?: environmentOf(runId, ctx.workspaceId)
+            ?: throw ApiError.NotFound("Run")
+
+        /* `guidance:<agent>` is what the loop matches on its own name; plain
+           `guidance` reaches every agent in the run. One convention, read in one
+           place — see `AgentBrainRunner.isGuidanceSignal`. */
+        val name = if (body.agent != null) "guidance:${body.agent.trim()}" else "guidance"
+
+        val outcome = delivery.deliver(
+            runId = runId,
+            workspaceId = ctx.workspaceId,
+            environmentId = environmentId,
+            name = name,
+            payloadJson = mapper.writeValueAsString(mapOf("text" to text)),
+            sentByUserId = req.principal?.appUserId,
+            sentByApiKeyId = req.apiKeyId,
+            source = if (req.apiKeyId != null) "api_key" else "user",
+            dedupeKey = body.dedupeKey,
+        )
+
+        return when (val result = outcome.result) {
+            is SignalStore.SendResult.RunNotFound -> throw ApiError.NotFound("Run")
+
+            is SignalStore.SendResult.RunTerminal -> throw ApiError.Conflict(
+                "This run has already finished (${result.status}), so there is no agent left " +
+                    "to tell. Start a new run with this in its input."
+            )
+
+            is SignalStore.SendResult.Duplicate -> Response.ok(mapOf(
+                "accepted" to true,
+                "duplicate" to true,
+                "signalId" to result.signal.id.toString(),
+                "message" to "This guidance was already accepted under the same dedupeKey.",
+            ))
+
+            is SignalStore.SendResult.Accepted -> Response.accepted(mapOf(
+                "accepted" to true,
+                "signalId" to result.signal.id.toString(),
+                "sequence" to result.signal.sequence,
+                "message" to "The agent will read this at its next iteration. It is not " +
+                    "interrupted mid-call.",
+            ))
+        }
     }
 
     private data class SendBody(
@@ -78,13 +175,11 @@ class SignalRoutes(
             )
         }
 
-        enforceRateLimit(ctx.workspaceId, runId)
-
         val environmentId = ctx.environmentId
             ?: environmentOf(runId, ctx.workspaceId)
             ?: throw ApiError.NotFound("Run")
 
-        return when (val result = signals.send(
+        val outcome = delivery.deliver(
             runId = runId,
             workspaceId = ctx.workspaceId,
             environmentId = environmentId,
@@ -93,8 +188,10 @@ class SignalRoutes(
             sentByUserId = req.principal?.appUserId,
             sentByApiKeyId = req.apiKeyId,
             source = if (req.apiKeyId != null) "api_key" else "user",
-            dedupeKey = body.dedupeKey?.take(200),
-        )) {
+            dedupeKey = body.dedupeKey,
+        )
+
+        return when (val result = outcome.result) {
             is SignalStore.SendResult.RunNotFound -> throw ApiError.NotFound("Run")
 
             is SignalStore.SendResult.RunTerminal -> throw ApiError.Conflict(
@@ -114,7 +211,7 @@ class SignalRoutes(
             )
 
             is SignalStore.SendResult.Accepted -> {
-                val resolvedWaitId = wakeIfParked(runId, ctx.workspaceId, name, result.signal)
+                val resolvedWaitId = outcome.resolvedWaitId
                 Response.accepted(
                     mapOf(
                         "accepted" to true,
@@ -130,60 +227,6 @@ class SignalRoutes(
             }
         }
     }
-
-    /**
-     * Resolve a matching wait, and wake the run.
-     *
-     * ── THE CAS DECIDES, NOT THIS CODE ──────────────────────────────────────
-     * `waitsForSignal` can return several — a run may hold more than one wait on
-     * the same name across branches — and `resolve` is a compare-and-set on
-     * `status = 'waiting'`. The first one that wins is the one this signal
-     * satisfies; the rest are untouched and keep waiting for their own. Two
-     * signals racing to satisfy one wait is the same story from the other side:
-     * one wins, one is stored for the step boundary.
-     *
-     * The signal is marked CONSUMED only when a wait actually resolved. Otherwise
-     * it stays pending and is delivered at the next step boundary, which is what
-     * the run needs — and is why a signal sent to a running run is never lost.
-     */
-    private fun wakeIfParked(
-        runId: UUID,
-        workspaceId: UUID,
-        name: String,
-        signal: SignalStore.Signal,
-    ): UUID? {
-        val candidates = runCatching { waits.waitsForSignal(runId, name) }.getOrDefault(emptyList())
-        for (wait in candidates) {
-            val payload = mapper.writeValueAsString(
-                mapOf("signal" to name, "sequence" to signal.sequence,
-                      "payload" to runCatching { mapper.readValue(signal.payloadJson, Any::class.java) }
-                          .getOrDefault(emptyMap<String, Any>()))
-            )
-            if (!waits.resolve(
-                    wait.id,
-                    com.vectorbea.worker.durable.wait.RunWait.Resolution.SIGNAL,
-                    payload,
-                    "signal:$name",
-                )
-            ) continue
-
-            signals.consume(listOf(signal.id), wait.id)
-
-            /*
-             * Best-effort, and covered. The wait is already durably resolved, so a
-             * lost enqueue is exactly the shape `ResumeReconciler`'s
-             * `wait_resolved` arm exists for — the same failure the reconciler was
-             * built after four other paths got it wrong.
-             */
-            runCatching {
-                queue?.enqueue(resumeJobFor(wait, workspaceId, "signal"))
-            }
-            return wait.id
-        }
-        return null
-    }
-
-    // ── Reading ──────────────────────────────────────────────────────────────
 
     private fun list(req: Request): Response {
         val ctx = req.context()
@@ -261,84 +304,7 @@ class SignalRoutes(
         return Response.ok(mapOf("items" to rows, "total" to rows.size))
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    /**
-     * Bound the stream.
-     *
-     * ── AN UNBOUNDED SIGNAL STREAM IS A DENIAL OF SERVICE AGAINST ONE RUN ───
-     * Every signal to a parked run resolves a wait and enqueues a resume, and
-     * every signal to a running run is read at its next step boundary. A caller
-     * in a loop could therefore make one run consume a worker permanently while
-     * making no progress — and the run is a tenant's own, so a global limit would
-     * not catch it.
-     *
-     * The limit is therefore PER RUN as well as per workspace: a busy workspace
-     * with a hundred runs is fine, and a hundred signals into one run is not.
-     */
-    private fun enforceRateLimit(workspaceId: UUID, runId: UUID) {
-        val limiter = rateLimiter ?: return
-        listOf(
-            "signal:run:$runId" to PER_RUN_PER_MINUTE,
-            "signal:ws:$workspaceId" to PER_WORKSPACE_PER_MINUTE,
-        ).forEach { (key, max) ->
-            val result = limiter.check(key, max, 60)
-            if (result is RateLimitResult.Exceeded) {
-                throw ApiError.TooManyRequests(
-                    if (key.startsWith("signal:run:"))
-                        "This run has received $max signals in the last minute, which is its " +
-                            "limit. A run that spends its time taking delivery makes no progress."
-                    else
-                        "This workspace has sent $max signals in the last minute, which is its limit.",
-                    mapOf("retryAfterSeconds" to result.resetsInSeconds, "limit" to max),
-                )
-            }
-        }
-    }
-
-    /**
-     * The resume job for a run woken by a signal.
-     *
-     * `executionClass` is READ from the run rather than re-derived: a
-     * continuation belongs on the same stream as the run it continues, and
-     * defaulting it to the system pool would take a slot that timer resumes and
-     * cancellations need to stay unstarvable. `ApprovalRoutes` makes exactly this
-     * argument for exactly this reason.
-     */
-    private fun resumeJobFor(
-        wait: com.vectorbea.worker.durable.wait.RunWait,
-        workspaceId: UUID,
-        reason: String,
-    ): WorkflowRunJob {
-        val details = runDetails(wait.runId, workspaceId)
-        return WorkflowRunJob(
-            runId = wait.runId.toString(),
-            workspaceId = workspaceId.toString(),
-            environmentId = wait.environmentId.toString(),
-            workflowId = details.first,
-            workflowVersionId = details.second,
-            jobType = JobType.RESUME_RUN,
-            reason = reason,
-            executionClass = com.vectorbea.api.queue.ExecutionClass.fromWire(details.third),
-        )
-    }
-
-    private fun runDetails(runId: UUID, workspaceId: UUID): Triple<String, String, String?> =
-        dataSource.connection.use { conn ->
-            conn.prepareStatement(
-                "SELECT workflow_id, workflow_version_id, execution_class " +
-                    "FROM agent_runs WHERE id = ? AND workspace_id = ?"
-            ).use { st ->
-                st.setObject(1, runId); st.setObject(2, workspaceId)
-                st.executeQuery().use { rs ->
-                    if (rs.next()) Triple(
-                        rs.getString("workflow_id"),
-                        rs.getString("workflow_version_id"),
-                        rs.getString("execution_class"),
-                    ) else Triple(runId.toString(), runId.toString(), null)
-                }
-            }
-        }
+    // ── Helpers ──────────────────────────────────────────────────────
 
     private fun environmentOf(runId: UUID, workspaceId: UUID): UUID? =
         dataSource.connection.use { conn ->
@@ -355,12 +321,11 @@ class SignalRoutes(
     private companion object {
         const val MAX_NAME_LENGTH = 200
 
+        /** Mirrors `AgentBrainRunner.MAX_GUIDANCE_CHARS`, which caps it again on read. */
+        const val MAX_GUIDANCE_CHARS = 2_000
+
         /** 64 KB. A signal says something happened; it is not a transport. */
         const val MAX_PAYLOAD_BYTES = 64 * 1024
 
-        val PER_RUN_PER_MINUTE: Long =
-            System.getenv("SIGNAL_RATE_PER_RUN_PER_MIN")?.toLongOrNull() ?: 60
-        val PER_WORKSPACE_PER_MINUTE: Long =
-            System.getenv("SIGNAL_RATE_PER_WORKSPACE_PER_MIN")?.toLongOrNull() ?: 600
     }
 }

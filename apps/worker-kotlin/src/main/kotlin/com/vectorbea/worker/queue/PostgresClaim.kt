@@ -137,6 +137,24 @@ class PostgresClaim(
                  WHERE r.status IN ('queued', 'yielded')
                    AND r.execution_class = ?
                    AND r.priority >= ?
+                   /*
+                    * ── A RUN PINNED TO A CUSTOMER'S NETWORK IS NOT OURS ─────
+                    *
+                    * The single most consequential line in this statement. A
+                    * workflow with `runner_pool_id` set has been declared to
+                    * execute inside the customer's perimeter — usually because a
+                    * procurement review said so — and a platform worker claiming
+                    * it would execute their prompts and their tool results on our
+                    * infrastructure. Not a degraded experience: the guarantee
+                    * they bought, broken, silently, with no error anywhere.
+                    *
+                    * Expressed here rather than as a filter after the claim,
+                    * because a filter after the claim has already read the row
+                    * and would still have to hand it back. `agent_runs_platform_
+                    * claimable_idx` (V072) is the matching partial index, so this
+                    * is not a scan.
+                    */
+                   AND r.runner_pool_id IS NULL
                  ORDER BY r.priority DESC, r.fair_vtime
                  LIMIT ?
             ),
@@ -151,6 +169,10 @@ class PostgresClaim(
                   FROM agent_runs r
                  WHERE r.id IN (SELECT id FROM eligible)
                    AND r.status IN ('queued', 'yielded')
+                   /* Re-checked on the locked row. The candidate scan and this
+                      are separate reads, and the gap between them is exactly
+                      where a re-pinned run would slip through. */
+                   AND r.runner_pool_id IS NULL
                    FOR UPDATE SKIP LOCKED
             )
             UPDATE agent_runs r

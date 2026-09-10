@@ -56,4 +56,13 @@ export interface Run {
   tokens: number;
   nodes: RunNode[];
   incidentId?: string;
+  /**
+   * Whether the result reached where it was meant to go.
+   *
+   * A SECOND axis, not a status value. A run that produced the right answer and
+   * could not deliver it is `succeeded` with `delivery: "failed"` — folding it
+   * into `status` would either paint a correct run red or hide the failure
+   * entirely, and both are wrong for the person looking at the list.
+   */
+  delivery?: "none" | "pending" | "delivered" | "partial" | "failed";
 }

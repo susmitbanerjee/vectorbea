@@ -90,3 +90,7 @@ secrets/
 # Regenerate with `npm run test:visual` / `npm run capture:storybook`.
 screenshots/
 *.stackdump
+
+# Kotlin compiler scratch — daemon session files and crash logs, written beside
+# each module. Not build output under `build/`, so it escaped that rule.
+.kotlin/

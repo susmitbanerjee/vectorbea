@@ -138,30 +138,33 @@ class Database private constructor(
         }
 
         /**
-         * Ensure the `run_checkpoints` table exists (idempotent).
-         * Called once at startup before the workflow runtime starts.
+         * `run_checkpoints` is owned by Flyway. There is nothing to ensure.
+         *
+         * ── WHAT THIS USED TO DO, AND WHY IT WAS WORSE THAN NOTHING ───────
+         * It ran `CREATE TABLE IF NOT EXISTS run_checkpoints (...)` with a shape
+         * that differed from V001's — `workspace_id`, `environment_id`,
+         * `node_id`, `snapshot_json` against `workflow_id`, `step_id`,
+         * `state_json_sanitized`. `IF NOT EXISTS` made it a no-op in every
+         * environment where Flyway had run, which is all of them, so the table
+         * kept V001's shape while `CheckpointStore` wrote the other one.
+         *
+         * Every checkpoint write therefore threw, and
+         * `WorkflowRuntime.writeCheckpoint` swallowed it into a warning — so
+         * every parked run resumed by REPLAYING FROM ITS FIRST NODE, for as long
+         * as the feature has existed, with nothing failing to say so.
+         *
+         * The lesson is the deletion, not the migration: a table with two
+         * definitions has one that is never exercised, and it will be the one
+         * the code was written against. V069 reconciled the schema; this is the
+         * second definition going away so it cannot drift again.
          */
-        fun ensureCheckpointsTable(ds: DataSource) {
-            ds.connection.use { conn ->
-                conn.createStatement().use { stmt ->
-                    stmt.execute("""
-                        CREATE TABLE IF NOT EXISTS run_checkpoints (
-                            id               UUID        NOT NULL PRIMARY KEY DEFAULT gen_random_uuid(),
-                            run_id           UUID        NOT NULL,
-                            workspace_id     UUID        NOT NULL,
-                            environment_id   UUID        NOT NULL,
-                            node_id          TEXT        NOT NULL,
-                            sequence         INTEGER     NOT NULL,
-                            snapshot_json    JSONB       NOT NULL,
-                            created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
-                        )
-                    """.trimIndent())
-                    stmt.execute("""
-                        CREATE INDEX IF NOT EXISTS idx_run_checkpoints_run_seq
-                            ON run_checkpoints (run_id, sequence DESC)
-                    """.trimIndent())
-                }
-            }
+        @Deprecated(
+            "run_checkpoints is a Flyway-managed table (V001, reconciled in V069). " +
+                "This is a no-op kept only so a partially-deployed worker still starts.",
+            level = DeprecationLevel.WARNING,
+        )
+        fun ensureCheckpointsTable(@Suppress("UNUSED_PARAMETER") ds: DataSource) {
+            // Intentionally empty. See above.
         }
 
         /**

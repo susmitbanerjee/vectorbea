@@ -118,6 +118,17 @@ sealed class Classification {
     /** The run is parked, waiting on something outside itself. Not a failure. */
     data class Waiting(val on: String) : Classification()
 
+    /**
+     * Somebody stopped it on purpose.
+     *
+     * A fourth outcome rather than a `Waiting` or a `Failed`, because it is
+     * neither. An incident that resolved while its run was still working was
+     * cancelled correctly, and both alternatives misreport it: `Failed` puts a
+     * correct decision in the failure metrics and on somebody's dashboard, and
+     * `Waiting` claims the run will resume, which it will not.
+     */
+    object Cancelled : Classification()
+
     /** A real failure with an owner. */
     data class Failed(val verdict: FailureVerdict) : Classification()
 }

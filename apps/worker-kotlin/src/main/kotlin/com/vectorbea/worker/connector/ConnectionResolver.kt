@@ -122,6 +122,12 @@ open class ConnectionResolver(
                             secretRef      = rs.getString("secret_ref"),   // NOT returned to callers
                             configJson     = configJson,
                             allowedHosts   = parseJsonList("allowed_hosts"),
+                            /* Tolerated missing: the API applies V071 and the
+                               worker may be running ahead of it. An unreadable
+                               policy reads as PUBLIC, which is the restrictive
+                               answer and the one that fails visibly. */
+                            egressPolicy   = SsrfGuard.EgressPolicy.of(
+                                runCatching { rs.getString("egress_policy") }.getOrNull()),
                             allowedPaths   = parseJsonList("allowed_paths"),
                             allowedSchemas = parseJsonList("allowed_schemas"),
                             allowedTables  = parseJsonList("allowed_tables"),
@@ -159,7 +165,8 @@ open class ConnectionResolver(
         private val SELECT_SQL = """
             SELECT id, workspace_id, environment_id, name, type, provider,
                    status, auth_type, secret_ref, config_json,
-                   allowed_hosts, allowed_paths, allowed_schemas, allowed_tables
+                   allowed_hosts, allowed_paths, allowed_schemas, allowed_tables,
+                   COALESCE(egress_policy, 'public') AS egress_policy
             FROM connections
             WHERE id = ? AND workspace_id = ?
         """.trimIndent()

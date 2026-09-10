@@ -29,7 +29,7 @@ class StopReasonTaxonomyTest {
             val result = StopReasonTaxonomy.classify(reason, failureReason = "something happened")
             assertNotNull(result, "$reason produced no classification")
         }
-        assertEquals(15, StopReason.entries.size,
+        assertEquals(16, StopReason.entries.size,
             "the enum changed — check the new stop reason has a deliberate class, " +
             "and add it to the case-by-case assertions below rather than relying on " +
             "the loop above, which only proves it is non-null")
@@ -59,6 +59,23 @@ class StopReasonTaxonomyTest {
                 "async tool call and every signal wait would then be counted as a " +
                 "failure on somebody's dashboard.")
         assertEquals("an external event", (external as Classification.Waiting).on)
+    }
+
+    @Test
+    fun `a cancelled loop is neither a success nor a failure`() {
+        /*
+         * The third outcome, and it needs to exist. An incident that resolved
+         * while its agent was still working was cancelled CORRECTLY —
+         * classifying that as `Failed` puts a right decision in the failure
+         * metrics and sends somebody debugging a run that did what it was told,
+         * and classifying it as `Waiting` claims it will resume, which it will
+         * not.
+         */
+        val cancelled = StopReasonTaxonomy.classify(
+            StopReason.CANCELLED, failureReason = "the run was cancelled")
+
+        assertTrue(cancelled is Classification.Cancelled,
+            "a cancelled agent loop was classified as $cancelled")
     }
 
     @Test

@@ -57,6 +57,9 @@ data class ReplayRequest(
      */
     val untilNode: String? = null,
 )
+/** Long enough for a service name plus a region plus a check id; short enough to index. */
+private const val MAX_DEDUP_KEY_LENGTH = 200
+
 private val CANCELLABLE_STATUSES = setOf("queued", "running", "waiting_for_approval")
 private val RETRYABLE_STATUSES   = setOf("failed", "enqueue_failed", "timed_out")
 
@@ -73,6 +76,10 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "currentStepId" to currentStepId,
     "currentAgentId" to currentAgentId?.toString(),
     "idempotencyKey" to idempotencyKey,
+    /* The live-singleton key, beside the idempotency key it is constantly
+       confused with. Shown so "why did my second alert not start a run" has an
+       answer on the run itself. */
+    "dedupKey" to dedupKey,
     "startedAt" to startedAt?.toString(),
     "completedAt" to completedAt?.toString(),
     "durationMs" to durationMs,
@@ -88,6 +95,20 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "nodeTotal" to nodeTotal,
     "nodeCommitted" to nodeCommitted,
     "ribbonJson" to ribbonJson,
+    // Whether the result got where it was going. On the LIST response, not only
+    // the detail one, because "which of my runs did not deliver" is a question
+    // asked of a list — and a list that needs a per-row join to answer it will
+    // not answer it.
+    "deliveryStatus" to deliveryStatus,
+    /*
+     * On the LIST response as well as the detail one, deliberately.
+     *
+     * Somebody scanning a list of runs needs to know which of them they can
+     * expect to inspect. Finding out only after opening one, and finding an
+     * empty panel, is the experience this flag exists to replace.
+     */
+    "payloadsWithheld" to payloadsWithheld,
+    "runnerPoolId" to runnerPoolId?.toString(),
     "incidentId" to incidentId?.toString(),
 )
 
@@ -306,6 +327,11 @@ class RunRoutes(
                 put("runId", started.runId.toString())
                 put("status", "QUEUED")
                 if (started.idempotentHit) put("idempotencyHit", true)
+                if (started.joinedExisting) {
+                    put("joinedExisting", true)
+                    put("message", "A run is already working on this deduplication key. " +
+                        "Your input was delivered to it as a signal; no second run was started.")
+                }
                 // Queue position and ETA when there is a queue. Absent when the run
                 // is expected to start immediately — an ETA of zero seconds reads
                 // as a system under strain when it is not.
@@ -343,6 +369,7 @@ class RunRoutes(
             put("runId", started.runId.toString())
             put("status", "QUEUED")
             if (started.idempotentHit) put("idempotencyHit", true)
+            if (started.joinedExisting) put("joinedExisting", true)
         }))
 
         streamRun(started.runId, ctx.workspaceId, emitter)
@@ -360,6 +387,21 @@ class RunRoutes(
     private data class TriggerBody(
         val input: Map<String, Any?> = emptyMap(),
         val idempotencyKey: String? = null,
+        /**
+         * At most one LIVE run per (workspace, workflow, key).
+         *
+         * The caller decides what "the same thing" is — a service name, a commit
+         * sha. What happens when the key is taken is the WORKFLOW's choice, not
+         * theirs: see `workflows.dedup_policy`.
+         */
+        val dedupKey: String? = null,
+        /**
+         * 0–100, or absent to take the workflow's default.
+         *
+         * Clamped to the workspace's plan ceiling. A Sev1 raised above the
+         * workflow's normal priority is the case this exists for.
+         */
+        val priority: Int? = null,
         val triggerType: String = "manual",
         val mode: String? = null,
         val responseMode: String? = null,
@@ -376,6 +418,18 @@ class RunRoutes(
         if (TriggerSource.fromWire(body.triggerType) == null) {
             throw ApiError.ValidationError(
                 "`triggerType` must be one of ${TriggerSource.wireNames().joinToString(", ")}."
+            )
+        }
+        if (body.priority != null && body.priority !in 0..100) {
+            throw ApiError.ValidationError(
+                "`priority` must be between 0 and 100. 0 is batch, 50 is normal, 100 is the " +
+                    "priority lane; a workspace without that entitlement is clamped below it."
+            )
+        }
+        if (body.dedupKey != null && body.dedupKey.length > MAX_DEDUP_KEY_LENGTH) {
+            throw ApiError.ValidationError(
+                "`dedupKey` is over $MAX_DEDUP_KEY_LENGTH characters. It names the thing being " +
+                    "worked — a service, a deploy — not the payload."
             )
         }
         return body
@@ -418,13 +472,15 @@ class RunRoutes(
                 apiKeyId = req.apiKeyId,
             ),
             idempotencyKey = body.idempotencyKey,
+            dedupKey = body.dedupKey,
+            priority = body.priority?.toShort(),
             reason = "Triggered via ${body.triggerType}",
         ))
 
         // Nothing here fires for an idempotency hit: no run was created, so
         // counting one would inflate the daily cap and the funnel with a
         // duplicate that never executed.
-        if (!started.idempotentHit) {
+        if (!started.idempotentHit && !started.joinedExisting) {
             runCatching {
                 betaRepo?.incrementDailyRuns(ctx.workspaceId,
                     isSimulation = body.executionMode == "simulation")

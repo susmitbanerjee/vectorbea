@@ -342,6 +342,12 @@ class EventTriggerRunner(
                     /* The delivery id, so a redelivery that somehow passes the
                        ledger still cannot produce a second run. */
                     idempotencyKey = "event:$deliveryId",
+                    /* The THING, not the message. The ledger above already stops
+                       one message running twice; this stops two messages about
+                       the same service starting two runs. */
+                    dedupKey = PayloadMapper.stringAt(body, trigger.runDedupPath)
+                        ?.takeIf { it.isNotBlank() },
+                    priority = trigger.runPriority,
                     reason = "Message from ${trigger.name}",
                 ))
                 triggers.finishDelivery(deliveryId, "accepted", null, started.runId)

@@ -287,12 +287,13 @@ const STEPS: ModalStep[] = [
 export interface CreateToolDialogProps {
   open: boolean;
   presetConnectionId?: string | null;
+  presetHttpSpec?: http.SpecDocument;
   onOpenChange: (open: boolean) => void;
   /** Called after a successful create, with the persisted tool. */
   onCreated?: (tool: contracts.Tool) => void;
 }
 
-export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnectionId }: CreateToolDialogProps) {
+export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnectionId, presetHttpSpec }: CreateToolDialogProps) {
   const api = useApi();
   const scope = useScope();
   const queryClient = useQueryClient();
@@ -305,7 +306,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [type, setType] = React.useState<ToolType>("http");
-  const [httpSpec, setHttpSpec] = React.useState<http.SpecDocument>(http.emptySpec);
+  const [httpSpec, setHttpSpec] = React.useState<http.SpecDocument>(presetHttpSpec ?? http.emptySpec);
   const [connectionId, setConnectionId] = React.useState<string | null>(presetConnectionId ?? null);
 
   const [method, setMethod] = React.useState<string>("GET");
@@ -456,10 +457,10 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
      provider — a Slack operation on a Gmail connection would post a request
      Gmail has never heard of. */
   React.useEffect(() => {
-    setOperationId(null);
+    setOperationId(presetHttpSpec ? CUSTOM_REQUEST : null);
     setOperationValues({});
     setBindings({});
-  }, [connectionId]);
+  }, [connectionId, presetHttpSpec]);
 
   /* Choosing an operation seeds the request it issues. The method and path are
      the vendor's, not the operator's, so they are set rather than asked for. */

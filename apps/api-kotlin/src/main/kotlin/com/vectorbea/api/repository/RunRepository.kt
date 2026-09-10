@@ -15,6 +15,30 @@ data class CreateRunRequest(
     val triggerType: String,
     val inputJson: String = "{}",
     val idempotencyKey: String? = null,
+    /**
+     * At most one LIVE run per (workspace, workflow, key).
+     *
+     * A different question from [idempotencyKey], and the difference is at the
+     * boundary: an idempotency key asks "is this the same request" and expires
+     * on a clock; this asks "is something already working on this thing" and
+     * lives exactly as long as the run does. Enforced by a partial unique index
+     * (V068), not by a check here — two alerts for one service in the same
+     * second is the normal case, and a read-then-write loses that race.
+     */
+    val dedupKey: String? = null,
+    /**
+     * The self-hosted runner pool this run must execute in, copied from the
+     * workflow at trigger.
+     *
+     * ── STAMPED, NOT JOINED ──────────────────────────────────────
+     * So that unpinning a workflow does not retroactively move runs that are
+     * already queued out of the customer's network, and so the platform claim
+     * reads one column rather than joining `workflows` on its hottest query.
+     *
+     * Non-null means the platform's own workers will NOT claim it — see the
+     * `runner_pool_id IS NULL` predicate in `PostgresClaim`.
+     */
+    val runnerPoolId: java.util.UUID? = null,
     /** True for "Debug Run" — instructs the worker to capture per-node debug snapshots. */
     val debugMode: Boolean = false,
     /**
@@ -69,6 +93,27 @@ data class AgentRun(
     val nodeTotal: Int? = null,
     val nodeCommitted: Int = 0,
     val ribbonJson: String = "[]",
+    /** The live-singleton key this run holds, or null. See [CreateRunRequest.dedupKey]. */
+    val dedupKey: String? = null,
+    /** The self-hosted runner pool this run executes in, if any. */
+    val runnerPoolId: java.util.UUID? = null,
+    /**
+     * True when this run's payloads never left the customer's network.
+     *
+     * Read by the run detail and the Debug tab so they can SAY so. Without it
+     * they render an empty panel, which reads as a broken product rather than
+     * as the policy the customer deliberately bought.
+     */
+    val payloadsWithheld: Boolean = false,
+    /**
+     * Whether the run's result reached where it was meant to go.
+     *
+     * `none` | `pending` | `delivered` | `partial` | `failed`. Deliberately NOT
+     * folded into [status]: a run that produced the right answer and could not
+     * deliver it did not fail — its output is correct and retrying the RUN would
+     * re-execute every side effect. Two facts, two columns. See docs/RESULT-DELIVERY.md.
+     */
+    val deliveryStatus: String = "none",
     /** Populated by list(); null for point reads and newly-created rows. */
     val workflowName: String? = null,
     val environmentName: String? = null,
@@ -84,7 +129,8 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         current_step_id, current_agent_id, idempotency_key,
         started_at, completed_at, duration_ms, token_count, estimated_cost,
         created_at, updated_at, debug_mode,
-        node_total, node_committed, ribbon_json
+        node_total, node_committed, ribbon_json, delivery_status, dedup_key,
+        runner_pool_id, COALESCE(payloads_withheld, FALSE) AS payloads_withheld
     """.trimIndent()
 
     /**
@@ -120,8 +166,9 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             (workspace_id, environment_id, workflow_id, workflow_version_id,
              status, trigger_type, input_json, idempotency_key, debug_mode,
              execution_class, fair_vtime, priority,
-             execution_mode_kind, source_run_id, replay_until_node)
-        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?)
+             execution_mode_kind, source_run_id, replay_until_node, dedup_key,
+             runner_pool_id, payloads_withheld)
+        VALUES (?, ?, ?, ?, 'queued', ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING $cols
         """.trimIndent(),
         {
@@ -139,6 +186,15 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             setString(12, req.executionModeKind)
             setUuidOrNull(13, req.sourceRunId)
             setString(14, req.replayUntilNode)
+            setString(15, req.dedupKey)
+            setUuidOrNull(16, req.runnerPoolId)
+            /*
+             * Set at CREATION, not when the run finishes. The Debug tab has to
+             * be able to say "payloads are withheld for this run" while it is
+             * still executing — which is exactly when somebody opens it to find
+             * out why they cannot see anything.
+             */
+            setBoolean(17, req.runnerPoolId != null)
         },
         ::mapRow,
     )
@@ -266,5 +322,14 @@ open class RunRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         nodeTotal = (rs.getObject("node_total") as? Number)?.toInt(),
         nodeCommitted = rs.getInt("node_committed"),
         ribbonJson = rs.getJsonbString("ribbon_json"),
+        /* `runCatching` for the same reason the other optional columns have it:
+           several queries in this repository project a narrower column list and
+           share this mapper. A missing column there means "not selected". */
+        deliveryStatus = runCatching { rs.getString("delivery_status") }.getOrNull() ?: "none",
+        dedupKey = runCatching { rs.getString("dedup_key") }.getOrNull(),
+        runnerPoolId = runCatching {
+            rs.getObject("runner_pool_id", java.util.UUID::class.java)
+        }.getOrNull(),
+        payloadsWithheld = runCatching { rs.getBoolean("payloads_withheld") }.getOrDefault(false),
     )
 }

@@ -38,6 +38,17 @@ data class Webhook(
     val eventTypes: List<String>,
     val dedupeHeader: String?,
     val dedupePath: String?,
+    /**
+     * The path naming the THING the run works, not the message that reported it.
+     *
+     * `dedupePath` above deduplicates a REDELIVERY of one message. This
+     * deduplicates the WORK: two different alerts about the same service carry
+     * two different event ids, pass that check, and would otherwise start two
+     * incident runs. What happens instead is `workflows.dedup_policy`.
+     */
+    val runDedupPath: String? = null,
+    /** 0–100, or null to take the workflow's default. */
+    val runPriority: Short? = null,
     val enabled: Boolean,
     val createdAt: Instant,
 )
@@ -130,14 +141,16 @@ open class WebhookRepository(dataSource: DataSource) : BaseRepository(dataSource
         eventTypes: List<String>,
         dedupeHeader: String?,
         dedupePath: String?,
+        runDedupPath: String?,
+        runPriority: Short?,
         createdByUserId: UUID?,
     ): Webhook = executeReturning(
         """INSERT INTO workflow_webhooks
              (workspace_id, environment_id, workflow_id, name, token, signature_scheme,
               signing_secret_ref, signature_header, timestamp_header, tolerance_seconds,
               input_mapping, event_type_path, event_types, dedupe_header, dedupe_path,
-              created_by_user_id)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?)
+              run_dedup_path, run_priority, created_by_user_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?::jsonb,?,?,?,?,?,?,?)
            RETURNING $COLUMNS""",
         {
             setUuid(1, workspaceId); setUuid(2, environmentId); setUuid(3, workflowId)
@@ -148,7 +161,10 @@ open class WebhookRepository(dataSource: DataSource) : BaseRepository(dataSource
             setString(12, eventTypePath)
             setArray(13, connectionArray(eventTypes))
             setString(14, dedupeHeader); setString(15, dedupePath)
-            setUuidOrNull(16, createdByUserId)
+            setString(16, runDedupPath)
+            if (runPriority != null) setShort(17, runPriority)
+            else setNull(17, java.sql.Types.SMALLINT)
+            setUuidOrNull(18, createdByUserId)
         }, ::mapWebhook)
 
     open fun setEnabled(id: UUID, workspaceId: UUID, enabled: Boolean): Boolean = execute(
@@ -265,6 +281,12 @@ open class WebhookRepository(dataSource: DataSource) : BaseRepository(dataSource
         eventTypes = readTextArray(rs, "event_types"),
         dedupeHeader = rs.getString("dedupe_header"),
         dedupePath = rs.getString("dedupe_path"),
+        /* Tolerated missing: the API and the worker deploy independently, and a
+           row read before V068 lands simply has no run-level dedup. */
+        runDedupPath = runCatching { rs.getString("run_dedup_path") }.getOrNull(),
+        runPriority = runCatching {
+            rs.getShort("run_priority").takeIf { !rs.wasNull() }
+        }.getOrNull(),
         enabled = rs.getBoolean("enabled"),
         createdAt = rs.instantOrNull("created_at") ?: Instant.EPOCH,
     )
@@ -319,7 +341,7 @@ private const val COLUMNS = """
     id, workspace_id, environment_id, workflow_id, name, token, signature_scheme,
     signing_secret_ref, signature_header, timestamp_header, tolerance_seconds,
     input_mapping, event_type_path, event_types, dedupe_header, dedupe_path,
-    enabled, created_at"""
+    run_dedup_path, run_priority, enabled, created_at"""
 
 private const val DELIVERY_COLUMNS = """
     id, webhook_id, workspace_id, received_at, outcome, detail, headers_json,

@@ -369,6 +369,16 @@ export interface VectorbeaClient {
      * the event log instead.
      */
     waits(id: string, scope?: Scope, options?: RequestOptions): Promise<Paged<contracts.RunWait>>;
+    /**
+     * `GET /api/runs/:id/deliveries` — where the result went.
+     *
+     * Read on every finished run, not only failed ones: "delivered" is the
+     * answer somebody is looking for as often as "not delivered".
+     */
+    deliveries(id: string, scope?: Scope, options?: RequestOptions):
+        Promise<{ items: contracts.RunDelivery[]; total: number; deliveryStatus: string }>;
+    /** `POST /api/deliveries/:id/redeliver` — try again, with the same key. */
+    redeliver(deliveryId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     purgeQueued(scope?: Scope, options?: RequestOptions): Promise<{ purged: number; status: string }>;
     cancel(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     retry(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
@@ -818,6 +828,16 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<Paged<contracts.RunWait>>(
           `/api/runs/${id}/waits`,
           req(scope, contracts.runWaitPage, options),
+        ),
+      deliveries: (id, scope, options) =>
+        call<{ items: contracts.RunDelivery[]; total: number; deliveryStatus: string }>(
+          `/api/runs/${id}/deliveries`,
+          req(scope, contracts.runDeliveryList, options),
+        ),
+      redeliver: (deliveryId, scope, options) =>
+        call<unknown>(
+          `/api/deliveries/${deliveryId}/redeliver`,
+          { ...req(scope, undefined, options), method: "POST" },
         ),
       purgeQueued: (scope, options) =>
         call<{ purged: number; status: string }>("/api/runs/purge-queued", {

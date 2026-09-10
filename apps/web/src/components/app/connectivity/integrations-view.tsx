@@ -16,6 +16,7 @@ import { ProviderLogo } from "~/components/ui/provider-logo";
 import { getConnections } from "@/lib/repository";
 import { CreateConnectionDialog } from "./create-connection-dialog";
 import { HttpClientDialog } from "./http-client-dialog";
+import type { SpecDocument } from "~/lib/tools/http-spec";
 import { CreateToolDialog } from "../registry/create-tool-dialog";
 import { ImportSpecDialog } from "../registry/import-spec-dialog";
 import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
@@ -42,6 +43,7 @@ export function IntegrationsView() {
   const { canBuild } = useWorkspaceRole();
   const [httpAction, setHttpAction] = React.useState<"test" | "create" | "import" | null>(null);
   const [httpConnectionId, setHttpConnectionId] = React.useState<string | null>(null);
+  const [httpSpecDraft, setHttpSpecDraft] = React.useState<SpecDocument | undefined>();
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -171,6 +173,7 @@ export function IntegrationsView() {
           setHttpConnectionId(existing.length === 1 ? existing[0]!.id : null);
           setParams({ integration: null });
           setHttpAction(action);
+          setHttpSpecDraft(undefined);
         }}
       />
       <CreateConnectionDialog
@@ -183,9 +186,11 @@ export function IntegrationsView() {
 
         }}
       />
-      {httpAction === "test" || connectTo?.id === "http" ? <HttpClientDialog onClose={() => { setHttpAction(null); setParams({ connect: null }); }} /> : null}
+      {httpAction === "test" || connectTo?.id === "http" ? <HttpClientDialog onCreateTool={(spec) => {
+        setHttpSpecDraft(spec); setHttpAction("create"); setParams({ connect: null });
+      }} onClose={() => { setHttpAction(null); setParams({ connect: null }); }} /> : null}
       {httpAction === "create" ? <CreateToolDialog
-        open presetConnectionId={httpConnectionId}
+        open presetConnectionId={httpConnectionId} presetHttpSpec={httpSpecDraft}
         onOpenChange={(next) => { if (!next) setHttpAction(null); }}
       /> : null}
       {httpAction === "import" ? <ImportSpecDialog

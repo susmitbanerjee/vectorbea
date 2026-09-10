@@ -125,6 +125,21 @@ object RbacGuard {
          * workflow must not be able to run one by asking in JSON-RPC.
          */
         "POST /api/mcp"                              to Permission.WORKFLOW_RUN,
+
+        /*
+         * Where a workspace's results go is a settings decision — it names an
+         * external endpoint and stores a credential — so it sits with workspace
+         * administration rather than with workflow editing.
+         *
+         * Redelivery is WORKFLOW_RUN: it sends a customer's data to a third
+         * party, which is closer to running something than to reading it.
+         */
+        "POST /api/delivery-targets"                 to Permission.WORKSPACE_WRITE,
+        "DELETE /api/delivery-targets/:id"           to Permission.WORKSPACE_WRITE,
+        "POST /api/delivery-targets/:id/enable"      to Permission.WORKSPACE_WRITE,
+        "POST /api/delivery-targets/:id/disable"     to Permission.WORKSPACE_WRITE,
+        "POST /api/delivery-targets/:id/rotate-secret" to Permission.WORKSPACE_WRITE,
+        "POST /api/deliveries/:id/redeliver"         to Permission.WORKFLOW_RUN,
         "DELETE /api/api-keys/:id"                   to Permission.WORKSPACE_WRITE,
         "PUT /api/workspaces/member-budget/:userId"  to Permission.WORKSPACE_WRITE,
 
@@ -159,6 +174,16 @@ object RbacGuard {
         "PATCH /api/connections/:id"                 to Permission.CONNECTION_WRITE,
         "DELETE /api/connections/:id"                to Permission.CONNECTION_DELETE,
         "POST /api/connections/:id/rotate-secret"    to Permission.SECRET_WRITE,
+        /* A negotiated rate moves every cost figure the connection produces, and
+           budget ceilings are measured against those figures — so setting one is
+           a connection write, not a read dressed up as configuration. */
+        "PUT /api/connections/:id/prices"            to Permission.CONNECTION_WRITE,
+        /* A runner pool decides where a workflow's data is allowed to execute,
+           and a token is a credential for a machine outside our network. Both
+           are administrative, not authoring. */
+        "POST /api/runner-pools"                     to Permission.CONNECTION_WRITE,
+        "POST /api/runner-pools/:id/tokens"          to Permission.SECRET_WRITE,
+        "DELETE /api/connections/:id/prices/:priceId" to Permission.CONNECTION_WRITE,
         // Testing reaches a third party with the workspace's credentials, so it
         // is a connection act rather than a read — but it changes nothing, so
         // it sits at CONNECTION_TEST rather than WRITE.

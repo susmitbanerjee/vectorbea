@@ -123,6 +123,25 @@ class RuntimeContext(
      * fan-out eat the reserve it exists to protect.
      */
     val executionLane: com.vectorbea.worker.queue.WorkerJobType? = null,
+    /**
+     * Whether somebody has asked for this run to stop.
+     *
+     * ── WHY IT LIVES HERE RATHER THAN IN A PARAMETER ──────────────────
+     * `WorkflowRuntime.runDag` already took a `cancellationCheck` and checked it
+     * between nodes. That is the right granularity for a node that finishes in
+     * one bounded operation, and completely wrong for an agent loop: a thirty
+     * iteration loop is thirty LLM calls inside ONE node, so a cancelled
+     * incident kept paying for a model to reason about it until the loop chose
+     * to stop on its own.
+     *
+     * Threading a parameter down four signatures to reach the brain would have
+     * meant four places to forget it. This object is the one thing every layer
+     * already receives — the same argument [tickDeadlineAtMs] makes.
+     *
+     * Defaults to "nobody asked", so every existing construction site and every
+     * test is unchanged, and a context built without it simply never cancels.
+     */
+    val cancellationCheck: () -> Boolean = { false },
 ) {
     /** Number of attempts seen so far per node — used to tag retry attempts in debug snapshots. */
     private val nodeAttempts: MutableMap<String, Int> = ConcurrentHashMap()

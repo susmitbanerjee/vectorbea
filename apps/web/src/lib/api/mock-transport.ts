@@ -759,6 +759,13 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
      run detail page is where the populated state lives. */
   ["GET", "/api/runs/:id/waits", (_params, init) => paged([], init)],
 
+  /* Where a run's result went. Empty for every fixture run and correctly so:
+     none of them has a delivery target, and inventing one would put an
+     "Undelivered" badge on rows that were never configured to deliver. */
+  ["GET", "/api/runs/:id/deliveries", () => ({
+    items: [], total: 0, deliveryStatus: "none",
+  })],
+
   [
     "GET",
     "/api/workflows",
