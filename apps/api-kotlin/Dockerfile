@@ -39,14 +39,13 @@ RUN apk add --no-cache curl unzip && \
     rm /tmp/gradle.zip
 ENV PATH="/opt/gradle/bin:${PATH}"
 
-# Limit JVM heap for Gradle + Kotlin compiler to stay within Railway build limits.
-# --no-daemon already prevents a second JVM, but the single Gradle JVM still needs
-# explicit caps or it will try to use ~25% of total RAM and OOM-kill silently.
-ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false"
+# Compile in the Gradle JVM with enough heap for a full API compilation.
+# Kotlin execution settings are project properties (-P on the build below).
+ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx2g -Dorg.gradle.daemon=false"
 
 # Copy build scripts first — maximises Docker layer cache.
 # Source code changes won't invalidate the dependency resolution layer.
-COPY apps/api-kotlin/settings.gradle.kts apps/api-kotlin/build.gradle.kts ./
+COPY apps/api-kotlin/settings.gradle.kts apps/api-kotlin/build.gradle.kts apps/api-kotlin/gradle.properties ./
 COPY packages/observability-kotlin/settings.gradle.kts packages/observability-kotlin/build.gradle.kts /workspace/packages/observability-kotlin/
 COPY packages/graph-kotlin/settings.gradle.kts packages/graph-kotlin/build.gradle.kts /workspace/packages/graph-kotlin/
 
@@ -60,9 +59,14 @@ COPY apps/api-kotlin/src ./src
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/crypto /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/crypto
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract
+# Keep these shared source roots aligned with sourceSets.main in build.gradle.kts.
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/durable/wait /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/durable/wait
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/delivery /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/delivery
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging
 COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
 COPY packages/graph-kotlin/src /workspace/packages/graph-kotlin/src
-RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info --stacktrace 2>&1
+RUN gradle fatJar --no-daemon --console=plain --max-workers=1 -Pkotlin.compiler.execution.strategy=in-process -Pkotlin.incremental=false --info --stacktrace 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime
