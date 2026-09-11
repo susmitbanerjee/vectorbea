@@ -1,4 +1,5 @@
 import type { PoolConfig } from "pg";
+import { checkServerIdentity } from "node:tls";
 
 /** Deployment configuration only: never select database trust from request headers. */
 export function appDatabaseConnectionOptions(
@@ -21,6 +22,7 @@ export function appDatabaseConnectionOptions(
   if (!ca) return unchanged;
 
   const url = new URL(connectionString);
+  const databaseHost = url.hostname.replace(/^\[|\]$/g, "");
   // pg's URL parser replaces explicit ssl options when these parameters exist.
   // Remove them only for staging with an explicitly supplied trust certificate.
   for (const key of ["sslmode", "sslcert", "sslkey", "sslrootcert", "ssl"]) {
@@ -28,6 +30,13 @@ export function appDatabaseConnectionOptions(
   }
   return {
     connectionString: url.toString(),
-    ssl: { ca, rejectUnauthorized: true },
+    ssl: {
+      ca,
+      rejectUnauthorized: true,
+      // pg upgrades an existing socket and omits servername for IP literals.
+      // Node can then verify "localhost". Keep normal identity validation,
+      // explicitly checking the actual database host (including IP SANs).
+      checkServerIdentity: (_hostname, cert) => checkServerIdentity(databaseHost, cert),
+    },
   };
 }
