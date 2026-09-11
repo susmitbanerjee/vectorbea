@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+import { verifyToken } from "@/lib/auth/jwt";
+import { AuditAction, recordUserScopedAuditEvent } from "@/lib/server/audit-write";
 import {
   getAuthenticatedUserFromCookies,
   getPostLoginRedirectForUser,
@@ -52,7 +54,26 @@ export async function GET() {
   });
 }
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  /*
+   * Read the session BEFORE clearing it — after the cookie is gone there is no
+   * identity to file the entry against, and "who signed out" is half of the
+   * session-duration question an access review asks.
+   *
+   * Best-effort in both directions: a sign-out is never refused because the
+   * audit write failed, and an unauthenticated DELETE records nothing rather
+   * than inventing an actor.
+   */
+  const token = request.cookies.get(AUTH_COOKIE_NAME)?.value;
+  const payload = token ? await verifyToken(token) : null;
+  if (payload?.sub) {
+    await recordUserScopedAuditEvent(payload.sub, {
+      action: AuditAction.LOGOUT,
+      targetType: "session",
+      request,
+    });
+  }
+
   const expired = { httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", maxAge: 0 };
   const res = NextResponse.json({ authenticated: false });
   res.cookies.set(AUTH_COOKIE_NAME, "", expired);

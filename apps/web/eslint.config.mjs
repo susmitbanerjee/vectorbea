@@ -178,7 +178,7 @@ const config = [
       "src/components/app/ribbon/checkpoint-ribbon.tsx",
       "src/components/app/ribbon/geometry.ts",
       "src/components/app/run-detail/canvas-mirror.tsx",
-      "src/components/app/run-detail/compare-and-events.tsx",
+      "src/components/app/run-detail/compare.tsx",
       "src/components/app/run-detail/inspector.tsx",
       "src/components/app/run-detail/log-stream.tsx",
       "src/components/app/run-detail/recovery-card.tsx",

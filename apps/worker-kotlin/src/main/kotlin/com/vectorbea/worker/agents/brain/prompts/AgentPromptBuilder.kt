@@ -75,6 +75,20 @@ object AgentPromptBuilder {
          * cannot use spends iterations discovering that.
          */
         roster: List<AgentDescriptor> = emptyList(),
+        /**
+         * The composed skills block, or empty when the agent holds none.
+         *
+         * A STRING rather than a list of skills, deliberately: composing it is
+         * `SkillComposer`'s job, it is bounded and ordered and it records what it
+         * had to cut, and none of that belongs in a prompt renderer. This builder
+         * decides WHERE it goes; the composer decides what it says.
+         *
+         * Empty when the feature flag is off, when the agent holds no skills, or
+         * when every granted skill was dropped because its tools were revoked —
+         * three different situations that all correctly render nothing, and all
+         * three of which the trace tells apart.
+         */
+        skillsBlock: String = "",
     ): String {
         /*
          * ── WHAT THE MODEL IS TOLD ABOUT EACH TOOL ──────────────────────────
@@ -140,10 +154,25 @@ object AgentPromptBuilder {
         val rosterSection = if (roster.isEmpty()) "" else
             "\n\nYOUR TEAM ROSTER (the ONLY agents you may DELEGATE or HANDOFF to):\n$rosterJson"
 
+        /*
+         * ── AFTER THE AGENT'S OWN INSTRUCTIONS, BEFORE EVERYTHING ELSE ──────
+         *
+         * The position is the precedence claim, and it is not configurable. The
+         * agent's instructions are WHO IT IS; a skill is HOW it does one kind of
+         * work; an observation is WHAT HAPPENED. Putting a skill above the
+         * instructions would let a shared bundle override the agent somebody
+         * configured; putting it below the observations would let a tool result
+         * outrank the method.
+         *
+         * Observations live in the USER prompt, which is why "before
+         * observations" is satisfied by being anywhere in here.
+         */
+        val skillsSection = if (skillsBlock.isBlank()) "" else "\n\n$skillsBlock"
+
         return """You are ${config.agentName}. ${config.role ?: ""}
 
 INSTRUCTIONS:
-${config.instructions}
+${config.instructions}$skillsSection
 
 YOUR TASK will be given in each user message.
 

@@ -270,6 +270,12 @@ class AgentHarness(
             iterations = result.iterationsUsed,
             tokens = result.tokensUsed,
             activationId = activation?.id,
+            /* §5 of the skills design: which skills were active on an activation
+               is a span attribute, so a behaviour change months later is
+               attributable to a skill VERSION rather than to the agent. The loop
+               is the only thing that knows what was actually composed — a grant
+               row does not, because a skill can be granted and then dropped. */
+            skillAttributes = result.skillAttributes,
         )
 
         // ── Record the outcome on the activation ─────────────────────────────
@@ -332,6 +338,12 @@ class AgentHarness(
         iterations: Int,
         tokens: Int,
         activationId: UUID? = null,
+        /**
+         * The skills this activation composed. Empty on the throw path, where the
+         * loop did not get far enough to say — which is honest: an activation
+         * that died before composing had none.
+         */
+        skillAttributes: Map<String, Any> = emptyMap(),
     ) {
         if (tracer == null || activationSpan == null) return
         runCatching {
@@ -358,7 +370,7 @@ class AgentHarness(
                    answer because it was handed a tenth of what it asked for looks,
                    in every other artefact, exactly like an agent that is bad at
                    its job — the clamp is the one thing that tells them apart. */
-                attributesJson = activationAttributes(req, iterations, tokens, activationId),
+                attributesJson = activationAttributes(req, iterations, tokens, activationId, skillAttributes),
                 failureClass = failureClass,
             )
             tracer.bindNode(req.stepId, restoreTo)
@@ -378,12 +390,17 @@ class AgentHarness(
         iterations: Int,
         tokens: Int,
         activationId: UUID?,
+        skillAttributes: Map<String, Any> = emptyMap(),
     ): String {
         val attrs = buildMap<String, Any> {
             put("agent_id", req.agentId.toString())
             put("iterations", iterations)
             put("tokens", tokens)
             activationId?.let { id -> putAll(ledger?.spanAttributes(id) ?: emptyMap()) }
+            /* Last, so a future clamp key can never quietly shadow a skills key —
+               and if one ever collides, the collision is visible here rather than
+               in whichever map happened to be merged second. */
+            putAll(skillAttributes)
         }
         return runCatching { mapper.writeValueAsString(attrs) }.getOrDefault("{}")
     }

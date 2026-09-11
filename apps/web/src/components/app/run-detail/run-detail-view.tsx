@@ -18,7 +18,7 @@ import { CanvasMirror } from "./canvas-mirror";
 import { Inspector } from "./inspector";
 import { LogStream } from "./log-stream";
 import type { RunStreamState } from "~/lib/api/run-stream";
-import { CompareView, EventHistory } from "./compare-and-events";
+import { CompareView } from "./compare";
 import { diagnoseRun } from "./diagnose-run";
 import { ApprovalGateIcon } from "~/components/icons/domain";
 import type { contracts } from "@vectorbea/shared";
@@ -158,7 +158,6 @@ function RunDetailBody({
   );
 
   const [comparing, setComparing] = React.useState(false);
-  const [showEvents, setShowEvents] = React.useState(false);
   const [logFullscreen, setLogFullscreen] = React.useState(false);
   const [logHeight, setLogHeight] = React.useState(220);
   const [leftWidth, setLeftWidth] = React.useState(272);
@@ -333,23 +332,6 @@ function RunDetailBody({
         </div>
       )}
 
-      {/* ── Event history ──────────────────────────────────────────────────── */}
-      {showEvents ? (
-        <EventHistory run={run} />
-      ) : (
-        <button
-          onClick={() => setShowEvents(true)}
-          className={cn(
-            "border-subtle bg-surface-raised hover:bg-surface-hover w-full rounded-lg border px-3 py-2 text-left",
-            "transition-colors duration-fast outline-none focus-visible:focus-ring",
-          )}
-        >
-          <Text variant="body-sm" tone="primary" className="font-medium">Event history</Text>
-          <Text variant="caption" tone="muted" className="ml-2">
-            the raw event-sourced log every view on this page is derived from
-          </Text>
-        </button>
-      )}
     </PageContainer>
   );
 }

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
 
@@ -32,6 +33,26 @@ vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
 }));
 
+/* The audit writer talks to Postgres. What these tests pin is that the route
+   CALLS it with the right actor and action, which is the half that was missing
+   — the writer itself is exercised against a real database elsewhere. */
+const recordUserScoped = vi.fn();
+vi.mock("@/lib/server/audit-write", () => ({
+  AuditAction: { LOGIN: "auth.login", LOGOUT: "auth.logout" },
+  recordUserScopedAuditEvent: (userId: string, event: { action: string }) =>
+    recordUserScoped(userId, event),
+}));
+
+const SUBJECT = "11111111-1111-4111-8111-111111111111";
+
+/* The token is verified, not minted, so what matters here is who it resolves to
+   — mocking the verifier keeps this a test of the ROUTE rather than of HS256,
+   and avoids needing a JWT_SECRET in the test environment. */
+const verify = vi.fn();
+vi.mock("@/lib/auth/jwt", () => ({
+  verifyToken: (token: string) => verify(token),
+}));
+
 const { GET, DELETE } = await import("@/app/api/auth/session/route");
 
 beforeEach(() => {
@@ -40,9 +61,21 @@ beforeEach(() => {
   profile.mockReset();
 });
 
+/**
+ * A request with no session cookie.
+ *
+ * The route reads the cookie before clearing it so the sign-out can be recorded
+ * against whoever was signed in — see `auth.logout` in the route. A visitor with
+ * no cookie must still get a clean sign-out, and must produce no audit row,
+ * because there is no actor to name.
+ */
+function anonymousRequest(): NextRequest {
+  return new NextRequest("http://localhost/api/auth/session", { method: "DELETE" });
+}
+
 describe("DELETE /api/auth/session", () => {
   it("expires the session cookie", async () => {
-    const response = await DELETE();
+    const response = await DELETE(anonymousRequest());
 
     const written = response.cookies.get(AUTH_COOKIE_NAME);
     expect(written?.value).toBe("");
@@ -53,6 +86,30 @@ describe("DELETE /api/auth/session", () => {
     // Path matters — a cookie cleared at a narrower path leaves the original
     // in place and the user stays signed in.
     expect(written?.path).toBe("/");
+  });
+
+  it("records the sign-out against the person who was signed in", async () => {
+    /* The gap this closes: `auth.logout` was a named audit action with no
+       caller, so a session ending left no trace and "how long was this account
+       signed in" had no answer. */
+    recordUserScoped.mockClear();
+    verify.mockResolvedValueOnce({ sub: SUBJECT, email: "someone@example.test" });
+    const request = new NextRequest("http://localhost/api/auth/session", { method: "DELETE" });
+    request.cookies.set(AUTH_COOKIE_NAME, "a-valid-session-token");
+
+    await DELETE(request);
+
+    expect(recordUserScoped).toHaveBeenCalledTimes(1);
+    const [userId, event] = recordUserScoped.mock.calls[0];
+    expect(userId).toBe(SUBJECT);
+    expect(event.action).toBe("auth.logout");
+  });
+
+  it("records nothing for a visitor with no session", async () => {
+    recordUserScoped.mockClear();
+    verify.mockResolvedValueOnce(null);
+    await DELETE(anonymousRequest());
+    expect(recordUserScoped).not.toHaveBeenCalled();
   });
 });
 

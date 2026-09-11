@@ -155,6 +155,21 @@ class AgentBrainRunner(
      */
     private val contextAssemblyEnabled: Boolean =
         AgentPromptBuilder.CONTEXT_ASSEMBLY_ENABLED,
+    /**
+     * The agent's granted skills, loaded per activation.
+     *
+     * Injected rather than constructed inline for the reason every other
+     * collaborator here is: a test drives both the flag-on and flag-off paths in
+     * one JVM, and JUnit cannot portably mutate process environment.
+     *
+     * The default reads AGENT_SKILLS_ENABLED and is OFF, so the loop is
+     * byte-for-byte what it was until somebody turns it on.
+     */
+    private val skillLoader: com.vectorbea.worker.agents.skills.SkillLoader =
+        com.vectorbea.worker.agents.skills.SkillLoader(dataSource),
+    /** Where the composition is written for the Debug tab. See the class note there. */
+    private val skillRecorder: com.vectorbea.worker.agents.skills.ActivationSkillRecorder =
+        com.vectorbea.worker.agents.skills.ActivationSkillRecorder(dataSource),
 ) {
     private val log = logger()
     private val mapper = jacksonObjectMapper()
@@ -621,6 +636,15 @@ class AgentBrainRunner(
                bucket produced children that were not — and delegation depth is
                the multiplier the bucket exists to bound. */
             capacity = capacity,
+            /* Passed through for the same reason as every other collaborator: the
+               child composes ITS OWN grants — `load` is keyed on the child's agent
+               id and checked against the child's tools — but it must do so with the
+               loader this runner was built with. Rebuilt from the default here, a
+               child would read the process environment and silently ignore a flag
+               the parent was constructed with, which is exactly how the capacity
+               bucket came to meter parents and not children. */
+            skillLoader = skillLoader,
+            skillRecorder = skillRecorder,
         )
 
         val result = child.run(childConfig, ctx)
@@ -892,6 +916,20 @@ class AgentBrainRunner(
          * failure — which is exactly what ASK_APPROVAL used to do.
          */
         val wait: NodeResult.Waiting? = null,
+        /**
+         * Which skills this activation ran with, and what composing them cost.
+         *
+         * Carried out of the loop for the same reason [handedOff] is: the harness
+         * cannot infer it. The harness owns the ACTIVATION span, §5 says the
+         * active skills belong on it, and the loop is the only thing that knows
+         * what was actually composed — a grant row does not, because a skill can
+         * be granted and then dropped under budget pressure or because its tools
+         * were revoked.
+         *
+         * Empty whenever the feature is off, which is also what an activation
+         * with no skills records: nothing.
+         */
+        val skillAttributes: Map<String, Any> = emptyMap(),
     )
 
     suspend fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
@@ -1074,6 +1112,22 @@ class AgentBrainRunner(
            closed it are unaffected. */
         var openIteration: IterationSpan? = null
 
+        /*
+         * ── WHICH SKILLS WERE ACTIVE, CARRIED OUT TO THE ACTIVATION SPAN ─────
+         *
+         * §5: a behaviour change has to be attributable to a skill VERSION. The
+         * activation span is where that belongs — it is the unit a reader opens
+         * when asking "what was this agent working with" — and the harness owns
+         * that span, so the answer rides out on [RunResult].
+         *
+         * Also put on each iteration span, because an iteration is what a reader
+         * is looking at when they ask why THIS call went the way it did, and
+         * walking up to the activation to find out is a click they should not
+         * have to make.
+         */
+        var skillAttributes: Map<String, Any> = emptyMap()
+        var skillsRecorded = false
+
         try {
             while (!state.isDone) {
                 budget.iterationStarted()
@@ -1146,7 +1200,39 @@ class AgentBrainRunner(
 
                 // Build prompt and call LLM
                 val tools = loadAllowedToolDescriptors(config)
-                val systemPrompt = AgentPromptBuilder.buildSystemPrompt(config, tools, loadRoster(config))
+                /*
+                 * ── SKILLS, READ FRESH LIKE THE ROSTER AND THE TOOL LIST ─────
+                 *
+                 * Inside the loop rather than before it, for the reason stated on
+                 * `loadRoster`: a grant is POLICY, and an operator who revokes a
+                 * skill — or the tool a skill needs — mid-run is making a decision
+                 * that must take effect. The read costs one query per iteration,
+                 * the same as the two beside it.
+                 *
+                 * `grantedToolIds` is passed so the loader can drop a skill whose
+                 * tools were revoked since the grant was saved. That check is the
+                 * same `SkillGrant.check` the API ran at save time, from the same
+                 * module — two implementations would drift, and the drift would be
+                 * invisible: the form would call a grant fine and the runtime
+                 * would quietly disagree.
+                 */
+                val loadedSkills = skillLoader.load(config.agentId, config.workspaceId, config.allowedToolIds)
+                val composedSkills = skillLoader.compose(loadedSkills, teamLimits.maxContextChars)
+                skillAttributes = composedSkills.spanAttributes()
+                if (!skillsRecorded && composedSkills.outcomes.isNotEmpty()) {
+                    /* Once per activation, not once per iteration. The row is keyed
+                       so a repeat would be harmless, but a write per iteration is a
+                       write per iteration. */
+                    skillRecorder.record(
+                        runId = config.runId, workspaceId = config.workspaceId,
+                        agentId = config.agentId, stepId = config.stepId,
+                        activationId = config.activationId, composed = composedSkills,
+                    )
+                    skillsRecorded = true
+                }
+                val systemPrompt = AgentPromptBuilder.buildSystemPrompt(
+                    config, tools, loadRoster(config), composedSkills.text,
+                )
                 /* Flag off, `built.text` is byte-for-byte what buildUserPrompt has
                    always returned and `built.assembly` is null. On, the same
                    sections are assembled under a budget and every drop is named. */
@@ -1160,6 +1246,7 @@ class AgentBrainRunner(
                     enabled = contextAssemblyEnabled)
                 val userPrompt = built.text
                 built.assembly?.let { iterSpan?.contextAttributesJson = it.attributesJson() }
+                iterSpan?.skillAttributes = skillAttributes
                 built.assembly?.let { reportContextBudget(config, state, it) }
 
                 val llmResult = callLlm(config, systemPrompt, userPrompt, runtimeCtx)
@@ -1744,6 +1831,7 @@ class AgentBrainRunner(
             approvalMessage    = approvalMessage,
             handedOff          = handedOff,
             yieldedReason      = yieldedReason,
+            skillAttributes    = skillAttributes,
         )
     }
 
@@ -3299,16 +3387,52 @@ class AgentBrainRunner(
         @Volatile
         var contextAttributesJson: String? = null
 
+        /**
+         * Which skills this iteration's prompt carried, and what the budget did
+         * to them.
+         *
+         * Kept as a MAP beside [contextAttributesJson]'s string rather than as a
+         * second JSON string, because the span takes one attributes document and
+         * merging two JSON strings textually is the kind of thing that works
+         * until a skill slug contains a brace. Merged once, on close.
+         */
+        @Volatile
+        var skillAttributes: Map<String, Any> = emptyMap()
+
         fun close(status: String) {
             if (!closed.compareAndSet(false, true)) return
             runCatching {
                 tracer.close(
                     spanId, "iteration", "iteration $index", status,
                     stepId = stepId, iterationIndex = index,
-                    attributesJson = contextAttributesJson ?: "{}",
+                    attributesJson = mergedAttributes(),
                 )
                 tracer.bindNode(stepId, parentSpanId)
             }
+        }
+
+        /**
+         * The context bookkeeping and the skills bookkeeping, as one document.
+         *
+         * Falls back to whichever half exists. A failure to serialise yields the
+         * context half unchanged rather than nothing: losing the skills
+         * attributes degrades one answer, losing both degrades the answer this
+         * whole path exists to give.
+         */
+        private fun mergedAttributes(): String {
+            val ctx = contextAttributesJson
+            val skills = skillAttributes
+            if (skills.isEmpty()) return ctx ?: "{}"
+            return runCatching {
+                val m = jacksonObjectMapper()
+                val merged = linkedMapOf<String, Any?>()
+                if (ctx != null) {
+                    @Suppress("UNCHECKED_CAST")
+                    merged.putAll(m.readValue(ctx, Map::class.java) as Map<String, Any?>)
+                }
+                merged.putAll(skills)
+                m.writeValueAsString(merged)
+            }.getOrElse { ctx ?: "{}" }
         }
 
         companion object {

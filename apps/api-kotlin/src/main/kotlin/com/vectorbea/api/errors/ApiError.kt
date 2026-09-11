@@ -55,6 +55,24 @@ sealed class ApiError(
     class UnprocessableEntity(message: String) :
         ApiError(422, "UNPROCESSABLE_ENTITY", message)
 
+    /**
+     * 422 — a skill was granted to an agent that lacks the tools it requires.
+     *
+     * Distinct from [UnprocessableEntity] for the reason [details] exists at
+     * all: the form has to HIGHLIGHT the tools it is telling somebody to add,
+     * and a sentence is not addressable. `missing` is one entry per skill, each
+     * with the unmet requirements under it, so a row in the picker can be
+     * marked without the client parsing prose.
+     *
+     * Refused at save rather than at run because a skill's instructions say
+     * "call the video generation tool" — an agent holding that skill and not
+     * that tool does exactly what it was taught, is refused by the runtime
+     * (invariant 1, correctly), and presents as an agent that hallucinated a
+     * tool. See docs/SKILLS.md §4.
+     */
+    class SkillToolsMissing(message: String, missing: List<Map<String, Any?>>) :
+        ApiError(422, "SKILL_TOOLS_MISSING", message, mapOf("missing" to missing))
+
     /** 429 — too many requests */
     class TooManyRequests(
         message: String = "Rate limit exceeded",

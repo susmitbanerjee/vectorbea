@@ -554,122 +554,7 @@ function Interop() {
   );
 }
 
-/* ── 7 · Comparison ───────────────────────────────────────────────────────── */
-
-type Verdict = "yes" | "no" | "partial";
-
-const COMPARISON: { capability: string; cells: [Verdict, Verdict, Verdict, Verdict]; note?: string }[] = [
-  { capability: "Resumes from the last committed step", cells: ["no", "no", "partial", "yes"], note: "Workflow tools resume the task graph, not the agent's own mid-step state." },
-  { capability: "Per-step idempotency keys", cells: ["no", "no", "partial", "yes"] },
-  { capability: "Suspends for human approval, at no cost while waiting", cells: ["no", "partial", "partial", "yes"] },
-  {
-    capability: "Per-node token and cost accounting",
-    cells: ["no", "no", "no", "yes"],
-    /* AUDIT: tokens are COUNTED and the claim is sound. Cost is DERIVED from a
-       model-price table, and docs/COST-ATTRIBUTION-FINDINGS.md measures that
-       derivation as wrong by 1.8x-29x depending on the model string — which is
-       why V062 caps a member's usage in tokens rather than in cents. Selling
-       the cost figure without that sentence is selling a number we know to be
-       unreliable. */
-    note: "Tokens are counted. Cost is derived from a model-price table and is an estimate — usage caps are enforced in tokens for that reason.",
-  },
-  /* AUDIT: this claimed a clean "yes". Incidents carry a signature and the
-     screen groups on it, but the SERVER-SIDE group-by does not exist (GAP-04)
-     and the clustering band is behind `failureClustering`, which defaults to
-     off. Grouping client-side over a capped page silently UNDER-COUNTS, which
-     is the one thing a cluster count must not do — so the honest cell is
-     partial, and the note says which half is missing. */
-  {
-    capability: "Failure clustering by signature",
-    cells: ["no", "no", "partial", "partial"],
-    note: "Incidents carry a signature and the screen groups on it. The server-side group-by is not shipped yet, so we do not show a cluster count that could under-report.",
-  },
-  { capability: "Runs agents you already wrote", cells: ["yes", "yes", "no", "yes"] },
-  { capability: "Mature scheduling and backfill", cells: ["partial", "no", "yes", "partial"], note: "Airflow has a decade of scheduling behaviour we do not match yet." },
-  { capability: "Huge connector library", cells: ["no", "no", "yes", "partial"], note: "Zapier's directory is far larger. We cover the integrations agentic workflows actually reach for." },
-  { capability: "Runs entirely on your own machine, free", cells: ["yes", "yes", "partial", "partial"] },
-];
-
-const COLUMNS = ["Script + cron", "Agent frameworks", "Workflow tools", "Vectorbea"];
-
-function VerdictCell({ verdict, emphasis }: { verdict: Verdict; emphasis: boolean }) {
-  const label = verdict === "yes" ? "Yes" : verdict === "no" ? "No" : "Partial";
-  return (
-    <td className="px-3 py-3 text-center">
-      <span
-        className={cn(
-          "font-ui text-caption inline-flex items-center gap-1.5",
-          verdict === "yes" && emphasis && "text-status-success",
-          verdict === "yes" && !emphasis && "text-fg-secondary",
-          verdict === "partial" && "text-status-waiting",
-          verdict === "no" && "text-fg-disabled",
-        )}
-      >
-        <span aria-hidden="true" className="font-code">
-          {verdict === "yes" ? "●" : verdict === "partial" ? "◐" : "○"}
-        </span>
-        {label}
-      </span>
-    </td>
-  );
-}
-
-function Comparison() {
-  return (
-    <Section id="compare" className="bg-surface-sunken">
-      <Reveal>
-        <Eyebrow>Honestly</Eyebrow>
-        <Text variant="display-md" tone="max" as="h2" className="max-w-[24ch] text-balance">
-          Where we win, and where we do not
-        </Text>
-        <Text variant="body-lg" tone="secondary" className="mt-4 block max-w-[62ch]">
-          Two rows at the bottom go against us. If mature scheduling or connector breadth is the
-          thing you are buying, Airflow and Zapier are still the better answer.
-        </Text>
-      </Reveal>
-
-      <Reveal className="mt-10 block">
-        <div className="border-subtle bg-surface-base overflow-x-auto rounded-lg border">
-          <table className="w-full min-w-[46rem] border-collapse text-left">
-            <thead>
-              <tr className="border-subtle border-b">
-                <th className="font-ui text-eyebrow text-fg-muted px-4 py-3 uppercase">Capability</th>
-                {COLUMNS.map((c, i) => (
-                  <th
-                    key={c}
-                    className={cn(
-                      "font-ui text-eyebrow px-3 py-3 text-center uppercase",
-                      i === 3 ? "text-accent" : "text-fg-muted",
-                    )}
-                  >
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {COMPARISON.map((row) => (
-                <tr key={row.capability} className="border-subtle border-b last:border-b-0">
-                  <th scope="row" className="px-4 py-3 text-left font-normal">
-                    <Text variant="body-sm" tone="primary" className="block">{row.capability}</Text>
-                    {row.note ? (
-                      <Text variant="caption" tone="muted" className="mt-0.5 block max-w-[46ch]">{row.note}</Text>
-                    ) : null}
-                  </th>
-                  {row.cells.map((verdict, i) => (
-                    <VerdictCell key={i} verdict={verdict} emphasis={i === 3} />
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Reveal>
-    </Section>
-  );
-}
-
-/* ── 8 · Security ─────────────────────────────────────────────────────────── */
+/* ── 7 · Security ─────────────────────────────────────────────────────────── */
 
 const SECURITY: { icon: IconComponent; title: string; body: string }[] = [
   {
@@ -743,7 +628,7 @@ function Security() {
   );
 }
 
-/* ── 9 · Close ────────────────────────────────────────────────────────────── */
+/* ── 8 · Close ────────────────────────────────────────────────────────────── */
 
 function Close() {
   return (
@@ -832,7 +717,6 @@ export function Landing() {
       <ControlPlane />
       <Approvals />
       <Interop />
-      <Comparison />
       <Security />
       <Close />
       <Footer />

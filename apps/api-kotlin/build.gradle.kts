@@ -26,6 +26,7 @@ dependencies {
     // (nodes, edges) on their own APIs, and a consumer that cannot name the
     // type it is handed has to re-declare it.
     api("com.vectorbea:graph-kotlin:0.1.0")
+    api("com.vectorbea:skills-kotlin:0.1.0")
 
     // JSON — Jackson with Kotlin + JSR-310 (java.time) support
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")

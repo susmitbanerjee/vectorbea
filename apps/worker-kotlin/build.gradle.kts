@@ -28,6 +28,7 @@ dependencies {
     // (nodes, edges) on their own APIs, and a consumer that cannot name the
     // type it is handed has to re-declare it.
     api("com.vectorbea:graph-kotlin:0.1.0")
+    api("com.vectorbea:skills-kotlin:0.1.0")
 
     /*
      * BPE tokenizer, for the capacity bucket's input-token estimate.

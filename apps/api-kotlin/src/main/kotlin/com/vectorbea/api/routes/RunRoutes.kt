@@ -223,6 +223,17 @@ class RunRoutes(
     private val runIngress: com.vectorbea.api.ingress.RunIngress? = null,
     /** Injectable so a test can wait without sleeping. */
     private val syncWaiter: com.vectorbea.api.ingress.SyncRunWaiter? = null,
+    /**
+     * The governance trail, for the two destructive run operations.
+     *
+     * `AuditLog.Action` has named `run.cancel` and `run.rerun` since it was
+     * written and nothing called either. Both are worth recording for the same
+     * reason: they are the operations where a PERSON overrides what the platform
+     * was going to do — stopping work that was in flight, or paying to run
+     * something a second time with its side effects. "Who cancelled the payment
+     * run" has exactly one correct answer and nothing recorded it.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
 
     /**
@@ -813,6 +824,12 @@ class RunRoutes(
             "api:cancel", "Cancellation requested", "Run cancellation requested via API")
 
         log.info("[run] cancellation requested runId={}", runId)
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.RUN_CANCEL,
+            targetType = "run", targetId = runId, environmentId = run.environmentId,
+            before = mapOf("status" to run.status),
+            after = mapOf("status" to "cancellation_requested"),
+        )
         return Response.ok(mapOf("runId" to runId.toString(), "status" to "cancellation_requested"))
     }
 
@@ -1069,6 +1086,15 @@ class RunRoutes(
         enqueueOrFail(q, newRun, original, rerunClass, ctx, environmentId)
 
         log.info("[run] rerun enqueued sourceRunId={} newRunId={}", runId, newRun.id)
+        /* Targeted at the ORIGINAL run, because that is the id somebody has in
+           front of them when they ask "why did this run twice"; the new run's id
+           is in `after`, so the trail leads forward as well as back. */
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.RUN_RERUN,
+            targetType = "run", targetId = runId, environmentId = environmentId,
+            before = mapOf("status" to original.status, "workflowId" to original.workflowId.toString()),
+            after = mapOf("runId" to newRun.id.toString(), "callsProvider" to true),
+        )
         return Response.accepted(mapOf(
             "operation"     to "rerun",
             "sourceRunId"   to runId.toString(),

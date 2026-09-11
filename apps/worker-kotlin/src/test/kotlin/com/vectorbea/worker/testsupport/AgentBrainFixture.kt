@@ -120,7 +120,15 @@ class AgentBrainFixture(
      * `dataSource = null` and `dbPoolManager = null` are the documented no-persistence
      * shape. Everything else is the production object graph.
      */
-    fun runner() = AgentBrainRunner(
+    fun runner(
+        /**
+         * The agent's skills. Defaults to a loader with no data source, which
+         * composes nothing — so every test written before skills existed still
+         * builds the prompt it always built.
+         */
+        skillLoader: com.vectorbea.worker.agents.skills.SkillLoader =
+            com.vectorbea.worker.agents.skills.SkillLoader(dataSource, enabled = false),
+    ) = AgentBrainRunner(
         dataSource         = dataSource,
         eventStore         = events,
         connectionResolver = stubLlmResolver(workspaceId, environmentId),
@@ -133,6 +141,9 @@ class AgentBrainFixture(
         reconstructionEnabled = reconstructionEnabled,
         teamLimits            = teamLimits,
         contextAssemblyEnabled = contextAssemblyEnabled,
+        skillLoader           = skillLoader,
+        skillRecorder         =
+            com.vectorbea.worker.agents.skills.ActivationSkillRecorder(dataSource),
     )
 
     /**

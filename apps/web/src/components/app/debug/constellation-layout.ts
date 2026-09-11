@@ -53,6 +53,18 @@ export interface ConstellationNode {
   blockedReason: string | null;
   startedAt: string | null;
   endedAt: string | null;
+  /**
+   * The skills composed into this activation's prompt, in composition order.
+   *
+   * Read from `agent_activation_skills` rather than from the span tree, because
+   * a span may be dropped under back-pressure and a skills panel that is empty
+   * for that reason reads as a product that lost your data.
+   *
+   * Includes the ones that were DROPPED. A skill that was granted and then cut
+   * under budget pressure is the most useful thing this list can say: the agent
+   * did not ignore it, it never saw it.
+   */
+  skills?: ActivationSkill[];
   /** This activation owns the span the root-cause attribution picked. */
   isRootCause?: boolean;
   /**
@@ -63,6 +75,26 @@ export interface ConstellationNode {
    * that failed; the client has neither together.
    */
   onRootCausePath?: boolean;
+}
+
+/** One skill, as it actually reached (or failed to reach) an activation. */
+export interface ActivationSkill {
+  slug: string;
+  /**
+   * The version composed, not the version granted.
+   *
+   * An unpinned grant follows the skill's current version, so "which text did
+   * this run actually see" is answerable only from here.
+   */
+  version: number;
+  provenance: "first_party" | "customer";
+  /** False when the budget left no room for it. The agent never saw it. */
+  included: boolean;
+  /** True when it was cut short to fit. The agent saw part of it. */
+  truncated: boolean;
+  /** True when its worked examples were dropped to make the instructions fit. */
+  examplesDropped: boolean;
+  chars: number;
 }
 
 export interface ConstellationEdge {

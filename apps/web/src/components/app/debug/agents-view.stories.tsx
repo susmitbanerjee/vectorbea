@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from "@storybook/nextjs";
 import { Text } from "~/components/ui/text";
 import { AgentsView } from "./agents-view";
 import type {
-  Constellation, ConstellationEdge, ConstellationNode,
+  ActivationSkill, Constellation, ConstellationEdge, ConstellationNode,
 } from "./constellation-layout";
 
 /**
@@ -32,6 +32,19 @@ function node(p: Partial<ConstellationNode> & { id: string; depth: number }): Co
     endedAt: null,
     isRootCause: p.isRootCause ?? false,
     onRootCausePath: p.onRootCausePath ?? false,
+    skills: p.skills,
+  };
+}
+
+function skill(slug: string, p: Partial<ActivationSkill> = {}): ActivationSkill {
+  return {
+    slug,
+    version: p.version ?? 1,
+    provenance: p.provenance ?? "first_party",
+    included: p.included ?? true,
+    truncated: p.truncated ?? false,
+    examplesDropped: p.examplesDropped ?? false,
+    chars: p.chars ?? 1_400,
   };
 }
 
@@ -286,6 +299,50 @@ export const NoAgentSteps: StoryObj = {
         emptyCause: "no_agent_steps",
         nodes: [],
         edges: [],
+        cycles: [],
+        loopGuard: GUARD,
+      }}
+    />
+  ),
+};
+
+/**
+ * ACCEPTANCE: which skills were active, per activation — including the ones the
+ * budget cut.
+ *
+ * The degraded states are the reason this panel exists. A skill that was granted
+ * and then dropped produces an agent that looks like it ignored its instructions,
+ * and nothing else in the product says otherwise: the grant row is there, the
+ * prompt is well formed, the model behaved reasonably given what it got.
+ */
+export const SkillsInPlay: StoryObj = {
+  name: "Skills in play, including what the budget cut",
+  render: () => (
+    <Frame
+      title="A pipeline where one agent did not receive everything granted to it"
+      note="Composed whole reads quiet; cut short takes the waiting ramp because the agent
+            saw part of it; never sent takes the failed ramp and is struck through, because
+            every conclusion drawn from its absence is wrong. Never the brand ramp — this is
+            status."
+      constellation={{
+        runId: "r",
+        nodes: [
+          node({ id: "prod", depth: 0, agentName: "producer", role: "supervisor", tokens: 2_400 }),
+          node({ id: "res", depth: 1, parentId: "prod", agentName: "researcher", tokens: 9_100,
+                 skills: [skill("research-brief", { version: 3 })] }),
+          node({ id: "scr", depth: 1, parentId: "prod", agentName: "scriptwriter", tokens: 7_600,
+                 skills: [skill("video-script", { version: 1, examplesDropped: true, chars: 1_180 })] }),
+          node({ id: "vid", depth: 1, parentId: "prod", agentName: "videographer", tokens: 14_200,
+                 skills: [
+                   skill("video-production", { version: 2, truncated: true, chars: 2_000 }),
+                   skill("house-style", { version: 7, provenance: "customer", included: false, chars: 0 }),
+                 ] }),
+        ],
+        edges: [
+          edge({ id: "e1", from: "prod", to: "res", reason: "research the brief" }),
+          edge({ id: "e2", from: "prod", to: "scr", reason: "write the script" }),
+          edge({ id: "e3", from: "prod", to: "vid", reason: "shoot the script" }),
+        ],
         cycles: [],
         loopGuard: GUARD,
       }}

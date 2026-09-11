@@ -116,7 +116,8 @@ docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md,
 docs/PLANS-AND-ENTITLEMENTS.md, docs/RETENTION.md,
 docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md, docs/HTTP-TOOLS.md,
 docs/WAITS-AND-SIGNALS.md, docs/INGRESS.md, docs/RESULT-DELIVERY.md,
-docs/SRE-AND-INCIDENT-RESPONSE.md, docs/ENTERPRISE-CONNECTIVITY.md.
+docs/SRE-AND-INCIDENT-RESPONSE.md, docs/ENTERPRISE-CONNECTIVITY.md,
+docs/SKILLS.md.
 Read the relevant sections before changing runtime code. The docs explain WHY
 each guard exists; most were written after a production bug.
 
@@ -303,6 +304,28 @@ each guard exists; most were written after a production bug.
    `insecureSkipVerify` anywhere in the TLS path and the omission is the
    feature. See docs/ENTERPRISE-CONNECTIVITY.md.
 
+21. A SKILL GRANTS COMPETENCE, AND NOTHING ELSE. It is a named, versioned
+   bundle granted per agent like a tool — so it inherits the tool discipline
+   rather than inventing one: the check is runtime code against a database, the
+   VERSION is the unit of change, the lookup is workspace-scoped and fails
+   closed, and the text is sanitized at the write boundary. What it must never
+   acquire is a way to widen anything. `validateToolAllowed` and
+   `validateAgentAllowed` take NO skill as input and would behave identically if
+   the feature were deleted; the worst a malicious skill can do is waste a
+   prompt, and `SkillInjectionTest` asserts that with text saying the opposite of
+   the grant. Granting a skill whose required tools the agent lacks is REFUSED AT
+   SAVE, with the missing list, because otherwise the failure lands at iteration
+   four of a production run and reads as a model that hallucinated a tool — and
+   the same check runs again per activation, dropping the skill, because a tool
+   can be revoked a minute after the grant. Composition is ordered (after the
+   agent's own instructions, before observations — that position is the
+   precedence claim, not a rendering choice) and bounded, and EVERY CUT IS
+   RECORDED: an agent that "ignored" a skill it was never shown is the hardest
+   failure here to diagnose, so the budget is ordinary and the bookkeeping is the
+   feature. One composer, shared by the save path and the run path — a second
+   implementation makes the save-time warning a lie, which is invariant 16's
+   lesson. See docs/SKILLS.md.
+
 ### Conventions
 
 - Migrations: Flyway, in apps/api-kotlin/src/main/resources/db/migration.
@@ -340,6 +363,11 @@ Ask before proceeding if a change would touch:
   branch that declines to enqueue a pinned run. Either one alone lets a
   customer's prompts execute on our infrastructure, silently
 - anything that alters what happens on resume
+- the position of the skills block in the system prompt, or anything that lets
+  a skill reach `allowed_tool_ids`, `can_delegate_to` or an output schema. The
+  first is a precedence decision the model reads as authority; the second turns
+  a bundle of prose into a permission, which is the one thing skills are
+  defined as not being
 
 These are the places where a plausible-looking change causes duplicate side
 effects in production. A wrong guess here is expensive; a question is cheap.

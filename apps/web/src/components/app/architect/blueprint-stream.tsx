@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { cellPath } from "~/components/app/ribbon/geometry";
+import { cellRingPath } from "~/components/app/ribbon/geometry-ring";
 import { layoutGraph } from "~/mocks/graph-layout";
 import { NODE_MARKS } from "~/components/icons/nodes";
 import type { Blueprint, BlueprintNode } from "~/lib/architect/blueprint";
@@ -204,8 +205,7 @@ export function BlueprintCanvas({
                   needs to notice, and they land last precisely so it registers. */}
               {isGate ? (
                 <path
-                  d={cellPath(NODE_W + 10, NODE_H + 10)}
-                  transform="translate(-5 -5)"
+                  d={cellRingPath(NODE_W, NODE_H, 5)}
                   fill="none"
                   stroke="var(--status-waiting)"
                   strokeWidth={2}

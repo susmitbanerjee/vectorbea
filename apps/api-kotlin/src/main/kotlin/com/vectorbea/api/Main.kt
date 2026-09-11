@@ -393,7 +393,7 @@ fun main() {
             connectionRepo, cacheService, secretService, telemetry, auditLog,
             environmentRepo,
         ).register(router)
-        ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
+        ConnectionTestRoutes(connectionRepo, secretService, cacheService, auditLog).register(router)
         /* A customer's negotiated rate, per connection. Without it every call
            through their own gateway is priced at our list rate, which
            over-reports their spend — the first number a finance team reconciles
@@ -408,6 +408,24 @@ fun main() {
     if (agentRepo != null && connectionRepo != null) {
         AgentRoutes(agentRepo, connectionRepo, cacheService, entitlementGuard).register(router)
     } else log.warn("AgentRoutes disabled — no database")
+
+    /*
+     * ── SKILLS: THE LIBRARY, THE BUNDLES, AND THE GRANT ─────────────────────
+     *
+     * Registered beside AgentRoutes rather than folded into it because the
+     * grant is its own write with its own refusal — `PUT /api/agents/:id/skills`
+     * fails with the missing tool list when the agent lacks something a skill
+     * requires — and putting that inside the agent PATCH would make "save the
+     * agent" fail for a reason that has nothing to do with the fields being
+     * saved. See V073 and docs/SKILLS.md.
+     */
+    if (ds != null && agentRepo != null && toolRepo != null) {
+        com.vectorbea.api.routes.SkillRoutes(
+            repo = com.vectorbea.api.repository.SkillRepository(ds),
+            agentRepo = agentRepo,
+            toolRepo = toolRepo,
+        ).register(router)
+    } else log.warn("SkillRoutes disabled — no database")
 
     /*
      * ── TOOLS, THEIR VERSIONS, AND THE SPEC IMPORTS THAT PROPOSE THEM ───────
@@ -437,7 +455,8 @@ fun main() {
     } else log.warn("Spec import and tool versioning disabled — no database")
 
     if (workflowRepo != null) {
-        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo, entitlementGuard).register(router)
+        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo, entitlementGuard, auditLog)
+            .register(router)
     } else log.warn("WorkflowRoutes disabled — no database")
 
     // Cron schedules: read API + the firing loop (see WorkflowScheduler).
@@ -564,6 +583,7 @@ fun main() {
             runRateLimiter = tokenBucket,
             entitlements = entitlementGuard,
             usageMeter = usageMeter,
+            audit = auditLog,
         ).register(router)
 
         com.vectorbea.api.routes.DebugRoutes(

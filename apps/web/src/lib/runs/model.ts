@@ -66,3 +66,13 @@ export interface Run {
    */
   delivery?: "none" | "pending" | "delivered" | "partial" | "failed";
 }
+
+/**
+ * A log line's severity.
+ *
+ * Here rather than in `~/mocks/run-detail` because it is a TYPE, not fabricated
+ * data — and the fixtures module is a restricted import, so leaving it there
+ * forced anything that classifies a real run's events to import from the mocks.
+ * `log-vocabulary.ts` is the thing that needed it.
+ */
+export type LogLevel = "debug" | "info" | "warn" | "error";

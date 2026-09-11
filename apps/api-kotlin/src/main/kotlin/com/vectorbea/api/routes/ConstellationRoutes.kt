@@ -249,8 +249,64 @@ class ConstellationRoutes(
            resolved here rather than inside the cursor. */
         val stopReasonOf = nodes.associate { it["id"] as String to it["stopReason"] as String? }
 
+        /*
+         * ── WHICH SKILLS EACH ACTIVATION RAN WITH ───────────────────────────
+         *
+         * Read from `agent_activation_skills` rather than from the span tree,
+         * for the reason the table exists: invariant 7 allows a span to be
+         * DROPPED under back-pressure, and a skills panel that is empty because
+         * a span was dropped reads as a product that lost your data. The span
+         * attribute is the answer for a trace; the row is the answer for this.
+         *
+         * Keyed on the activation id where there is one and on the step id where
+         * there is not, which is exactly what `id` holds in each case — the
+         * derived path uses the step id as the node identity because there is no
+         * activation uuid to use.
+         *
+         * `included` is carried through rather than filtered here. A skill that
+         * was granted and then DROPPED under budget pressure is the single most
+         * useful thing this panel can say: the agent did not ignore it, it never
+         * saw it. Hiding the dropped ones would remove the answer.
+         */
+        val skillsByNode: Map<String, List<Map<String, Any?>>> = runCatching {
+            dataSource.connection.use { conn ->
+                conn.prepareStatement(
+                    """SELECT COALESCE(activation_id::text, step_id) AS node_key,
+                              slug, version, provenance, position,
+                              included, truncated, examples_dropped, chars
+                         FROM agent_activation_skills
+                        WHERE run_id = ? AND workspace_id = ?
+                        ORDER BY node_key, position"""
+                ).use { st ->
+                    st.setObject(1, runId); st.setObject(2, wsId)
+                    st.executeQuery().use { rs ->
+                        val out = mutableMapOf<String, MutableList<Map<String, Any?>>>()
+                        while (rs.next()) {
+                            out.getOrPut(rs.getString("node_key")) { mutableListOf() } += mapOf(
+                                "slug" to rs.getString("slug"),
+                                "version" to rs.getInt("version"),
+                                "provenance" to rs.getString("provenance"),
+                                "included" to rs.getBoolean("included"),
+                                "truncated" to rs.getBoolean("truncated"),
+                                "examplesDropped" to rs.getBoolean("examples_dropped"),
+                                "chars" to rs.getInt("chars"),
+                            )
+                        }
+                        out
+                    }
+                }
+            }
+        }.getOrElse {
+            /* A skills panel that cannot be read must not take the constellation
+               with it. The view renders the node without the section, which is
+               indistinguishable from an agent that holds no skills — acceptable,
+               because the alternative is a debugger that will not open. */
+            emptyMap()
+        }
+
         val nodesWithCause = nodes.map { n ->
             n + mapOf(
+                "skills" to (skillsByNode[n["id"] as? String] ?: emptyList<Map<String, Any?>>()),
                 "isRootCause" to (n["id"] in rootCauseActivations),
                 "onRootCausePath" to (n["id"] in rootCausePath),
                 "blockedReason" to blockedReason(

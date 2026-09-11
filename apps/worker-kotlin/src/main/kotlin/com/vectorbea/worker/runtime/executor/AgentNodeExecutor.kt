@@ -69,6 +69,16 @@ class AgentNodeExecutor(
     private val delegationEnabled: Boolean =
         com.vectorbea.worker.agents.brain.runtime.AgentBrainRunner.DELEGATION_ENABLED,
     /**
+     * Mirrors AGENT_SKILLS_ENABLED, forwarded to the brain.
+     *
+     * A parameter for the reason every other flag here is one: JUnit cannot
+     * portably mutate process environment, and the acceptance test has to drive
+     * a pipeline with skills on while the rest of the suite runs with them off.
+     *
+     * Null keeps the loader's own default, which reads the environment.
+     */
+    private val skillsEnabled: Boolean? = null,
+    /**
      * Mirrors AGENT_LOOP_RECONSTRUCTION_ENABLED, forwarded to the brain.
      *
      * A parameter so the delegation resume test can drive BOTH settings in one
@@ -515,6 +525,14 @@ class AgentNodeExecutor(
                 .fromNodeConfig(node.config),
             delegationEnabled  = delegationEnabled,
             capacity           = capacity,
+            /* Built here rather than injected, for the approval store's reason:
+               it needs nothing but the data source. The flag is forwarded so a
+               test can drive both states without touching process environment. */
+            skillLoader        = skillsEnabled
+                ?.let { com.vectorbea.worker.agents.skills.SkillLoader(dataSource, enabled = it) }
+                ?: com.vectorbea.worker.agents.skills.SkillLoader(dataSource),
+            skillRecorder      =
+                com.vectorbea.worker.agents.skills.ActivationSkillRecorder(dataSource),
         )
 
         val config = AgentBrainConfig(

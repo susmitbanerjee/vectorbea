@@ -6,7 +6,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import type { contracts } from "@vectorbea/shared";
-import type { LogLevel, LogLine } from "~/mocks/run-detail";
+import type { LogLine } from "~/mocks/run-detail";
+import type { LogLevel } from "~/lib/runs/model";
+import { describe, isPlumbing, levelFor } from "~/lib/runs/log-vocabulary";
 import { useReplay, timeAt } from "./replay";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -64,12 +66,28 @@ export function LogStream({
      like a log and described nothing that happened. These lines are the events
      the worker actually recorded; when there are none, the pane says so rather
      than filling itself in. */
+  /**
+   * Show the stored row instead of the translation.
+   *
+   * For support, and off by default. See `toLogLines` and
+   * `~/lib/runs/log-vocabulary` for what the default view removes and why.
+   */
+  const [raw, setRaw] = React.useState(false);
+
   const all = React.useMemo(
-    () => toLogLines(events, run.nodes.map((node) => node.id)),
-    [events, run.nodes],
+    () => toLogLines(events, run.nodes.map((node) => node.id), raw),
+    [events, run.nodes, raw],
   );
 
-  const [minLevel, setMinLevel] = React.useState<LogLevel>("debug");
+  /*
+   * ── THE DEFAULT FLOOR IS `info`, NOT `debug` ────────────────────────────
+   * `debug` is where durable-execution mechanics live — leases, claims,
+   * re-enqueues, checkpoint writes. They are the platform doing its job, and
+   * putting them in the default view spends the reader's attention on the part
+   * that is working. One click on DEBUG brings them all back; nothing is
+   * dropped from the stream.
+   */
+  const [minLevel, setMinLevel] = React.useState<LogLevel>("info");
   const [nodeFilter, setNodeFilter] = React.useState<number | null>(null);
   const [query, setQuery] = React.useState("");
   const [tsMode, setTsMode] = React.useState<TimestampMode>("relative");
@@ -172,6 +190,29 @@ export function LogStream({
             </button>
           ))}
         </div>
+
+        {/*
+          RAW: the stored row, for support.
+
+          Labelled and reachable rather than hidden, because "the log is not
+          telling me everything" is a worse feeling than a toggle. What it adds
+          back is the event type as stored, its status, and the worker the run
+          executed on.
+        */}
+        <button
+          onClick={() => setRaw((r) => !r)}
+          aria-pressed={raw}
+          title={raw
+            ? "Showing the stored event row, including the worker it ran on"
+            : "Show the stored event row, for support"}
+          className={cn(
+            "font-code rounded-xs px-1.5 py-0.5 text-[10px] uppercase",
+            "transition-colors duration-fast outline-none focus-visible:focus-ring",
+            raw ? "bg-surface-active text-fg-primary" : "text-fg-disabled hover:text-fg-primary",
+          )}
+        >
+          raw
+        </button>
 
         <div className="relative flex items-center">
           <input
@@ -320,18 +361,6 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   );
 }
 
-/** Event type → severity, using the type's own vocabulary rather than a guess. */
-function levelFor(type: string, status: string | null | undefined): LogLevel {
-  const text = `${type} ${status ?? ""}`.toLowerCase();
-  /* `timed_out` is how every timeout in this system is actually spelled —
-     RUN_TIMED_OUT, RUN_WAIT_TIMED_OUT — and `timeout` alone never matched it,
-     so a wait that blew its deadline was logged as routine information. */
-  if (/fail|error|timeout|timed_out|dead|reject/.test(text)) return "error";
-  if (/retry|recover|warn|cancel|skip|yield|expired/.test(text)) return "warn";
-  if (/debug|trace/.test(text)) return "debug";
-  return "info";
-}
-
 /**
  * A run's events, as log lines.
  *
@@ -369,23 +398,39 @@ function TransportNote({ stream }: { stream: RunStreamState | null }) {
   );
 }
 
-function toLogLines(events: contracts.RunEvent[], nodeIds: string[]): LogLine[] {
+function toLogLines(
+  events: contracts.RunEvent[],
+  nodeIds: string[],
+  raw: boolean,
+): LogLine[] {
   return [...events]
     .sort((a, b) => a.sequence - b.sequence)
     .map((event) => {
       const index = nodeIds.findIndex((id) => event.type.includes(id));
-      const detail = [
-        event.status ? `status=${event.status}` : null,
-        event.source ? `source=${event.source}` : null,
-        event.durationMs != null ? `${event.durationMs}ms` : null,
-      ].filter(Boolean).join(" ");
+      const duration = event.durationMs != null ? ` ${event.durationMs}ms` : "";
+      /*
+       * ── RAW IS THE STORED ROW; THE DEFAULT IS THE TRANSLATION ───────────
+       * Raw exists so support can read exactly what was written, including the
+       * worker the run executed on. It is off by default because the worker's
+       * identity is our fleet, not the customer's workflow, and because the
+       * enum is our vocabulary for a question they asked in theirs.
+       */
+      const message = raw
+        ? [
+            event.type,
+            event.status ? `status=${event.status}` : null,
+            event.source ? `source=${event.source}` : null,
+            event.durationMs != null ? `${event.durationMs}ms` : null,
+          ].filter(Boolean).join(" ")
+        : `${describe(event.type)}${duration}`;
       return {
         seq: event.sequence,
         at: Date.parse(event.timestamp),
         level: levelFor(event.type, event.status),
         nodeIndex: index,
         nodeName: index === -1 ? "run" : nodeIds[index],
-        message: detail ? `${event.type} ${detail}` : event.type,
+        message,
       };
     });
 }
+

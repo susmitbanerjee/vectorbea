@@ -23,3 +23,15 @@ includeBuild("../../packages/observability-kotlin")
  * the first time a third shape appears.
  */
 includeBuild("../../packages/graph-kotlin")
+
+/*
+ * Skills: what a skill is, and the three answers both services must give
+ * identically — which required tools are missing, what the composed prompt
+ * block looks like, and which text is safe to put in a prompt.
+ *
+ * Shared for `RunIngress`' reason (invariant 16): the whole point of refusing a
+ * grant at SAVE time is that the author learns what the RUNTIME will do. A
+ * second implementation of the composer makes that promise false the first time
+ * one of them changes.
+ */
+includeBuild("../../packages/skills-kotlin")

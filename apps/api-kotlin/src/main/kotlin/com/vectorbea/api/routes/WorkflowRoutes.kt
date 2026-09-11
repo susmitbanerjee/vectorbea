@@ -140,6 +140,23 @@ class WorkflowRoutes(
      * saved. Null skips the check — the behaviour before S3.
      */
     private val entitlements: com.vectorbea.api.entitlements.EntitlementGuard? = null,
+    /**
+     * The governance trail.
+     *
+     * ── WHY THIS WAS THE GAP, NOT THE AUDIT SCREEN ──────────────────────────
+     * `AuditLog.Action` has named `workflow.publish`, `workflow.update`,
+     * `workflow.archive` and `workflow.delete` since it was written, and nothing
+     * called any of them: the constants existed, the table existed, the screen
+     * read the table correctly, and no workflow change was ever recorded. A
+     * workspace could publish for a month and its audit log would be empty —
+     * which reads as "the screen is broken" and is in fact "the trail has a hole
+     * in it", which is much worse and is what an enterprise review asks about
+     * first.
+     *
+     * Nullable and best-effort for `AuditLog`'s stated reason: an audit write
+     * failing must not fail the action it is auditing.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
     private val log = LoggerFactory.getLogger(WorkflowRoutes::class.java)
 
@@ -201,6 +218,11 @@ class WorkflowRoutes(
             workflowId = workflow.id.toString(),
             appUserId = req.principal?.appUserId?.toString(),
             properties = mapOf("name" to name, "status" to status))
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.WORKFLOW_UPDATE,
+            targetType = "workflow", targetId = workflow.id, environmentId = envId,
+            after = mapOf("name" to workflow.name, "slug" to workflow.slug, "status" to workflow.status),
+        )
         return Response.created(workflow.toResponse())
     }
 
@@ -232,6 +254,11 @@ class WorkflowRoutes(
             )
         }
 
+        /* Read first, so the entry carries BOTH sides. "Someone changed the
+           workflow" is not an audit trail; "someone changed status from active
+           to paused at 14:02" is. */
+        val before = repo.findById(id, ctx.workspaceId)
+
         val wf = repo.update(
             id = id,
             workspaceId = ctx.workspaceId,
@@ -247,6 +274,18 @@ class WorkflowRoutes(
 
         invalidateListCache(ctx.workspaceId.toString(), wf.environmentId.toString())
         cache.del(CacheKeys.workflow(ctx.workspaceId.toString(), id.toString()))
+        /* An archive is a different question from an edit — "who took this out of
+           service" is asked on its own — so it is its own action rather than an
+           update whose diff a reader has to notice. */
+        val archived = body.status == "archived" && before?.status != "archived"
+        audit?.recordUserAction(
+            req, ctx.workspaceId,
+            if (archived) com.vectorbea.api.audit.AuditLog.Action.WORKFLOW_ARCHIVE
+            else com.vectorbea.api.audit.AuditLog.Action.WORKFLOW_UPDATE,
+            targetType = "workflow", targetId = id, environmentId = wf.environmentId,
+            before = before?.let { mapOf("name" to it.name, "status" to it.status) },
+            after = mapOf("name" to wf.name, "status" to wf.status),
+        )
         return Response.ok(wf.toResponse())
     }
 
@@ -257,6 +296,13 @@ class WorkflowRoutes(
         repo.delete(id, ctx.workspaceId)
         invalidateListCache(ctx.workspaceId.toString(), existing.environmentId.toString())
         cache.del(CacheKeys.workflow(ctx.workspaceId.toString(), id.toString()))
+        /* `before` and no `after`: the row is gone, and what it WAS is the only
+           thing anybody can still ask about it. */
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.WORKFLOW_DELETE,
+            targetType = "workflow", targetId = id, environmentId = existing.environmentId,
+            before = mapOf("name" to existing.name, "slug" to existing.slug, "status" to existing.status),
+        )
         return Response.noContent()
     }
 
@@ -304,6 +350,16 @@ class WorkflowRoutes(
         // Materialize a cron schedule from the trigger config (creates / updates /
         // removes the workflow's schedule). Never fail the save if this errors.
         syncSchedule(ctx.workspaceId, wf.environmentId, workflowId, body.triggerConfig)
+
+        /* THE ONE AN AUDITOR ASKS ABOUT FIRST: who changed what this workflow
+           does, and when. A version is the unit of that change, so the entry
+           names the version rather than only the workflow. */
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.WORKFLOW_PUBLISH,
+            targetType = "workflow", targetId = workflowId, environmentId = wf.environmentId,
+            before = mapOf("currentVersionId" to wf.currentVersionId?.toString()),
+            after = mapOf("versionId" to version.id.toString(), "version" to version.version),
+        )
 
         return Response.created(version.toResponse())
     }
