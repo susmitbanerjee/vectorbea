@@ -192,3 +192,8 @@ with that sentence** rather than silently downgraded.
   refresh is a scheduler decision, not a protocol one.
 - **The granting UI.** `mcp_tools_available` is the query it needs; the screen is
   web work.
+- **Anything an operator triggers discovery *with*.** `syncTools` has no caller
+  outside its own tests, so in the shipped product no MCP tool row is ever
+  written and nothing is grantable. The endpoint, the connection test that works
+  against a spec-correct server, and the screens are specified in
+  [MCP-CONNECTOR-UI.md](./MCP-CONNECTOR-UI.md).

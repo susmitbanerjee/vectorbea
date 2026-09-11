@@ -35,3 +35,14 @@ includeBuild("../../packages/graph-kotlin")
  * one of them changes.
  */
 includeBuild("../../packages/skills-kotlin")
+
+/*
+ * MCP: the wire protocol, the sanitizer and discovery.
+ *
+ * The API calls discovery from two places — the Discover action, and the
+ * connect wizard's verify step, which is where the product says "this server
+ * advertises 12 tools". Both have to be answers about the code that will
+ * actually run the customer's tools, so it is the worker's implementation,
+ * shared, rather than a second one that agrees today.
+ */
+includeBuild("../../packages/mcp-kotlin")

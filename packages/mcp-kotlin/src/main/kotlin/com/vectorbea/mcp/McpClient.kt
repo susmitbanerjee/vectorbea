@@ -1,9 +1,7 @@
-package com.vectorbea.worker.agents.tools.mcp
+package com.vectorbea.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.vectorbea.worker.logging.logger
-import com.vectorbea.worker.net.OutboundHttp
 import java.net.URI
 import java.net.http.HttpRequest
 
@@ -25,8 +23,8 @@ import java.net.http.HttpRequest
  * ── EVERY RESPONSE IS UNTRUSTED ─────────────────────────────────────────────
  * This is a customer's server, and its tool descriptions reach the model's
  * prompt. That makes them an injection surface with a direct route to the thing
- * being protected. Nothing in this file trusts a field: sizes are bounded by
- * `OutboundHttp`'s streaming cap, and everything textual is sanitized by
+ * being protected. Nothing in this file trusts a field: sizes are bounded by the
+ * [McpTransport]'s byte cap, and everything textual is sanitized by
  * [McpSanitizer] before it is stored or shown. See [McpDiscovery].
  *
  * ── ONE TRANSPORT, DELIBERATELY ─────────────────────────────────────────────
@@ -38,10 +36,13 @@ import java.net.http.HttpRequest
  * worse than one that says it does not.
  */
 class McpClient(
-    private val httpSend: (HttpRequest, Long, Long) -> OutboundHttp.Result =
-        { req, total, maxBytes -> OutboundHttp.send(req, total, maxBytes) },
+    /**
+     * Supplied by the caller, because egress is the caller's business. See
+     * [McpTransport]. There is no default: a default would be one service's
+     * egress policy silently applied to the other's calls.
+     */
+    private val transport: McpTransport,
 ) {
-    private val log = logger()
     private val mapper = ObjectMapper()
 
     data class Server(
@@ -96,7 +97,7 @@ class McpClient(
     private fun call(server: Server, method: String, params: JsonNode): JsonNode {
         if (server.transport != "streamable-http") {
             throw McpException(
-                "MCP transport '${server.transport}' is not supported by this worker. " +
+                "MCP transport '${server.transport}' is not supported. " +
                 "Only streamable-http is implemented; configure the server for HTTP.")
         }
 
@@ -121,9 +122,7 @@ class McpClient(
         }
 
         val response = try {
-            httpSend(builder.build(),
-                OutboundHttp.policy().clampTotalCallMs(server.timeoutMs),
-                MAX_RESPONSE_BYTES)
+            transport.send(builder.build(), server.timeoutMs, MAX_RESPONSE_BYTES)
         } catch (e: Exception) {
             /* The message, never the exception: a stack trace from an HTTP client
                carries the URL, and an MCP server URL can carry a token in its
@@ -164,7 +163,7 @@ class McpClient(
             ?: emptyList()
 
     companion object {
-        /** The revision this worker implements. Sent, so a mismatch is the server's to report. */
+        /** The revision this client implements. Sent, so a mismatch is the server's to report. */
         const val PROTOCOL_VERSION = "2025-06-18"
 
         /**

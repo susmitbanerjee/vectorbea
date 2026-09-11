@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { contracts } from "@vectorbea/shared";
 import {
   Brain, ArrowsClockwise, Wrench, ArrowsSplit, SealCheck, Broadcast,
-  MagnifyingGlass, CheckCircle, WarningCircle, ArrowRight, ArrowLeft, Plus,
+  MagnifyingGlass, CheckCircle, WarningCircle, ArrowRight, ArrowLeft, Plus, Plugs,
 } from "@phosphor-icons/react/dist/ssr";
 
 import { cn } from "~/lib/cn";
@@ -118,6 +118,15 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
   const [step, setStep] = React.useState(0);
   const [connections, setConnections] = React.useState<contracts.Connection[]>([]);
   const [tools, setTools] = React.useState<contracts.Tool[]>([]);
+  /*
+   * Names for the MCP servers tools were discovered from.
+   *
+   * Built from the FULL connection page, before `connections` is narrowed to
+   * LLM providers — an MCP server is not an LLM connection and would not
+   * survive that filter, leaving the grant list showing twelve rows called
+   * `mcp-1a2b3c4d.*` with nothing to say whose they are.
+   */
+  const [serverNames, setServerNames] = React.useState<Map<string, string>>(new Map());
   const [loadingRefs, setLoadingRefs] = React.useState(true);
 
   const [name, setName] = React.useState("");
@@ -145,11 +154,13 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
       .then(([connectionPage, toolPage]) => {
         if (!alive) return;
         setConnections(connectionPage.items.filter((connection) => connection.type === "llm"));
+        setServerNames(new Map(connectionPage.items.map((c) => [c.id, c.name])));
         setTools(toolPage.items);
       })
       .catch(() => {
         if (!alive) return;
         setConnections([]);
+        setServerNames(new Map());
         setTools([]);
       })
       .finally(() => { if (alive) setLoadingRefs(false); });
@@ -201,10 +212,51 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
   const visibleTools = React.useMemo(() => {
     const query = toolQuery.trim().toLowerCase();
     if (!query) return tools;
-    return tools.filter((tool) =>
-      `${tool.name} ${tool.description ?? ""} ${tool.type} ${tool.riskLevel}`.toLowerCase().includes(query),
-    );
-  }, [tools, toolQuery]);
+    return tools.filter((tool) => {
+      const server = tool.mcpServerConnectionId
+        ? serverNames.get(tool.mcpServerConnectionId) ?? "" : "";
+      return `${tool.name} ${tool.description ?? ""} ${tool.type} ${tool.riskLevel} ${server}`
+        .toLowerCase().includes(query);
+    });
+  }, [tools, toolQuery, serverNames]);
+
+  /**
+   * The grant list, grouped by where each tool came from.
+   *
+   * Locally-authored tools first, then one group per MCP server. The grouping
+   * exists because a discovered tool is named `mcp-1a2b3c4d.search` and a flat
+   * list of forty of those, from three servers, is unreadable — the namespacing
+   * in `syncTools` keeps them distinct and this is where that distinction gets
+   * used.
+   *
+   * The group is a HEADING, never a checkbox. A tri-state control at the server
+   * level is exactly the affordance that would teach the wrong model — that a
+   * server is a thing you grant. It is not, and there is no field in the schema
+   * that could make it one.
+   */
+  const toolGroups = React.useMemo(() => {
+    const local: contracts.Tool[] = [];
+    const byServer = new Map<string, contracts.Tool[]>();
+    for (const tool of visibleTools) {
+      const serverId = tool.mcpServerConnectionId;
+      if (!serverId) { local.push(tool); continue; }
+      const bucket = byServer.get(serverId);
+      if (bucket) bucket.push(tool); else byServer.set(serverId, [tool]);
+    }
+    return [
+      ...(local.length > 0
+        ? [{ id: "local", label: "Your tools", isMcp: false, items: local }]
+        : []),
+      ...[...byServer.entries()]
+        .map(([serverId, items]) => ({
+          id: serverId,
+          label: serverNames.get(serverId) ?? "Unknown server",
+          isMcp: true,
+          items,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    ];
+  }, [visibleTools, serverNames]);
 
   /* ── Create ─────────────────────────────────────────────────────────────── */
   const create = useApiMutation<contracts.Agent, void>({
@@ -258,6 +310,23 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
   function toggleGrant(id: string, granted: boolean) {
     setGrants((current) => (granted ? [...new Set([...current, id])] : current.filter((item) => item !== id)));
+  }
+
+  /**
+   * Grant or revoke every tool in one group at once.
+   *
+   * This is a CONVENIENCE OVER N CHECKBOXES and nothing more: it writes N
+   * individual tool ids into `allowedToolIds`, which is the only thing that
+   * list can hold. It does not create a server-level grant, because there is
+   * nothing in the schema to create one in — and the button says "12", not
+   * "this server", so what somebody is doing matches what is stored.
+   */
+  function toggleGroup(ids: string[], granted: boolean) {
+    setGrants((current) => {
+      if (granted) return [...new Set([...current, ...ids])];
+      const removing = new Set(ids);
+      return current.filter((item) => !removing.has(item));
+    });
   }
 
   const railSteps: ModalStep[] = STEPS.map((entry, index) => ({
@@ -564,7 +633,34 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                           </Text>
                         </div>
                       ) : (
-                        visibleTools.map((tool) => {
+                        toolGroups.map((group) => {
+                          const ids = group.items.map((tool) => tool.id);
+                          const allGranted = ids.every((id) => grants.includes(id));
+                          return (
+                        <div key={group.id}>
+                          {/* A heading, never a checkbox. See `toggleGroup`. */}
+                          <div className="bg-surface-sunken border-subtle sticky top-0 z-raised flex items-center justify-between gap-2 border-b px-3 py-1.5">
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              {group.isMcp ? (
+                                <Icon icon={Plugs} size="sm" decorative className="text-fg-muted shrink-0" />
+                              ) : null}
+                              <Text variant="caption" tone="secondary" className="truncate">
+                                {group.label}
+                                {group.isMcp ? <span className="text-fg-muted"> · MCP</span> : null}
+                              </Text>
+                            </span>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => toggleGroup(ids, !allGranted)}
+                            >
+                              {allGranted
+                                ? `Clear all ${ids.length}`
+                                : `Select all ${ids.length}`}
+                            </Button>
+                          </div>
+                          <div className="divide-subtle divide-y">
+                        {group.items.map((tool) => {
                           const granted = grants.includes(tool.id);
                           return (
                             <label
@@ -603,6 +699,10 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                                 </Text>
                               </span>
                             </label>
+                          );
+                        })}
+                          </div>
+                        </div>
                           );
                         })
                       )}

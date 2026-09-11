@@ -24,6 +24,7 @@ import { useConnectionsData } from "./use-connections-data";
 import { useApi } from "~/lib/api/api-provider";
 import type { ConnectionTestResult, Scope } from "~/lib/api/client";
 import { ConnectionEditor } from "./connection-editor";
+import { McpToolsPanel } from "./mcp-tools-panel";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    CONNECTIONS — the operational view.
@@ -42,6 +43,21 @@ const DETAIL_TABS = [
   { id: "access", label: "Access" },
   { id: "audit", label: "Audit" },
   { id: "settings", label: "Settings" },
+];
+
+/**
+ * MCP servers get one more, second from the left.
+ *
+ * "What does this server offer, and is it still answering" is a question about
+ * a CONNECTION and has nowhere else to live — and it belongs early, because on
+ * an MCP connection it is the reason the connection exists. Rendered only for
+ * MCP: a tab that reads "no tools" on a Postgres connection is noise on every
+ * other row in the product.
+ */
+const MCP_DETAIL_TABS = [
+  DETAIL_TABS[0],
+  { id: "mcp-tools", label: "Tools" },
+  ...DETAIL_TABS.slice(1),
 ];
 
 export function ConnectionsView({ forceState }: { forceState?: TableStatus }) {
@@ -455,7 +471,8 @@ function ConnectionDetail({
           </Button>
         </div>
       }
-      tabs={DETAIL_TABS.map((t) => (t.id === "blast" && connection.status !== "healthy" ? { ...t, badge: radius.workflows.length } : t))}
+      tabs={(connection.isMcp ? MCP_DETAIL_TABS : DETAIL_TABS).map((t) =>
+        (t.id === "blast" && connection.status !== "healthy" ? { ...t, badge: radius.workflows.length } : t))}
       activeTab={tab}
       onTabChange={onTabChange}
     >
@@ -470,6 +487,9 @@ function ConnectionDetail({
         ) : null}
 
         {tab === "overview" ? <Overview connection={connection} onDelete={onDelete} onEdit={() => onTabChange("settings")} /> : null}
+        {tab === "mcp-tools" && connection.isMcp ? (
+          <McpToolsPanel connectionId={connection.id} connectionName={connection.name} scope={scope} />
+        ) : null}
         {tab === "blast" ? <Blast connection={connection} radius={radius} /> : null}
         {tab === "health" ? <Health connection={connection} /> : null}
         {tab === "access" ? <Access connection={connection} /> : null}
@@ -501,7 +521,7 @@ function Overview({ connection, onDelete, onEdit }: { connection: ConnectionReco
             variant="ghost"
             className="text-status-failed"
             onClick={() => {
-              if (window.confirm(`Delete ${connection.name}? This cannot be undone.`)) {
+              if (window.confirm(deleteWarning(connection))) {
                 void onDelete(connection.id).catch(() => undefined);
               }
             }}
@@ -533,6 +553,27 @@ function Overview({ connection, onDelete, onEdit }: { connection: ConnectionReco
       ) : null}
     </>
   );
+}
+
+/**
+ * What deleting this connection costs, said before it happens.
+ *
+ * For an MCP server this is the ONE server-level action there is — revoking the
+ * credential revokes every tool discovered through it, because
+ * `mcp_server_connection_id` is an FK. That is deliberate design, not a
+ * side effect, and somebody about to take it deserves the number rather than
+ * "this cannot be undone".
+ */
+function deleteWarning(connection: ConnectionRecord): string {
+  const tools = connection.tools.length;
+  const agents = connection.agents.length;
+  if (!connection.isMcp || tools === 0) {
+    return `Delete ${connection.name}? This cannot be undone.`;
+  }
+  const agentClause = agents === 0
+    ? "No agent holds a grant to them."
+    : `${agents} agent${agents === 1 ? "" : "s"} hold grants to them and will start failing at the next run that calls one.`;
+  return `Delete ${connection.name}? ${tools} discovered tool${tools === 1 ? "" : "s"} stop working. ${agentClause}`;
 }
 
 function Blast({ connection, radius }: { connection: ConnectionRecord; radius: ReturnType<typeof blastRadius> }) {

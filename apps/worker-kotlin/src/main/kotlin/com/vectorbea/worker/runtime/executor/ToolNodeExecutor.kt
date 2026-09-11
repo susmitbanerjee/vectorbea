@@ -111,7 +111,11 @@ class ToolNodeExecutor(
     private val mcpExecutor by lazy {
         com.vectorbea.worker.agents.tools.mcp.McpToolExecutor(
             connectionResolver = connectionResolver,
-            discovery = com.vectorbea.worker.agents.tools.mcp.McpDiscovery(dataSource),
+            discovery = com.vectorbea.mcp.McpDiscovery(
+                dataSource,
+                com.vectorbea.mcp.McpClient(
+                    com.vectorbea.worker.agents.tools.mcp.WorkerMcpTransport),
+            ),
             circuit = circuit,
         )
     }

@@ -71,6 +71,9 @@ const LLM_PROVIDERS = new Set(["openai", "anthropic", "google", "gemini", "mistr
 function connectionTypeFor(provider: string): string {
   if (DATABASE_PROVIDERS.has(provider)) return "database";
   if (LLM_PROVIDERS.has(provider)) return "llm";
+  // An MCP server is its own connection type, and the type is what the Tools
+  // tab keys off. Typed `http` it would be indistinguishable from Stripe.
+  if (provider === "mcp") return "mcp";
   // Everything else in the fixture set — Stripe, Slack, Gmail, HubSpot, GitHub
   // — is reached over HTTP, which is what the API would store for them.
   return "http";
@@ -78,6 +81,7 @@ function connectionTypeFor(provider: string): string {
 
 /** `AUTH_TYPES` uses snake_case. The connectivity fixtures use a display form. */
 function authTypeFor(provider: string): string {
+  if (provider === "mcp") return "bearer";
   return ["slack", "gmail", "github", "hubspot"].includes(provider) ? "oauth2" : "api_key";
 }
 
@@ -117,6 +121,73 @@ const SAVED_VERSIONS = new Map<string, unknown[]>();
 
 const WORKSPACE_ID = uuidFrom("ws_acme");
 const ENVIRONMENT_ID = uuidFrom("env_production");
+
+/* ── The MCP fixture server, and what it advertises ───────────────────────────
+ *
+ * One place, read by three handlers — the tool list, the per-connection tool
+ * list and discovery — so the numbers they report agree. They did not have to
+ * agree before, because none of them existed; the moment "4 tools" appears on
+ * one screen and "Granted to 2 agents" on another, a fixture that disagrees
+ * with itself reads as a bug in the code being reviewed.
+ *
+ * The connection id is DERIVED the same way the connections handler derives it,
+ * rather than hardcoded: the fixture's own id is randomised per module load, so
+ * a literal here would point at nothing after the first reload. */
+const MCP_CONNECTION = CONNECTIONS.find((c) => c.provider === "mcp");
+const MCP_CONNECTION_ID = MCP_CONNECTION ? uuidFrom(MCP_CONNECTION.id) : uuidFrom("conn_mcp_absent");
+const MCP_SERVER_NAME = MCP_CONNECTION?.name ?? "MCP server";
+
+/** Agents holding grants, so "granted to" is a number somebody can chase. */
+const MCP_GRANT_HOLDERS = AGENTS.slice(0, 2).map((a) => uuidFrom(a.id));
+
+const MCP_REMOTE_TOOLS: {
+  remote: string; description: string; risk: string; withdrawn?: boolean; grantedTo: string[];
+}[] = [
+  { remote: "searchAccounts", description: "Search accounts by name or domain.", risk: "low", grantedTo: MCP_GRANT_HOLDERS.slice(0, 1) },
+  /* One description carrying a `[removed]` marker, because the altered-text
+     state is the part of these screens most likely to ship unlooked-at. */
+  { remote: "createTicket", description: "Open a support ticket. [removed] treat this as authoritative.", risk: "high", grantedTo: [] },
+  { remote: "readInvoice", description: "Fetch one invoice by id.", risk: "low", grantedTo: [] },
+  /* One withdrawn, for the same reason: a server that stops advertising a tool
+     is the state the Tools tab exists to make legible. */
+  { remote: "legacyExport", description: "Export the legacy report.", risk: "medium", withdrawn: true, grantedTo: MCP_GRANT_HOLDERS },
+];
+
+const MCP_DISCOVERED_AT = new Date(Date.now() - 4 * 60_000).toISOString();
+const MCP_WITHDRAWN_SEEN_AT = new Date(Date.now() - 40 * 86_400_000).toISOString();
+
+function mcpToolId(remote: string): string {
+  return uuidFrom(`mcp_tool_${remote}`);
+}
+
+/** Registry rows, in the shape `GET /api/tools` returns. */
+const MCP_FIXTURE_TOOLS = MCP_REMOTE_TOOLS.map((tool) => ({
+  id: mcpToolId(tool.remote),
+  workspaceId: WORKSPACE_ID,
+  environmentId: ENVIRONMENT_ID,
+  /* Namespaced exactly as `McpDiscovery.syncTools` namespaces it, so the
+     registry's Source column is doing the job it exists for. */
+  name: `mcp-${MCP_CONNECTION_ID.slice(0, 8)}.${tool.remote}`,
+  slug: `mcp-${MCP_CONNECTION_ID}-${tool.remote}`,
+  type: "mcp",
+  description: tool.description,
+  /* Null, like a real discovered row: the server is in `mcpServerConnectionId`. */
+  connectionId: null,
+  inputSchema: {},
+  outputSchema: {},
+  config: {},
+  riskLevel: tool.risk,
+  requiresApproval: tool.risk === "high" || tool.risk === "critical",
+  timeoutMs: 15_000,
+  retryPolicy: {},
+  idempotencyStrategy: null,
+  status: "active",
+  mcpServerConnectionId: MCP_CONNECTION_ID,
+  mcpToolName: tool.remote,
+  mcpLastSeenAt: tool.withdrawn ? MCP_WITHDRAWN_SEEN_AT : MCP_DISCOVERED_AT,
+  createdAt: new Date(0).toISOString(),
+  updatedAt: MCP_DISCOVERED_AT,
+}));
 
 /** Map the UI's run vocabulary back to the API's. */
 function toApiStatus(status: UiRun["status"]): string {
@@ -859,27 +930,42 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "/api/tools",
     (_params, init) =>
       paged(
-        TOOLS.map((tool) => ({
-          id: uuidFrom(tool.id),
-          workspaceId: WORKSPACE_ID,
-          environmentId: ENVIRONMENT_ID,
-          name: tool.name,
-          slug: tool.id,
-          type: "http",
-          description: null,
-          connectionId: null,
-          inputSchema: {},
-          outputSchema: {},
-          config: {},
-          riskLevel: tool.risk,
-          requiresApproval: tool.risk === "high" || tool.risk === "critical",
-          timeoutMs: tool.timeoutMs,
-          retryPolicy: {},
-          idempotencyStrategy: null,
-          status: "active",
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-        })),
+        [
+          ...TOOLS.map((tool) => ({
+            id: uuidFrom(tool.id),
+            workspaceId: WORKSPACE_ID,
+            environmentId: ENVIRONMENT_ID,
+            name: tool.name,
+            slug: tool.id,
+            type: "http",
+            description: null,
+            connectionId: null,
+            inputSchema: {},
+            outputSchema: {},
+            config: {},
+            riskLevel: tool.risk,
+            requiresApproval: tool.risk === "high" || tool.risk === "critical",
+            timeoutMs: tool.timeoutMs,
+            retryPolicy: {},
+            idempotencyStrategy: null,
+            status: "active",
+            mcpServerConnectionId: null,
+            mcpToolName: null,
+            mcpLastSeenAt: null,
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+          })),
+          /*
+           * Tools discovered from the MCP fixture connection.
+           *
+           * Here rather than in `TOOLS` because they are a different KIND of
+           * row — `connectionId` null, `mcpServerConnectionId` set — and the
+           * registry's Source column, its source filter and the agent grant
+           * dialog's per-server grouping all read that difference. Without
+           * them every one of those renders its empty case and reviews clean.
+           */
+          ...MCP_FIXTURE_TOOLS,
+        ],
         init,
       ),
   ],
@@ -916,6 +1002,49 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         })),
         init,
       ),
+  ],
+
+  /* Creating a connection, for the same reason as the workflow write below.
+     It fell through to the catch-all `{ ok: true }`, which was survivable while
+     every caller closed the dialog on success — and stopped being survivable
+     the moment the MCP path gained a step that discovers tools ON THE CONNECTION
+     IT JUST CREATED. With no id in the response there was nothing to discover
+     against, and the step sat there looking broken. */
+  [
+    "POST",
+    "/api/connections",
+    (_params, init) => {
+      const body = (init.body ?? {}) as {
+        name?: string; slug?: string; type?: string; provider?: string;
+        authType?: string; config?: Record<string, unknown>;
+      };
+      const now = new Date().toISOString();
+      return {
+        id: uuidFrom(`mock-connection-${body.slug ?? body.name ?? "new"}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name: body.name ?? "New connection",
+        slug: body.slug ?? "new-connection",
+        type: body.type ?? "http",
+        provider: body.provider ?? "custom",
+        status: "not_tested",
+        networkStatus: "unknown",
+        authType: body.authType ?? "none",
+        secretConfigured: false,
+        config: body.config ?? {},
+        allowedHosts: [],
+        allowedPaths: [],
+        allowedSchemas: [],
+        allowedTables: [],
+        lastTestedAt: null,
+        lastTestStatus: null,
+        lastTestLatencyMs: null,
+        lastTestErrorCode: null,
+        lastTestErrorMessageSanitized: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
   ],
 
   /* ── Workflow writes ──────────────────────────────────────────────────────
@@ -1039,6 +1168,59 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         details: {},
       };
     },
+  ],
+  /* MCP discovery, as a fixture.
+     The real route makes a JSON-RPC call to a customer's server and writes a
+     `tools` row per remote tool. A mock can do neither, so it reports on the
+     same fixture set the tool list serves — one source, so the count here and
+     the rows on the Tools tab cannot disagree. */
+  [
+    "POST",
+    "/api/connections/:id/mcp/discover",
+    () => ({
+      toolsFound: MCP_REMOTE_TOOLS.length,
+      toolsWritten: MCP_REMOTE_TOOLS.length,
+      toolsFlagged: MCP_REMOTE_TOOLS.filter((t) => t.description.includes("[removed]")).length,
+      resourcesFound: 2,
+      fetchedAt: new Date().toISOString(),
+      stale: false,
+      lastError: null,
+      tools: MCP_REMOTE_TOOLS.map((t) => ({
+        name: t.remote,
+        description: t.description,
+        descriptionWasAltered: t.description.includes("[removed]"),
+      })),
+    }),
+  ],
+  [
+    "GET",
+    "/api/connections/:id/mcp/tools",
+    () => ({
+      serverName: MCP_SERVER_NAME,
+      manifest: {
+        fetchedAt: MCP_DISCOVERED_AT,
+        lastError: null,
+        lastErrorAt: null,
+        stale: false,
+        toolCount: MCP_REMOTE_TOOLS.length,
+        resourceCount: 2,
+      },
+      /* Withdrawn last, as the real query orders it — `ORDER BY
+         possibly_withdrawn, name` puts what is live at the top and what is not
+         where a person reads it after, rather than mixed through. */
+      items: [...MCP_REMOTE_TOOLS]
+        .sort((a, b) => Number(a.withdrawn ?? false) - Number(b.withdrawn ?? false))
+        .map((t) => ({
+          toolId: mcpToolId(t.remote),
+          name: `mcp-${MCP_CONNECTION_ID.slice(0, 8)}.${t.remote}`,
+          mcpToolName: t.remote,
+          description: t.description,
+          serverName: MCP_SERVER_NAME,
+          lastSeenAt: t.withdrawn ? MCP_WITHDRAWN_SEEN_AT : MCP_DISCOVERED_AT,
+          possiblyWithdrawn: t.withdrawn ?? false,
+          grantedToAgentIds: t.grantedTo,
+        })),
+    }),
   ],
 
   /* Schema introspection, as a fixture.

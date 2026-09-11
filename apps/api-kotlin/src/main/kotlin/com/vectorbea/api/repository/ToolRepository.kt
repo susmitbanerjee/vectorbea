@@ -31,6 +31,27 @@ data class Tool(
     val resultContractJson: String?,
     /** Which `tool_versions.version` is live. */
     val currentVersion: Int,
+    /**
+     * The MCP server this tool was discovered through (V058), or null for a
+     * locally-authored tool.
+     *
+     * On the model so a tools list can say WHERE a tool came from. Without it,
+     * twelve rows named `mcp-1a2b3c4d.*` are unreadable — the namespacing in
+     * `McpDiscovery.syncTools` exists so two servers' `search` tools are
+     * distinguishable, and a list that cannot name the server leaves that
+     * thought half-finished.
+     */
+    val mcpServerConnectionId: UUID?,
+    /** What the server calls this tool. Differs from `name`, which is namespaced. */
+    val mcpToolName: String?,
+    /**
+     * When discovery last saw this tool advertised.
+     *
+     * Null on a locally-authored tool. On a discovered one, an old value is how
+     * a withdrawn tool is recognised — it keeps its row and its grants and fails
+     * at call time, rather than being deleted (MCP.md §3).
+     */
+    val mcpLastSeenAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -61,7 +82,9 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         id, workspace_id, environment_id, name, slug, type, description, connection_id,
         input_schema_json, output_schema_json, config_json, risk_level, requires_approval,
         timeout_ms, retry_policy_json, idempotency_strategy, status,
-        http_spec_json, result_contract_json, current_version, created_at, updated_at
+        http_spec_json, result_contract_json, current_version,
+        mcp_server_connection_id, mcp_tool_name, mcp_last_seen_at,
+        created_at, updated_at
     """.trimIndent()
 
     fun findById(id: UUID, workspaceId: UUID): Tool? = queryOne(
@@ -226,6 +249,9 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         httpSpecJson = rs.getString("http_spec_json"),
         resultContractJson = rs.getString("result_contract_json"),
         currentVersion = rs.getInt("current_version"),
+        mcpServerConnectionId = rs.uuidOrNull("mcp_server_connection_id"),
+        mcpToolName = rs.getString("mcp_tool_name"),
+        mcpLastSeenAt = rs.instantOrNull("mcp_last_seen_at"),
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
     )

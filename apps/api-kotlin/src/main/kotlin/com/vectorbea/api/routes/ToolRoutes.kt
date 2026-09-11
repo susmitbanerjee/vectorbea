@@ -97,6 +97,17 @@ private fun Tool.toResponse(): Map<String, Any?> = mapOf(
     "httpSpec" to httpSpecJson?.let { runCatching { mapper.readValue(it, Map::class.java) }.getOrNull() },
     "resultContract" to resultContractJson?.let { runCatching { mapper.readValue(it, Map::class.java) }.getOrNull() },
     "currentVersion" to currentVersion,
+    /*
+     * Where this tool came from. Null on a locally-authored one, which is what
+     * a registry list renders as "—".
+     *
+     * Nullable, and the columns default to NULL, so the API and the worker
+     * deploy independently and tolerate schema skew in both directions — an
+     * older worker writing rows an newer API reads, and the reverse.
+     */
+    "mcpServerConnectionId" to mcpServerConnectionId?.toString(),
+    "mcpToolName" to mcpToolName,
+    "mcpLastSeenAt" to mcpLastSeenAt?.toString(),
     "createdAt" to createdAt.toString(),
     "updatedAt" to updatedAt.toString(),
 )

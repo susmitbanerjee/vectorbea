@@ -21,6 +21,17 @@ export interface ConnectionRecord {
   needsPrivateRunner: boolean;
   tools: string[];
   agents: string[];
+  /**
+   * This connection is an MCP server.
+   *
+   * A separate flag from `type`, which describes how the connection
+   * AUTHENTICATES (`api-key`, `oauth`, `connection-string`). An MCP server is
+   * usually a bearer token and would be indistinguishable on that axis from any
+   * other token-authenticated thing — but it is the only kind of connection that
+   * advertises its own tools, which is a different question and needs its own
+   * answer.
+   */
+  isMcp: boolean;
 }
 
 export const AUTH_LABEL: Record<ConnectionType, string> = {

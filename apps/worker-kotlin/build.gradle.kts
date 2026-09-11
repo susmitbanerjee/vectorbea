@@ -29,6 +29,7 @@ dependencies {
     // type it is handed has to re-declare it.
     api("com.vectorbea:graph-kotlin:0.1.0")
     api("com.vectorbea:skills-kotlin:0.1.0")
+    api("com.vectorbea:mcp-kotlin:0.1.0")
 
     /*
      * BPE tokenizer, for the capacity bucket's input-token estimate.

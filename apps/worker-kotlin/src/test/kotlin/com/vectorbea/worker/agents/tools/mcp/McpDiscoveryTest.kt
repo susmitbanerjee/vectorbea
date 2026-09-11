@@ -1,6 +1,8 @@
 package com.vectorbea.worker.agents.tools.mcp
+import com.vectorbea.mcp.McpClient
+import com.vectorbea.mcp.McpDiscovery
+import com.vectorbea.mcp.McpTransport
 
-import com.vectorbea.worker.net.OutboundHttp
 import com.vectorbea.worker.testsupport.Infra
 import org.junit.jupiter.api.Tag
 import java.net.http.HttpRequest
@@ -36,11 +38,10 @@ class McpDiscoveryTest {
         val replies = ArrayDeque<String>()
         var failWith: Exception? = null
         var calls = 0
-        fun send(req: HttpRequest, total: Long, maxBytes: Long): OutboundHttp.Result {
+        fun send(req: HttpRequest, total: Long, maxBytes: Long): McpTransport.Response {
             calls++
             failWith?.let { throw it }
-            return OutboundHttp.Result(200, replies.removeFirstOrNull() ?: "{}",
-                emptyMap(), 1)
+            return McpTransport.Response(200, replies.removeFirstOrNull() ?: "{}")
         }
     }
 
@@ -52,7 +53,7 @@ class McpDiscoveryTest {
     private fun server() = McpClient.Server(connectionId, "https://mcp.example.test/rpc")
 
     private fun discoveryWith(fake: Fake, ttlMs: Long = 300_000) =
-        McpDiscovery(ds, McpClient(httpSend = fake::send), ttlMs)
+        McpDiscovery(ds, McpClient(fake::send), ttlMs)
 
     private fun seedWorkspace() {
         ds.connection.use { c ->

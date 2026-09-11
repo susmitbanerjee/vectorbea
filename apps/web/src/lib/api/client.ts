@@ -241,6 +241,60 @@ export interface SchemaPreviewResult {
 }
 
 /**
+ * `POST /api/connections/:id/mcp/discover`, as `McpConnectorRoutes` declares it.
+ *
+ * `toolsFound` and `toolsWritten` are different numbers and both are reported:
+ * found is what the server advertised, written is what reached the registry. A
+ * gap between them is a partial write worth seeing rather than rounding away.
+ */
+export interface McpDiscoverResult {
+  toolsFound: number;
+  toolsWritten: number;
+  /** How many descriptions the sanitizer altered. Surfaced, never only logged. */
+  toolsFlagged: number;
+  resourcesFound: number;
+  fetchedAt: string;
+  /** The last refresh failed and these tools came from the previous one. */
+  stale: boolean;
+  lastError: string | null;
+  tools: { name: string; description: string | null; descriptionWasAltered: boolean }[];
+}
+
+/** One row of `mcp_tools_available`, as the API returns it. */
+export interface McpToolRow {
+  toolId: string;
+  name: string;
+  mcpToolName: string | null;
+  description: string | null;
+  serverName: string | null;
+  lastSeenAt: string | null;
+  /**
+   * The server has not advertised this in a week.
+   *
+   * "Possibly" is the API's word and it is kept: a server down for eight days
+   * has withdrawn nothing. The row keeps its grants either way.
+   */
+  possiblyWithdrawn: boolean;
+  grantedToAgentIds: string[];
+}
+
+/** The manifest cache's health — a different fact from the tools themselves. */
+export interface McpManifest {
+  fetchedAt: string;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  stale: boolean;
+  toolCount: number;
+  resourceCount: number;
+}
+
+export interface McpToolsResponse {
+  items: McpToolRow[];
+  manifest: McpManifest | null;
+  serverName: string;
+}
+
+/**
  * `POST /api/workflows/:id/run`, as `RunRoutes.triggerRun` declares it.
  *
  * `mode` is the one that matters: "simulation" executes the graph without
@@ -665,6 +719,16 @@ export interface VectorbeaClient {
      * Metadata only - no row data ever crosses this boundary.
      */
     schemaPreview(id: string, scope?: Scope, options?: RequestOptions): Promise<SchemaPreviewResult>;
+    /**
+     * Ask an MCP server what it offers, and register each tool it names.
+     *
+     * Writes one `tools` row per remote tool. It does NOT grant anything —
+     * granting is per tool, on an agent, and there is deliberately no call here
+     * or anywhere that could express "every tool from this server".
+     */
+    mcpDiscover(id: string, scope?: Scope, options?: RequestOptions): Promise<McpDiscoverResult>;
+    /** What this server has advertised, including what it has stopped advertising. */
+    mcpTools(id: string, scope?: Scope, options?: RequestOptions): Promise<McpToolsResponse>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
@@ -1196,6 +1260,18 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           timeoutMs: 30_000,
           ...req(scope, undefined, options),
         }),
+      mcpDiscover: (id, scope, options) =>
+        call<McpDiscoverResult>(`/api/connections/${id}/mcp/discover`, {
+          method: "POST",
+          body: {},
+          // A JSON-RPC round trip to somebody else's server, then a write per
+          // tool. The 15s default abandons a slow customer server and reports a
+          // timeout that reads as "discovery is broken".
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
+      mcpTools: (id, scope, options) =>
+        call<McpToolsResponse>(`/api/connections/${id}/mcp/tools`, req(scope, undefined, options)),
     },
 
     approvals: {

@@ -403,6 +403,26 @@ fun main() {
                 .register(router)
         }
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
+
+        /*
+         * ── MCP: DISCOVERY, AND WHAT A SERVER OFFERS ────────────────────────
+         *
+         * Registered under connections because an MCP server IS a connection —
+         * MCP is a tool type, not a subsystem (MCP.md §2), and the surfaces have
+         * to say what the runtime says. Discovery itself is
+         * `packages/mcp-kotlin`, the same implementation the worker runs, so the
+         * tool count this reports is a fact about the code that will run them.
+         */
+        ds?.let {
+            com.vectorbea.api.routes.McpConnectorRoutes(
+                connections = connectionRepo,
+                mcpTools = com.vectorbea.api.repository.McpToolRepository(it),
+                dataSource = it,
+                secretService = secretService,
+                entitlements = entitlementGuard,
+                audit = auditLog,
+            ).register(router)
+        }
     } else log.warn("ConnectionRoutes disabled — no database")
 
     if (agentRepo != null && connectionRepo != null) {

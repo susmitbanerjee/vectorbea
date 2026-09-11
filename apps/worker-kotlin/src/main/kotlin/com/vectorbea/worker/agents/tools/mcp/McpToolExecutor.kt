@@ -2,6 +2,9 @@ package com.vectorbea.worker.agents.tools.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.vectorbea.mcp.McpClient
+import com.vectorbea.mcp.McpDiscovery
+import com.vectorbea.mcp.McpSanitizer
 import com.vectorbea.worker.agents.tools.ToolErrorShape
 import com.vectorbea.worker.agents.tools.ToolResultContract
 import com.vectorbea.worker.connector.ConnectionResolver
@@ -39,7 +42,7 @@ import java.util.UUID
 class McpToolExecutor(
     private val connectionResolver: ConnectionResolver,
     private val discovery: McpDiscovery,
-    private val client: McpClient = McpClient(),
+    private val client: McpClient = McpClient(WorkerMcpTransport),
     /**
      * Per-server breaker. The same one every other outbound integration uses, so
      * an MCP server that is down stops being called on the same terms as an HTTP

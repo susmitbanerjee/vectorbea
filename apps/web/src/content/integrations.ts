@@ -236,6 +236,24 @@ export const INTEGRATION_SEEDS: {
       "Store the credential as a workspace secret rather than inlining it in the header.",
     ],
   },
+  {
+    id: "mcp", name: "MCP server", category: "generic",
+    /*
+     * The second sentence is doing work. It is the first place anybody meets
+     * the grant model, and it is far cheaper to say here than to explain after
+     * somebody expected a single switch and found twelve checkboxes.
+     */
+    description:
+      "Connect a Model Context Protocol server and use the tools it advertises. " +
+      "Each tool is granted to an agent individually.",
+    auth: ["none", "api-key"],
+    scopes: [],
+    setup: [
+      "Give the server's streamable-HTTP endpoint — the single URL it answers JSON-RPC on, usually ending in /mcp.",
+      "Add a bearer token if the server requires one. SSE and stdio servers are not supported.",
+      "Discover its tools after connecting. Each one becomes a tool in your registry, granted to an agent individually.",
+    ],
+  },
 ];
 
 /** The catalogue entry for a provider id, or undefined for an unknown one. */

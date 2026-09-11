@@ -174,6 +174,13 @@ object RbacGuard {
         "PATCH /api/connections/:id"                 to Permission.CONNECTION_WRITE,
         "DELETE /api/connections/:id"                to Permission.CONNECTION_DELETE,
         "POST /api/connections/:id/rotate-secret"    to Permission.SECRET_WRITE,
+        /*
+         * Discovery writes `tools` rows that become grantable capabilities,
+         * sourced from a third party's server. That is a connection write, not a
+         * read that happens to have a side effect — whoever may add the server
+         * may add what it offers, and whoever may not, may not.
+         */
+        "POST /api/connections/:id/mcp/discover"     to Permission.CONNECTION_WRITE,
         /* A negotiated rate moves every cost figure the connection produces, and
            budget ceilings are measured against those figures — so setting one is
            a connection write, not a read dressed up as configuration. */

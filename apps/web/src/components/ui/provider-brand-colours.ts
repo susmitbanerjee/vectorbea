@@ -35,4 +35,11 @@ export const PROVIDER_BRAND_COLOUR: Record<ProviderId, string> = {
   jira: "#2684ff",
   webhook: "#c73a63",
   http: "#5a5cf0",
+  /*
+   * MCP is a specification, not a company, so there is no brand kit to be
+   * faithful to. This is the protocol's own documentation colour, kept here
+   * with the trademarks rather than in tokens for the same reason as the rest:
+   * it is a fixed vendor-ish value, not a hue Ink & Iris gets to theme.
+   */
+  mcp: "#7a5af0",
 };

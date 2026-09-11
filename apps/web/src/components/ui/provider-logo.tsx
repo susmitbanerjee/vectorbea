@@ -23,7 +23,7 @@ export type ProviderId =
   | "openai" | "anthropic" | "gemini" | "mistral"
   | "slack" | "gmail" | "google-sheets" | "notion" | "airtable"
   | "postgres" | "mysql" | "hubspot" | "github" | "jira"
-  | "webhook" | "http";
+  | "webhook" | "http" | "mcp";
 
 type ProviderMark = {
   label: string;
@@ -182,6 +182,21 @@ const PROVIDER_MARKS: Record<ProviderId, ProviderMark> = {
         <circle cx="12" cy="12" r="9" />
         <path d="M3 12h18" />
         <path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18Z" />
+      </g>
+    ),
+  },
+  /*
+   * A socket with three leads: one server, several tools. The mark says the
+   * grant model before any copy does — what plugs in is a set of separate
+   * things, not one switch.
+   */
+  mcp: {
+    label: "MCP server",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="13" width="16" height="7" rx="2" />
+        <path d="M8 13V8.5a2 2 0 0 1 4 0V13M16 13V9.5" />
+        <circle cx="16" cy="6.5" r="2" />
       </g>
     ),
   },

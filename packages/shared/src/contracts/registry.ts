@@ -78,6 +78,25 @@ export const tool = z.object({
   resultContract: jsonObject.nullish(),
   /** Which `tool_versions.version` is live. */
   currentVersion: maybe(z.number()),
+  /**
+   * The MCP server this tool was discovered through (V058), or null.
+   *
+   * A SEPARATE FIELD FROM `connectionId`, and the separation is deliberate: an
+   * MCP tool's `connection_id` is null and its server lives here, behind its own
+   * FK. Anything asking "what depends on this connection" has to read both, or
+   * it will report that deleting an MCP server breaks nothing.
+   */
+  mcpServerConnectionId: uuid.nullish(),
+  /** What the server calls it. `name` is namespaced; this is not. */
+  mcpToolName: z.string().nullish(),
+  /**
+   * When discovery last saw it advertised.
+   *
+   * An old value is how a withdrawn tool is recognised. It keeps its row, its
+   * uuid and its grants and fails at call time — deleting it would shrink an
+   * agent's tool list because somebody else's server was redeployed.
+   */
+  mcpLastSeenAt: isoDateTime.nullish(),
   createdAt: isoDateTime,
   updatedAt: isoDateTime,
 });

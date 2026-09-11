@@ -80,11 +80,15 @@ class ConnectionTester(private val secretService: SecretService) {
             "tool", "mcp", "mcp_server" -> {
                 val serverUrl = firstNonBlank(config, "serverUrl", "server_url", "url", "baseUrl", "base_url")
                     ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR", "MCP connection requires a server URL.")
-                HttpTester.test(HttpTester.HttpTestInput(
-                    url = serverUrl,
-                    authType = if (plaintextSecret.isNullOrBlank()) "none" else "bearer",
-                    apiKey = plaintextSecret, username = null, password = null,
-                ))
+                /* The same probe the saved path takes. The connect wizard tests
+                   here and the connection page tests there, and a credential
+                   that passes one and fails the other is the bug SaasEndpoints
+                   was written to end. */
+                McpTester.test(
+                    serverUrl = serverUrl,
+                    bearerToken = plaintextSecret,
+                    transport = (config["transport"] as? String) ?: "streamable-http",
+                )
             }
             "vector_store", "vector", "vectorstore" -> {
                 val endpoint = firstNonBlank(config, "endpoint", "url", "host", "baseUrl", "base_url")
@@ -343,21 +347,23 @@ class ConnectionTester(private val secretService: SecretService) {
     // ── MCP server (stored as type "tool") ─────────────────────────────────────
 
     /**
-     * MCP servers speak HTTP or SSE. A reachability + auth check against the server
-     * URL confirms the endpoint is live and the token (if any) is accepted.
+     * Ask the server what it offers.
+     *
+     * A real `tools/list`, not a reachability probe — see [McpTester] for why a
+     * HEAD/GET probe failed against every correctly-implemented MCP server,
+     * including Vectorbea's own.
      */
     private fun testMcp(conn: Connection, secret: String?): ConnectionTestResult {
         val config = parseConfig(conn.configJson)
         val serverUrl = firstNonBlank(config, "serverUrl", "server_url", "url", "baseUrl", "base_url")
             ?: return ConnectionTestResult.failed(0, "CONFIG_ERROR",
                 "MCP connection requires a server URL. Add the MCP server URL first.")
-        return HttpTester.test(HttpTester.HttpTestInput(
-            url = serverUrl,
-            authType = if (secret.isNullOrBlank()) "none" else "bearer",
-            apiKey = secret,
-            username = null,
-            password = null,
-        ))
+        return McpTester.test(
+            serverUrl = serverUrl,
+            bearerToken = secret,
+            transport = (config["transport"] as? String) ?: "streamable-http",
+            connectionId = conn.id,
+        )
     }
 
     // ── Vector store ────────────────────────────────────────────────────────────

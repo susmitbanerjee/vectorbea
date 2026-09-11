@@ -30,3 +30,13 @@ includeBuild("../../packages/graph-kotlin")
  * one of them changes.
  */
 includeBuild("../../packages/skills-kotlin")
+
+/*
+ * MCP: the wire protocol, the sanitizer and discovery.
+ *
+ * Shared because the API now calls discovery too — the Discover button and the
+ * connect wizard's "this server advertises 12 tools". A second implementation
+ * of `syncTools` would make that sentence a claim about code that never runs
+ * the customer's tools. `McpToolExecutor` stays here: it is execution.
+ */
+includeBuild("../../packages/mcp-kotlin")

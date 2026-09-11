@@ -36,8 +36,24 @@ fun requirePositiveDouble(value: Double?, fieldName: String): Double? {
     return value
 }
 
-/** Connection type allowlist */
-val CONNECTION_TYPES = setOf("llm", "database", "http", "tool", "vector_store", "object_storage")
+/**
+ * Connection type allowlist.
+ *
+ * `mcp` and `tool` are the SAME THING with two spellings, and both stay.
+ * An MCP server has always been stored as `tool` — `ConnectionTester` has
+ * treated `tool`, `mcp` and `mcp_server` as one case since it was written, and
+ * the web maps its own `mcp_server` onto `tool` before sending. Rows exist with
+ * `tool`, so removing it would orphan every MCP connection anyone has already
+ * made; `mcp` is added because a type nobody can name is a type nobody can
+ * filter a list by, which is how an MCP server became indistinguishable from
+ * anything else typed `tool`.
+ */
+val CONNECTION_TYPES = setOf(
+    "llm", "database", "http", "tool", "mcp", "vector_store", "object_storage",
+)
+
+/** The spellings that mean "an MCP server". Matches `ConnectionTester`'s `when`. */
+val MCP_CONNECTION_TYPES = setOf("tool", "mcp", "mcp_server")
 
 /** Provider allowlist for LLM connections */
 val LLM_PROVIDERS = setOf("openai", "anthropic", "google", "mistral", "cohere", "azure_openai", "custom")
@@ -50,8 +66,18 @@ val AGENT_TYPES = setOf(
     "conversational", "task", "supervisor", "router", "custom",
 )
 
-/** Tool type allowlist */
-val TOOL_TYPES = setOf("http", "database", "code", "builtin", "llm_generate", "custom")
+/**
+ * Tool type allowlist.
+ *
+ * `mcp` is here because `McpDiscovery.syncTools` has always INSERTed it, through
+ * raw SQL that never passed this check. The two agreed only because discovery
+ * never went through the create-tool route — and a vocabulary that a stored row
+ * can violate is a vocabulary that will be believed and then contradicted.
+ * Naming it also lets a person PATCH a discovered tool (its risk level, its
+ * approval requirement) without the update being refused for a type the row
+ * already has.
+ */
+val TOOL_TYPES = setOf("http", "database", "code", "builtin", "llm_generate", "mcp", "custom")
 
 /** Tool risk levels */
 val RISK_LEVELS = setOf("low", "medium", "high", "critical")
@@ -72,11 +98,23 @@ fun compatibleConnectionTypes(toolType: String): Set<String> = when (toolType) {
     "llm_generate" -> setOf("llm")
     "builtin" -> emptySet()   // no connection needed
     "code" -> emptySet()      // no external connection
+    /* An MCP tool's connection IS its server, and revoking it revokes every
+       tool discovered through it — the one server-level action there should be.
+       Pointing one at an LLM or a database connection would be a tool whose
+       call can never be made. */
+    "mcp" -> MCP_CONNECTION_TYPES
     "custom" -> CONNECTION_TYPES  // any
     else -> CONNECTION_TYPES
 }
 
-/** Returns true if the given tool type requires a connectionId. */
+/**
+ * Returns true if the given tool type requires a connectionId.
+ *
+ * `mcp` is deliberately NOT here, and the omission is load-bearing. A discovered
+ * MCP tool carries its server in `mcp_server_connection_id`, which is a separate
+ * column with its own FK and its own index; `connection_id` stays null on those
+ * rows. Requiring one would refuse every row discovery writes.
+ */
 fun toolRequiresConnection(toolType: String): Boolean = when (toolType) {
     "http", "database", "llm_generate" -> true
     else -> false

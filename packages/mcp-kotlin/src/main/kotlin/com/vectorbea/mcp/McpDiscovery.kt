@@ -1,9 +1,8 @@
-package com.vectorbea.worker.agents.tools.mcp
+package com.vectorbea.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.vectorbea.worker.agents.tools.ToolResultContract
-import com.vectorbea.worker.logging.logger
+import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -35,7 +34,7 @@ import javax.sql.DataSource
  */
 class McpDiscovery(
     private val dataSource: DataSource,
-    private val client: McpClient = McpClient(),
+    private val client: McpClient,
     /**
      * How long a manifest is used before a refresh is attempted.
      *
@@ -46,7 +45,7 @@ class McpDiscovery(
     private val ttlMs: Long =
         System.getenv("MCP_MANIFEST_TTL_MS")?.toLongOrNull() ?: 300_000L,
 ) {
-    private val log = logger()
+    private val log = LoggerFactory.getLogger(McpDiscovery::class.java)
     private val mapper = ObjectMapper()
 
     /** One remote tool, after sanitization. */
@@ -54,8 +53,19 @@ class McpDiscovery(
         val name: String,
         val description: String?,
         val inputSchema: Map<String, Any?>,
-        /** Built from the server's own annotations, when it supplies them. */
-        val resultContract: ToolResultContract?,
+        /**
+         * A result contract from the server's own annotations, as the canonical
+         * `{"version":1,"fields":[…]}` document.
+         *
+         * A JSON STRING and not a parsed object, because this module has no
+         * opinion about result contracts — it neither reads one nor applies one.
+         * It transcribes what the server annotated into the shape
+         * `ToolResultContract.parse` already reads, and the worker parses it at
+         * the point it is used. Holding the parsed type here would drag the
+         * result-contract layer into a protocol module to store a value it
+         * immediately re-serialises.
+         */
+        val resultContractJson: String?,
         /** True when the description tripped the frame-impersonation rules. */
         val descriptionWasAltered: Boolean,
     )
@@ -137,7 +147,7 @@ class McpDiscovery(
             name = name,
             description = McpSanitizer.text(rawDescription),
             inputSchema = schema,
-            resultContract = contractFromAnnotations(node),
+            resultContractJson = contractFromAnnotations(node),
             descriptionWasAltered = altered,
         )
     }
@@ -156,7 +166,7 @@ class McpDiscovery(
      * `desc` reaches the prompt in the result legend, which makes it the same
      * injection surface as the description.
      */
-    private fun contractFromAnnotations(node: JsonNode): ToolResultContract? {
+    private fun contractFromAnnotations(node: JsonNode): String? {
         val out = node["outputSchema"] ?: node["annotations"]?.get("result") ?: return null
         val props = out["properties"] as? com.fasterxml.jackson.databind.node.ObjectNode
             ?: return null
@@ -169,7 +179,7 @@ class McpDiscovery(
             )
         }.take(MAX_ANNOTATED_FIELDS).toList()
         if (fields.isEmpty()) return null
-        return ToolResultContract.parse(mapper.writeValueAsString(mapOf("fields" to fields)))
+        return mapper.writeValueAsString(mapOf("version" to 1, "fields" to fields))
     }
 
     private fun toResource(node: JsonNode): RemoteResource? {
@@ -258,13 +268,7 @@ class McpDiscovery(
                         st.setString(4, "mcp-${server.connectionId}-${t.name}".take(200))
                         st.setString(5, t.description)
                         st.setString(6, mapper.writeValueAsString(t.inputSchema))
-                        st.setString(7, t.resultContract?.let {
-                            mapper.writeValueAsString(mapOf(
-                                "version" to 1,
-                                "fields" to it.fields.map { f ->
-                                    mapOf("path" to f.path, "as" to f.name, "desc" to f.desc)
-                                }))
-                        })
+                        st.setString(7, t.resultContractJson)
                         st.setObject(8, server.connectionId)
                         st.setString(9, t.name)
                         written += st.executeUpdate()
@@ -386,9 +390,9 @@ class McpDiscovery(
                 inputSchema = runCatching {
                     mapper.convertValue(n["inputSchema"], Map::class.java) as Map<String, Any?>
                 }.getOrDefault(emptyMap()),
-                resultContract = n["resultContract"]?.let {
-                    ToolResultContract.parse(mapper.writeValueAsString(it))
-                },
+                resultContractJson = n["resultContractJson"]
+                    ?.takeIf { !it.isNull }
+                    ?.let { if (it.isTextual) it.asText() else mapper.writeValueAsString(it) },
                 descriptionWasAltered = n["descriptionWasAltered"]?.asBoolean() ?: false,
             )
         }

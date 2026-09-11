@@ -1,4 +1,4 @@
-package com.vectorbea.worker.agents.tools.mcp
+package com.vectorbea.mcp
 
 /**
  * A customer MCP server is untrusted input, and its text reaches the prompt.
