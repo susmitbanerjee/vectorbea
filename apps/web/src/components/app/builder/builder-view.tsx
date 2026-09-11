@@ -12,7 +12,7 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Kbd } from "~/components/ui/kbd";
 import { Canvas } from "./canvas";
-import { Palette, PALETTE, type QuickTemplate } from "./palette";
+import { Palette, PALETTE } from "./palette";
 import { Inspector } from "./inspector";
 import { NodeInspector, type NodeEdits } from "./inspector/node-inspector";
 import { TopBar, type SaveState } from "./top-bar";
@@ -362,15 +362,6 @@ function BuilderInner({
     setPicker({ at, connectFrom: sourceId });
   }, []);
 
-  const applyTemplate = React.useCallback((template: QuickTemplate) => {
-    const base = centreOfViewport();
-    let previous: string | undefined;
-    template.kinds.forEach((kind, i) => {
-      const id = `n-new-${kind}`;
-      dispatch({ type: "addNode", kind, x: base.x + i * 260, y: base.y, connectFrom: previous });
-      previous = id;
-    });
-  }, [dispatch, centreOfViewport]);
 
   const runAutoLayout = React.useCallback(() => {
     dispatch({ type: "replaceGraph", graph: autoLayout(state.nodes, state.edges), label: "Auto-layout" });
@@ -586,7 +577,6 @@ function BuilderInner({
             collapsed={paletteCollapsed}
             onToggle={() => setPaletteCollapsed((v) => !v)}
             onAdd={(kind, label) => addNode(kind, label)}
-            onApplyTemplate={applyTemplate}
           />
         ) : null}
 

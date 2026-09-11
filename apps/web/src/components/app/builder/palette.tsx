@@ -75,48 +75,12 @@ export const PALETTE: { group: string; items: PaletteItem[] }[] = [
   },
 ];
 
-export interface QuickTemplate {
-  id: string;
-  name: string;
-  description: string;
-  kinds: NodeKind[];
-}
-
-/** Shapes people build over and over, as one click instead of six. */
-export const QUICK_TEMPLATES: QuickTemplate[] = [
-  {
-    id: "gated-tool",
-    name: "Gated tool call",
-    description: "Approval, then the call, then a checkpoint",
-    kinds: ["approval", "tool", "checkpoint"],
-  },
-  {
-    id: "fan-merge",
-    name: "Fan out and merge",
-    description: "Per-item work, joined back together",
-    kinds: ["parallel", "tool", "merge"],
-  },
-  {
-    id: "supervisor-team",
-    name: "Supervisor and workers",
-    description: "A team node, gated, with a checkpoint after",
-    kinds: ["agent_team", "checkpoint"],
-  },
-  {
-    id: "classify-route",
-    name: "Classify and route",
-    description: "A model call feeding a branch",
-    kinds: ["llm", "branch"],
-  },
-];
-
 export function Palette({
-  collapsed, onToggle, onAdd, onApplyTemplate,
+  collapsed, onToggle, onAdd,
 }: {
   collapsed: boolean;
   onToggle: () => void;
   onAdd: (kind: NodeKind, label: string) => void;
-  onApplyTemplate: (template: QuickTemplate) => void;
 }) {
   const [query, setQuery] = React.useState("");
   const needle = query.trim().toLowerCase();
@@ -275,39 +239,6 @@ export function Palette({
         )}
       </div>
 
-      <div className="border-subtle border-t p-2">
-        <Text variant="eyebrow" tone="muted" className="mb-1 block px-1">Quick templates</Text>
-        <ul className="grid gap-px">
-          {QUICK_TEMPLATES.map((template) => (
-            <li key={template.id}>
-              <button
-                type="button"
-                onClick={() => onApplyTemplate(template)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-sm px-1.5 py-1.5 text-left",
-                  "hover:bg-surface-hover transition-colors duration-fast",
-                  "outline-none focus-visible:focus-ring",
-                )}
-              >
-                <span className="flex shrink-0 -space-x-1">
-                  {template.kinds.map((kind) => (
-                    <span
-                      key={kind}
-                      className="border-subtle bg-surface-raised text-fg-muted grid size-5 place-items-center rounded-xs border"
-                    >
-                      <Mark kind={kind} size={10} />
-                    </span>
-                  ))}
-                </span>
-                <span className="min-w-0">
-                  <span className="font-ui text-body-sm text-fg-primary block truncate">{template.name}</span>
-                  <span className="font-ui text-caption text-fg-muted block truncate">{template.description}</span>
-                </span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
     </aside>
   );
 }

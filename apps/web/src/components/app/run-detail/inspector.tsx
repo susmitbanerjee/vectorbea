@@ -460,7 +460,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * `result.rows[0].account_id` to paste into the next query, and counting
  * brackets by eye is how people get it wrong.
  */
-function JsonViewer({ value }: { value: unknown }) {
+export function JsonViewer({ value }: { value: unknown }) {
   const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
   const [copiedPath, setCopiedPath] = React.useState<string | null>(null);

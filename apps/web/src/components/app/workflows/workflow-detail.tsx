@@ -23,6 +23,7 @@ import { fromStoredGraph } from "~/lib/workflows/graph-codec";
 import type { BuilderGraph } from "~/lib/workflows/builder-graph";
 import type { RunStatus } from "~/lib/workflows/model";
 import { WorkflowStatusBadge } from "./atoms";
+import { ApiTriggerCard } from "./api-trigger-card";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WORKFLOW OVERVIEW — on real data
@@ -257,6 +258,23 @@ export function WorkflowDetail({ workflowId }: { workflowId: string }) {
                 ) : null}
               </ul>
             )}
+          </Card>
+
+          {/*
+            The endpoint has existed since the beginning and the UI never named
+            it, so the Run button looked like the only trigger there was. It sits
+            above the cost card because "how do I call this from my own code" is
+            asked on the first visit and the cost trend is asked on the tenth.
+          */}
+          <Card
+            title="Run it from anywhere"
+            help="This workflow is an HTTP endpoint. Calling it is identical to pressing Run."
+          >
+            <ApiTriggerCard
+              workflowId={workflow.id}
+              workflowName={workflow.name}
+              hasVersion={Boolean(workflow.currentVersionId)}
+            />
           </Card>
 
           <Card title="Cost trend">

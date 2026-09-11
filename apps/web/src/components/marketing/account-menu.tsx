@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { cn } from "~/lib/cn";
+import { Button } from "~/components/ui/button";
 import { Spinner } from "~/components/ui/spinner";
 import { overlaySurface, overlayMotion, menuItem } from "~/components/ui/select";
 import { signOutRequest } from "~/lib/auth/session";
@@ -20,9 +21,10 @@ import type { SessionIdentity } from "./session-cta";
    fetches this chunk only after the session hint says there is somebody to show
    it to, and an anonymous reader downloads none of it.
 
-   It is the same menu the app shell's sidebar renders, and deliberately so: the
-   avatar means the same thing in both places, so it opens onto the same three
-   choices.
+   WHAT IT RENDERS IS A PAIR, NOT A MENU. A `Control` button, then the avatar.
+   The menu behind the avatar holds exactly one action — sign out — because
+   everything else it used to hold was either a duplicate of the button beside
+   it or a page that lives inside the product the button opens.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function AccountMenu({ identity }: { identity: SessionIdentity }) {
@@ -56,71 +58,86 @@ export function AccountMenu({ identity }: { identity: SessionIdentity }) {
   };
 
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger
-        className={cn(
-          "flex items-center gap-2 rounded-full py-0.5 pl-0.5 pr-2.5",
-          "font-ui text-body-sm text-fg-secondary",
-          "border-subtle border bg-transparent",
-          "transition-colors duration-fast outline-none",
-          "hover:border-default hover:text-fg-primary",
-          "focus-visible:focus-ring",
-          "data-[state=open]:border-default data-[state=open]:text-fg-primary",
-        )}
-        aria-label={`Account: ${name}`}
-      >
-        <Avatar identity={identity} />
-        <span className="hidden max-w-[12ch] truncate sm:inline">{name}</span>
-        <Chevron />
-      </DropdownMenu.Trigger>
+    <>
+      {/*
+        CONTROL IS A BUTTON, NOT A MENU ITEM.
 
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={8}
-          className={cn(overlaySurface, overlayMotion, "z-popover w-60 p-1")}
+        It is the only thing a signed-in reader comes to this page to do, and it
+        was two interactions deep — open the menu, find the first row. A primary
+        action does not belong behind a disclosure; the menu's job is the
+        account, and going into the product is not an account operation.
+
+        `redirectTo` carries the workspace, so this is their Control page rather
+        than a generic one.
+      */}
+      <Button asChild size="sm" variant="secondary">
+        <Link href={identity.redirectTo as Route}>Control</Link>
+      </Button>
+
+      <DropdownMenu.Root>
+        {/*
+          The avatar alone. The name used to sit beside it, which said something
+          the picture already says and cost a third of the nav's width on a
+          phone. What is left is round, recognisable and unambiguous about which
+          account is signed in — the one question this control exists to answer.
+        */}
+        <DropdownMenu.Trigger
+          className={cn(
+            "flex items-center justify-center rounded-full p-0.5",
+            "border-subtle border bg-transparent",
+            "transition-colors duration-fast outline-none",
+            "hover:border-default",
+            "focus-visible:focus-ring",
+            "data-[state=open]:border-default",
+          )}
+          aria-label={`Account: ${name}`}
         >
-          <div className="border-subtle mb-1 flex items-center gap-2.5 border-b px-2 pb-2 pt-1.5">
-            <Avatar identity={identity} size="lg" />
-            <div className="min-w-0">
-              <p className="font-ui text-body-sm text-fg-primary truncate">{name}</p>
-              {identity.fullName ? (
-                <p className="font-ui text-caption text-fg-muted truncate">{identity.email}</p>
-              ) : null}
-            </div>
-          </div>
+          <Avatar identity={identity} />
+        </DropdownMenu.Trigger>
 
-          {/* The thing they came for. `redirectTo` carries the workspace, so
-              this is their Control page rather than a generic one. */}
-          <DropdownMenu.Item className={menuItem} asChild>
-            <Link href={identity.redirectTo as Route}>
-              <ControlGlyph />
-              Control
-            </Link>
-          </DropdownMenu.Item>
-          <DropdownMenu.Item className={menuItem} asChild>
-            <Link href={"/settings/profile" as Route}>Account settings</Link>
-          </DropdownMenu.Item>
-
-          <DropdownMenu.Separator className="bg-surface-active my-1 h-px" />
-
-          <DropdownMenu.Item
-            className={cn(menuItem, "text-status-failed data-[highlighted]:text-status-failed")}
-            disabled={signingOut}
-            /* `onSelect`, not `onClick`: Radix closes the menu on select, and an
-               async handler hung off a click would race that unmount.
-               `preventDefault` holds it open long enough to show the spinner. */
-            onSelect={(event) => {
-              event.preventDefault();
-              signOut();
-            }}
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            align="end"
+            sideOffset={8}
+            className={cn(overlaySurface, overlayMotion, "z-popover w-56 p-1")}
           >
-            {signingOut ? <Spinner /> : null}
-            {signingOut ? "Signing out…" : "Sign out"}
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+            {/*
+              Who, then the one action.
+
+              The identity block stays because the menu would otherwise be a
+              single unlabelled row — and on a shared machine "sign out" without
+              saying whose session is being ended is the wrong question
+              answered. Account settings has gone: it lives inside the product,
+              which the Control button now reaches in one click.
+            */}
+            <div className="border-subtle mb-1 flex items-center gap-2.5 border-b px-2 pb-2 pt-1.5">
+              <Avatar identity={identity} size="lg" />
+              <div className="min-w-0">
+                <p className="font-ui text-body-sm text-fg-primary truncate">{name}</p>
+                {identity.fullName ? (
+                  <p className="font-ui text-caption text-fg-muted truncate">{identity.email}</p>
+                ) : null}
+              </div>
+            </div>
+
+            <DropdownMenu.Item
+              className={cn(menuItem, "text-status-failed data-[highlighted]:text-status-failed")}
+              disabled={signingOut}
+              /* `onSelect`, not `onClick`: Radix closes the menu on select, and an
+                 async handler hung off a click would race that unmount.
+                 `preventDefault` holds it open long enough to show the spinner. */
+              onSelect={(event) => {
+                event.preventDefault();
+                signOut();
+              }}
+            >
+              {signingOut ? <Spinner /> : null}
+              {signingOut ? "Signing out…" : "Sign out"}
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </>
   );
 }
 
@@ -167,18 +184,4 @@ function Avatar({ identity, size = "sm" }: { identity: SessionIdentity; size?: "
   );
 }
 
-function Chevron() {
-  return (
-    <svg viewBox="0 0 10 10" className="size-2.5 shrink-0 opacity-60" aria-hidden="true" fill="none">
-      <path d="M2.5 4l2.5 2.5L7.5 4" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
 
-function ControlGlyph() {
-  return (
-    <svg viewBox="0 0 14 14" className="size-3.5 shrink-0" aria-hidden="true" fill="none">
-      <path d="M2 2.5h4v4H2zM8 2.5h4v2H8zM8 6.5h4v5H8zM2 8.5h4v3H2z" stroke="currentColor" strokeWidth={1.2} strokeLinejoin="round" />
-    </svg>
-  );
-}

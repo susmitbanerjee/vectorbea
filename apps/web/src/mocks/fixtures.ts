@@ -620,7 +620,7 @@ export const CONNECTIONS: Connection[] = [
      Without one this workspace cannot reach that surface at all in mock mode,
      and a screen nobody can open is a screen nobody reviews. */
   {
-    id: `conn_${uuid().slice(0, 8)}`, name: "Acme Internal — MCP", provider: "mcp",
+    id: `conn_${uuid().slice(0, 8)}`, name: "ServiceNow — Acme", provider: "mcp",
     status: "healthy", latencyMs: 208,
     blastRadius: { workflows: 2, tools: 4 },
     lastCheckedAt: iso(NOW - 39_000),

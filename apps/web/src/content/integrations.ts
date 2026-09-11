@@ -11,9 +11,45 @@
  *
  * ~/mocks/connectivity re-exports these and layers the fabricated per-tenant
  * parts (which connections exist, blast radius) on top.
+ *
+ * ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────
+ * Slack, HubSpot, Gmail, GitHub, Notion, Airtable, Jira and Google Sheets were
+ * all first-class entries and have been removed. Every one of them is reached
+ * through its own MCP server now, and that is the better answer for all of
+ * them: the vendor maintains the tool list, it stays current without a release
+ * from us, and the customer's own credential and scopes apply.
+ *
+ * Keeping both would have been worse than picking either. Two doors to GitHub —
+ * one an adapter with the six operations we happened to implement, the other a
+ * server with everything GitHub ships — is a choice a person has to make
+ * without the information needed to make it, and the adapter is the wrong
+ * answer almost every time it is chosen.
+ *
+ * WHAT STAYS, and why each is not an MCP case:
+ *   · LLM providers — a model connection is billing and capacity, not a tool
+ *     list. There is nothing to discover.
+ *   · Postgres and MySQL — the runtime speaks the wire protocol directly,
+ *     with parameters bound rather than interpolated and a read-only guard the
+ *     engine enforces. Going through a server would lose both.
+ *   · Generic HTTP and outbound webhook — the escape hatch for an endpoint
+ *     nobody has wrapped in anything. MCP-only would mean a customer with a
+ *     plain REST API has to build a server first, which is a worse product for
+ *     a protocol preference (MCP.md §1).
+ *   · MCP itself — the door to all of the above.
+ *
+ * The removed vendors keep their MARKS in `provider-logo.tsx`. A logo is for
+ * recognition, and recognising GitHub on a discovered tool list is exactly what
+ * this change makes more likely, not less.
  */
 import type { ProviderId } from "~/components/ui/provider-logo";
 
+/**
+ * `messaging`, `crm`, `productivity` and `developer` are retained with no
+ * members. They are the shape of the removed entries, and a catalogue that
+ * grows a first-class adapter again — for something genuinely not MCP-shaped —
+ * should not have to re-litigate the taxonomy to add it. Empty groups are
+ * filtered out at render.
+ */
 export type IntegrationCategory =
   | "ai" | "database" | "messaging" | "crm" | "productivity" | "developer" | "generic";
 
@@ -75,87 +111,6 @@ export const INTEGRATION_SEEDS: {
     ],
   },
   {
-    id: "slack", name: "Slack", category: "messaging",
-    description: "Post messages, reply in threads and look up users in a Slack workspace.",
-    auth: ["oauth"],
-    scopes: [
-      { name: "chat:write", description: "Post messages as the app.", required: true },
-      { name: "channels:read", description: "Resolve channel names to ids.", required: true },
-      { name: "users:read", description: "Look up a user by email.", required: false },
-    ],
-    setup: [
-      "Authorise the Vectorbea app in your Slack workspace.",
-      "Choose the channels it may post to — the grant is per channel, not workspace-wide.",
-      "Send a test message before saving.",
-    ],
-  },
-  {
-    id: "hubspot", name: "HubSpot", category: "crm",
-    description: "Read contacts, companies and deals, and write back deal stages.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "crm.objects.contacts.read", description: "Read contacts and their companies.", required: true },
-      { name: "crm.objects.deals.write", description: "Update deal stages and properties.", required: false },
-    ],
-    setup: [
-      "Authorise through HubSpot's OAuth flow, or paste a private app token.",
-      "Select the object types the workflows need.",
-      "Test against a known contact id.",
-    ],
-  },
-  {
-    id: "gmail", name: "Gmail", category: "productivity",
-    description: "Send mail from a workspace mailbox and search existing threads.",
-    auth: ["oauth"],
-    scopes: [
-      { name: "gmail.send", description: "Send mail as the connected mailbox.", required: true },
-      { name: "gmail.readonly", description: "Search and read threads.", required: false },
-    ],
-    setup: [
-      "Authorise a shared mailbox rather than a personal one — a personal account leaves with the person.",
-      "Grant send, and read only if a workflow needs to search.",
-      "Send a test message to yourself before saving.",
-    ],
-  },
-  {
-    id: "github", name: "GitHub", category: "developer",
-    description: "Open issues, read pull requests and comment on both.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "repo", description: "Read and write issues and pull requests.", required: true },
-      { name: "read:org", description: "Resolve team names.", required: false },
-    ],
-    setup: [
-      "Install the Vectorbea GitHub app on the organisation.",
-      "Choose the repositories it may act on.",
-      "Test by reading a pull request.",
-    ],
-  },
-  {
-    id: "notion", name: "Notion", category: "productivity",
-    description: "Create pages and query databases in a Notion workspace.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "content.read", description: "Query databases and read pages.", required: true },
-      { name: "content.write", description: "Create and update pages.", required: false },
-    ],
-    setup: [
-      "Create an internal integration in Notion.",
-      "Share the specific databases with it — Notion grants access per page, not per workspace.",
-      "Paste the integration token.",
-    ],
-  },
-  {
-    id: "airtable", name: "Airtable", category: "productivity",
-    description: "Read and upsert records in an Airtable base.",
-    auth: ["api-key"],
-    scopes: [
-      { name: "data.records:read", description: "Read records.", required: true },
-      { name: "data.records:write", description: "Create and update records.", required: false },
-    ],
-    setup: ["Create a personal access token scoped to one base.", "Paste it and pick the base."],
-  },
-  {
     id: "openai", name: "OpenAI", category: "ai",
     description: "Bring your own OpenAI key so model spend is billed to you rather than the workspace.",
     auth: ["api-key"],
@@ -196,25 +151,6 @@ export const INTEGRATION_SEEDS: {
       { name: "write", description: "INSERT and UPDATE.", required: false },
     ],
     setup: ["Create a dedicated role.", "Grant only the needed tables.", "Paste the connection string."],
-  },
-  {
-    id: "jira", name: "Jira", category: "developer",
-    description: "Create tickets and move them through a workflow.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "write:jira-work", description: "Create and transition issues.", required: true },
-      { name: "read:jira-work", description: "Read issues and projects.", required: true },
-    ],
-    setup: ["Authorise the Atlassian app.", "Pick the projects it may write to.", "Test by reading a project."],
-  },
-  {
-    id: "google-sheets", name: "Google Sheets", category: "productivity",
-    description: "Read ranges and append rows to a spreadsheet.",
-    auth: ["oauth"],
-    scopes: [
-      { name: "spreadsheets", description: "Read and write the sheets you share with it.", required: true },
-    ],
-    setup: ["Authorise with Google.", "Share the specific spreadsheets with the service account.", "Test a read."],
   },
   {
     id: "webhook", name: "Outbound webhook", category: "generic",

@@ -12,6 +12,7 @@ import { ReplayProvider, useReplay } from "./replay";
 import { RunHeader } from "./run-header";
 import { RecoveryCard } from "./recovery-card";
 import { WaitBanner } from "./wait-banner";
+import { ResultPanel } from "./result-panel";
 import { DeliveryPanel } from "./delivery-panel";
 import { StepTimeline } from "./step-timeline";
 import { CanvasMirror } from "./canvas-mirror";
@@ -258,6 +259,11 @@ function RunDetailBody({
           produced the right answer and failed to deliver it is not a success,
           and putting that on a tab means the person closes the page first. */}
       <DeliveryPanel deliveries={deliveries} onRedeliver={onRedeliver} />
+
+      {/* The answer, where somebody looking for the answer will find it. It was
+          already on this page — behind the last node of the timeline — which is
+          a thing you learn by being told rather than by looking. */}
+      <ResultPanel detail={detail} runId={run.id} />
 
       {comparing ? <CompareView run={run} onClose={() => setComparing(false)} /> : null}
 

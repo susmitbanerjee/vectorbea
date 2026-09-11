@@ -1329,8 +1329,21 @@ function DiscoverStep({
       >
         <ul className="grid gap-1.5">
           {shown.map((tool) => (
-            <li key={tool.name} className="flex min-w-0 items-start gap-2">
-              <Text variant="mono-sm" tone="primary" className="w-44 shrink-0 truncate">
+            <li key={tool.name} className="flex min-w-0 items-center gap-2">
+              {/*
+                The vendor's mark, guessed from the server name and the tool's
+                own. This is the moment discovery has to look like it WORKED —
+                a list of strings proves a request returned, a list of
+                ServiceNow-marked rows proves we found ServiceNow.
+              */}
+              <ProviderLogo
+                provider={`${serverName} ${tool.name}`}
+                fallbackLabel={serverName}
+                size={14}
+                decorative
+                className="shrink-0"
+              />
+              <Text variant="mono-sm" tone="primary" className="w-40 shrink-0 truncate">
                 {tool.name}
               </Text>
               <Text variant="body-sm" tone="secondary" className="min-w-0 flex-1 leading-snug">

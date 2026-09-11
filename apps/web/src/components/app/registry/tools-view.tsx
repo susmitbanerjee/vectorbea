@@ -6,7 +6,7 @@ import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
-import { Plugs } from "@phosphor-icons/react/dist/ssr";
+import { ProviderLogo } from "~/components/ui/provider-logo";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
 import { Icon } from "~/components/ui/icon";
@@ -214,7 +214,15 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       cell: (tool) => (
         tool.mcpServerId ? (
           <span className="flex min-w-0 items-center gap-1.5">
-            <Icon icon={Plugs} size="sm" decorative className="text-fg-muted shrink-0" />
+            {/* The vendor, not a generic plug — a registry with forty rows from
+                three servers is read by its marks long before its text. */}
+            <ProviderLogo
+              provider={`${tool.mcpServerName ?? ""} ${tool.mcpToolName ?? ""}`}
+              fallbackLabel={tool.mcpServerName ?? "MCP"}
+              size={13}
+              decorative
+              className="shrink-0"
+            />
             <Text variant="caption" tone="secondary" className="truncate">{tool.mcpServerName}</Text>
           </span>
         ) : (

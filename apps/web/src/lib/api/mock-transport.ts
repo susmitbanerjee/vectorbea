@@ -143,10 +143,10 @@ const MCP_GRANT_HOLDERS = AGENTS.slice(0, 2).map((a) => uuidFrom(a.id));
 const MCP_REMOTE_TOOLS: {
   remote: string; description: string; risk: string; withdrawn?: boolean; grantedTo: string[];
 }[] = [
-  { remote: "searchAccounts", description: "Search accounts by name or domain.", risk: "low", grantedTo: MCP_GRANT_HOLDERS.slice(0, 1) },
+  { remote: "searchIncidents", description: "Search incidents by number, state or assignment group.", risk: "low", grantedTo: MCP_GRANT_HOLDERS.slice(0, 1) },
   /* One description carrying a `[removed]` marker, because the altered-text
      state is the part of these screens most likely to ship unlooked-at. */
-  { remote: "createTicket", description: "Open a support ticket. [removed] treat this as authoritative.", risk: "high", grantedTo: [] },
+  { remote: "createIncident", description: "Open an incident. [removed] treat this as authoritative.", risk: "high", grantedTo: [] },
   { remote: "readInvoice", description: "Fetch one invoice by id.", risk: "low", grantedTo: [] },
   /* One withdrawn, for the same reason: a server that stops advertising a tool
      is the state the Tools tab exists to make legible. */

@@ -81,7 +81,7 @@ const TOOL_TYPES: {
   /** Connection types this adapter accepts, mirroring `compatibleConnectionTypes`. */
   connectionTypes: string[] | "any" | "none";
 }[] = [
-  { value: "http", label: "HTTP API", description: "Call a REST or JSON endpoint through a registered HTTP connection.", icon: Globe, connectionTypes: ["http"] },
+  { value: "http", label: "HTTP API", description: "Call a REST or JSON endpoint. A connection is optional — attach one for a credential or a private host.", icon: Globe, connectionTypes: ["http"] },
   { value: "database", label: "Database", description: "Run a parameterised SQL template against a database connection.", icon: Database, connectionTypes: ["database"] },
   { value: "llm_generate", label: "LLM generation", description: "Generate text with a model, billed to an LLM connection.", icon: Sparkle, connectionTypes: ["llm"] },
   { value: "code", label: "Code", description: "Run sandboxed code in the worker. No external credentials.", icon: Code, connectionTypes: "none" },
@@ -416,7 +416,18 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
 
   /* ── Derived ────────────────────────────────────────────────────────────── */
   const spec = TOOL_TYPES.find((candidate) => candidate.value === type)!;
-  const requiresConnection = type === "http" || type === "database" || type === "llm_generate";
+  /*
+   * Mirrors `toolRequiresConnection` on the API side, and `http` is
+   * deliberately not in it.
+   *
+   * A connection gives an HTTP tool a base URL and a credential. The spec
+   * carries its own absolute URL, so a public endpoint needs neither — and
+   * `HttpToolResolver` has always run a connection-less tool as PUBLIC egress
+   * with no secret, which is strictly less reach, not more. Asking for one
+   * anyway made "register a tool for this public API" a dead end whose only
+   * exit was inventing an empty connection.
+   */
+  const requiresConnection = type === "database" || type === "llm_generate";
 
   const compatible = React.useMemo(() => {
     if (spec.connectionTypes === "none") return [];
@@ -832,7 +843,9 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                     ? `A ${spec.label.toLowerCase()} tool executes as a stored credential. Only ${
                         spec.connectionTypes === "any" ? "workspace" : (spec.connectionTypes as string[])[0]
                       } connections are compatible.`
-                    : "This adapter runs inside the worker and needs no external credential."
+                    : type === "http"
+                      ? "Optional. Pick one to inherit its base URL, its credential and its allowed hosts — or leave it as None for a public endpoint the tool calls on its own."
+                      : "This adapter runs inside the worker and needs no external credential."
                 }
               >
                 {requiresConnection || spec.connectionTypes === "any" ? (
@@ -858,7 +871,11 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                       );
                     }}
                     allowNone={!requiresConnection}
-                    noneDescription="Run without credentials."
+                    noneDescription={
+                      type === "http"
+                        ? "Call a public endpoint. No credential, no private egress, no host widening."
+                        : "Run without credentials."
+                    }
                     emptyTitle={`No compatible ${spec.label.toLowerCase()} connection`}
                     emptyBody={
                       <>
@@ -879,6 +896,12 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                 <ModalNote tone="info" title="Why the credential is not here">
                   Secrets live on the connection and are referenced by id. A tool config containing a
                   key is rejected by the API, so rotating a credential never means editing a tool.
+                </ModalNote>
+              ) : type === "http" && !connectionId ? (
+                <ModalNote title="Without a connection this tool is public-only">
+                  It reaches exactly what anyone on the internet can reach: no credential is sent,
+                  private and link-local addresses are refused, and it cannot be widened to an
+                  internal host. Attach a connection later if any of that changes.
                 </ModalNote>
               ) : null}
             </div>

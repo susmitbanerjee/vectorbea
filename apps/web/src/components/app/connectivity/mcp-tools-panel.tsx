@@ -13,6 +13,7 @@ import { Icon } from "~/components/ui/icon";
 import { Button } from "~/components/ui/button";
 import { Tooltip } from "~/components/ui/tooltip";
 import { MonoId } from "~/components/ui/mono-id";
+import { ProviderLogo } from "~/components/ui/provider-logo";
 import { Section } from "~/components/app/registry/detail-sheet";
 import { RelativeTime } from "~/components/app/workflows/atoms";
 import { useApi } from "~/lib/api/api-provider";
@@ -278,7 +279,7 @@ function ToolRow({
             onClick={onToggle}
             aria-expanded={expanded}
             className={cn(
-              "group flex min-w-0 items-center gap-1 rounded-xs text-left",
+              "group flex min-w-0 items-center gap-1.5 rounded-xs text-left",
               "outline-none focus-visible:focus-ring",
             )}
           >
@@ -293,6 +294,20 @@ function ToolRow({
                 "transition-transform duration-fast ease-standard motion-reduce:transition-none",
                 expanded && "rotate-90",
               )}
+            />
+            {/*
+              The vendor's mark, resolved from the server name and the remote
+              tool name. This is the row saying WHAT was found rather than only
+              that something was — "Vectorbea discovered ServiceNow" instead of
+              four strings beginning `mcp-1a2b3c4d.`. An unrecognised vendor
+              gets a monogram, never a hole.
+            */}
+            <ProviderLogo
+              provider={vendorHint(tool)}
+              fallbackLabel={tool.serverName ?? tool.mcpToolName ?? tool.name}
+              size={14}
+              decorative
+              className="shrink-0"
             />
             <Text variant="mono-sm" tone="primary" className="truncate group-hover:text-fg-primary">
               {tool.name}
@@ -382,6 +397,25 @@ function ToolRow({
       ) : null}
     </>
   );
+}
+
+/**
+ * The best guess at which vendor a discovered tool belongs to.
+ *
+ * Three sources, most specific first. The SERVER name is the strongest signal —
+ * somebody who calls their connection "Acme ServiceNow" has told us — and the
+ * remote tool name is the fallback for a server named after the team that runs
+ * it rather than the product it fronts (`platform-tools` advertising
+ * `grafana_query`). The namespaced local name is last because it leads with
+ * `mcp-<uuid8>.` and matches nothing.
+ *
+ * Wrong guesses are cheap here: the tool is named correctly beside the mark, so
+ * the worst case is an unhelpful picture, not a misleading row.
+ */
+function vendorHint(tool: McpToolRow): string {
+  return [tool.serverName, tool.mcpToolName, tool.name]
+    .filter((part): part is string => Boolean(part))
+    .join(" ");
 }
 
 function Th({ children, align = "left" }: { children: React.ReactNode; align?: "left" | "right" }) {

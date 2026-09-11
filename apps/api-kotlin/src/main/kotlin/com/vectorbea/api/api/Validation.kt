@@ -110,13 +110,29 @@ fun compatibleConnectionTypes(toolType: String): Set<String> = when (toolType) {
 /**
  * Returns true if the given tool type requires a connectionId.
  *
- * `mcp` is deliberately NOT here, and the omission is load-bearing. A discovered
- * MCP tool carries its server in `mcp_server_connection_id`, which is a separate
- * column with its own FK and its own index; `connection_id` stays null on those
- * rows. Requiring one would refuse every row discovery writes.
+ * ── WHY `http` IS NOT HERE ──────────────────────────────────────────────────
+ * It was, and it was wrong. A connection supplies an HTTP tool with two things:
+ * a base URL and a credential. Since V064 the whole call lives in
+ * `http_spec_json`, which carries its own absolute URL — so a tool that hits a
+ * public endpoint needs neither, and `HttpToolResolver` has always handled
+ * that: "Public until a connection says otherwise. A tool with no connection
+ * behind it has nothing that could have authorised private egress."
+ *
+ * The runtime was therefore already correct and only the create route refused,
+ * which made "register a tool for this public API" a dead end that ended in
+ * inventing an empty connection to get past the form.
+ *
+ * The egress story is unchanged and is the reason this is safe: no connection
+ * means `EgressPolicy.PUBLIC`, no allowed-hosts widening and no secret. A
+ * connection-less HTTP tool can reach strictly less than one with a connection,
+ * never more.
+ *
+ * `mcp` is also deliberately absent, for a different reason: a discovered MCP
+ * tool carries its server in `mcp_server_connection_id`, a separate column with
+ * its own FK. Requiring `connection_id` would refuse every row discovery writes.
  */
 fun toolRequiresConnection(toolType: String): Boolean = when (toolType) {
-    "http", "database", "llm_generate" -> true
+    "database", "llm_generate" -> true
     else -> false
 }
 
