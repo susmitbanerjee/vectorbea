@@ -1,5 +1,5 @@
 import type { Route } from "next";
-import { GearSix, UsersThree } from "@phosphor-icons/react/dist/ssr";
+import { GearSix, UsersThree, Sparkle } from "@phosphor-icons/react/dist/ssr";
 import type { IconComponent } from "~/components/icons/types";
 import {
   DurableRunIcon, IncidentIcon, ApprovalGateIcon, AgentBrainIcon, ToolCallIcon,
@@ -76,6 +76,7 @@ export const NAV: NavGroup[] = [
       { label: "Workflows", href: "/workflows" as Route, icon: FanOutIcon },
       { label: "Agents", href: "/agents" as Route, icon: AgentBrainIcon },
       { label: "Tools", href: "/tools" as Route, icon: ToolCallIcon },
+      { label: "Skills", href: "/skills" as Route, icon: Sparkle },
       { label: "Templates", href: "/templates" as Route, icon: CommitBoundaryIcon },
     ],
   },
@@ -127,6 +128,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   workflows: "Workflows",
   agents: "Agents",
   tools: "Tools",
+  skills: "Skills",
   templates: "Templates",
   integrations: "Integrations",
   connections: "Connections",

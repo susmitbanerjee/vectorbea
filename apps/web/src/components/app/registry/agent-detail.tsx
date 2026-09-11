@@ -13,6 +13,7 @@ import { formatCost, formatDuration, formatTokens } from "~/lib/format";
 import { DetailSheet, Section, Facts } from "./detail-sheet";
 import { RiskBadge, RegistryStatusBadge, HealthDot, EnvironmentScope, Sparkline, DistributionBar } from "./atoms";
 import { grantFindings, type AgentRecord, type ToolGrant } from "~/lib/registry/model";
+import { AgentSkillGrants } from "./skills-view";
 import { AgentEditor } from "./registry-editor";
 import { useApi } from "~/lib/api/api-provider";
 import { useScope } from "~/lib/workspace/workspace-provider";
@@ -34,6 +35,10 @@ import { useScope } from "~/lib/workspace/workspace-provider";
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "grants", label: "Tool grants" },
+  /* Skills sit beside tool grants because the decision is about the two
+     together: a skill that names a tool the agent does not hold is REFUSED,
+     and the fix is one tab away rather than one screen away. */
+  { id: "skills", label: "Skills" },
   { id: "guardrails", label: "Guardrails" },
   { id: "prompt", label: "Prompt history" },
   { id: "performance", label: "Performance" },
@@ -103,6 +108,14 @@ export function AgentDetail({
         {editing ? <AgentEditor id={agent.id} onCancel={() => setEditing(false)} onSaved={async () => { await onUpdated(); setEditing(false); }} /> : <>
           {tab === "overview" ? <Overview agent={agent} connection={connection} /> : null}
           {tab === "grants" ? <Grants agent={agent} /> : null}
+          {tab === "skills" ? (
+            <Section
+              title="Skills"
+              help="Named instructions this agent works from. A skill teaches it how — it can never let it do something it was not already granted."
+            >
+              <AgentSkillGrants agentId={agent.id} agentName={agent.name} />
+            </Section>
+          ) : null}
           {tab === "guardrails" ? <GuardrailsPane agent={agent} /> : null}
           {tab === "prompt" ? <PromptHistory agent={agent} /> : null}
           {tab === "performance" ? <Performance agent={agent} /> : null}

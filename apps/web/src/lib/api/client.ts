@@ -294,6 +294,176 @@ export interface McpToolsResponse {
   serverName: string;
 }
 
+/* ── Triggers ─────────────────────────────────────────────────────────────── */
+
+/** One inbound webhook, as `WebhookRoutes.toResponse` returns it. */
+export interface WebhookRow {
+  id: string;
+  workflowId: string;
+  name: string;
+  signatureScheme: string;
+  /** True when a signing secret is stored. The secret itself is never returned. */
+  signed: boolean;
+  signatureHeader: string | null;
+  timestampHeader: string | null;
+  toleranceSeconds: number;
+  inputMapping: Record<string, string>;
+  eventTypePath: string | null;
+  eventTypes: string[];
+  dedupeHeader: string | null;
+  dedupePath: string | null;
+  runDedupPath: string | null;
+  runPriority: number | null;
+  enabled: boolean;
+  createdAt: string;
+  /** Present only on create and rotate. */
+  url?: string;
+}
+
+export interface CreateWebhookBody {
+  workflowId: string;
+  name: string;
+  signatureScheme?: string;
+  /** Plaintext, exactly once. Stored encrypted; never returned. */
+  signingSecret?: string | null;
+  signatureHeader?: string | null;
+  timestampHeader?: string | null;
+  toleranceSeconds?: number;
+  inputMapping?: Record<string, string>;
+  eventTypePath?: string | null;
+  eventTypes?: string[];
+  dedupeHeader?: string | null;
+  dedupePath?: string | null;
+  runDedupPath?: string | null;
+}
+
+export interface WebhookDeliveryRow {
+  id: string;
+  receivedAt: string;
+  /** `accepted`, `rejected`, `duplicate`, … — why the call did or did not run. */
+  outcome: string;
+  detail: string | null;
+  headers: Record<string, string>;
+  body: string | null;
+  bodyBytes: number;
+}
+
+/** One broker subscription, as `EventTriggerRoutes.toResponse` returns it. */
+export interface EventTriggerRow {
+  id: string;
+  workflowId: string;
+  name: string;
+  broker: string;
+  connectionId: string | null;
+  source: string;
+  consumerGroup: string | null;
+  inputMapping: Record<string, string>;
+  filterPath: string | null;
+  filterValues: string[];
+  dedupePath: string | null;
+  runDedupPath: string | null;
+  runPriority: number | null;
+  maxInFlight: number | null;
+  batchSize: number | null;
+  enabled: boolean;
+  /** Why it stopped, if it did. The answer to "my events stopped arriving". */
+  disabledReason: string | null;
+  lastError: string | null;
+  lastMessageAt: string | null;
+  messagesConsumed: number;
+  createdAt: string;
+}
+
+export interface CreateEventTriggerBody {
+  workflowId: string;
+  name: string;
+  broker: string;
+  connectionId?: string | null;
+  source: string;
+  consumerGroup?: string | null;
+  inputMapping?: Record<string, string>;
+  filterPath?: string | null;
+  filterValues?: string[];
+  dedupePath?: string | null;
+  runDedupPath?: string | null;
+}
+
+/* ── Skills ───────────────────────────────────────────────────────────────── */
+
+export interface SkillRow {
+  id: string;
+  workspaceId: string;
+  environmentId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  /** `first_party` for a library install, `workspace` for one written here. */
+  provenance: string;
+  catalogEntryId: string | null;
+  currentVersionId: string | null;
+  currentVersion: number | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SkillVersionRow {
+  id: string;
+  skillId: string;
+  version: number;
+  name: string;
+  summary: string | null;
+  instructions: string;
+  outputContract: string | null;
+  examples: { title: string; body: string }[];
+  requiredTools: { toolId: string; label: string }[];
+  /**
+   * The text tripped the frame-impersonation rules and was defanged.
+   *
+   * Surfaced, never hidden: the sanitizer does not reject, so a flagged version
+   * is installed and composing, and the API saying so is the only way anybody
+   * finds out.
+   */
+  flaggedForReview: boolean;
+  changeSummary: string | null;
+  createdAt: string;
+}
+
+export interface SkillCatalogRow {
+  id: string;
+  slug: string;
+  version: number;
+  name: string;
+  summary: string | null;
+  category: string | null;
+  instructions: string;
+  outputContract: string | null;
+  examples: { title: string; body: string }[];
+  /**
+   * What this skill needs an agent to be able to DO, in the abstract.
+   *
+   * A library entry cannot name tool uuids — it has no workspace — so it names
+   * capabilities, and installing binds each to a real tool. That binding is the
+   * install's whole job.
+   */
+  requiredCapabilities: { key: string; label: string; why: string }[];
+  provenance: string;
+}
+
+export interface InstallSkillBody {
+  version?: number;
+  slug?: string;
+  /** capability key → tool uuid. Every declared capability must appear. */
+  toolBindings: Record<string, string>;
+}
+
+export interface SkillGrantRow {
+  skillId: string;
+  skillName: string;
+  skillVersionId: string | null;
+  version: number | null;
+}
+
 /**
  * `POST /api/workflows/:id/run`, as `RunRoutes.triggerRun` declares it.
  *
@@ -733,6 +903,62 @@ export interface VectorbeaClient {
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
     setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /**
+   * Inbound webhooks — the "something happened over there" trigger.
+   *
+   * Shipped on the API since the beginning with no client and no screen, so the
+   * only way to start a workflow from a third party was to read the route
+   * handler. See `WebhookRoutes`.
+   */
+  webhooks: {
+    list(params?: Scope & { workflowId?: string }, options?: RequestOptions): Promise<{ items: WebhookRow[]; total: number }>;
+    /**
+     * Returns the row WITH its url — the only time it is ever returned.
+     *
+     * A webhook url is pasted into somebody else's console, which makes it a
+     * bearer credential for "may enqueue work in this workspace" even with a
+     * signature on top. It appears on create and on rotate and nowhere else, so
+     * the caller has to keep it or rotate again.
+     */
+    create(body: CreateWebhookBody, scope?: Scope, options?: RequestOptions): Promise<WebhookRow & { url: string }>;
+    remove(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /** Issues a new token and invalidates the old one. Returns the new url, once. */
+    rotate(id: string, scope?: Scope, options?: RequestOptions): Promise<{ url: string }>;
+    deliveries(id: string, params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<WebhookDeliveryRow>>;
+    replay(id: string, deliveryId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /** Broker subscriptions — Kafka, SQS, Pub/Sub. See `EventTriggerRoutes`. */
+  eventTriggers: {
+    list(params?: Scope & { workflowId?: string }, options?: RequestOptions): Promise<{ items: EventTriggerRow[]; total: number }>;
+    create(body: CreateEventTriggerBody, scope?: Scope, options?: RequestOptions): Promise<EventTriggerRow>;
+    remove(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /**
+   * Skills: the first-party library, a workspace's installed bundles, and the
+   * per-agent grant.
+   *
+   * `setGrants` is the one that matters. It REFUSES a grant whose skill needs a
+   * tool the agent does not hold, and the refusal carries the missing list —
+   * see `SkillToolsMissing`. That refusal is the feature, not an obstacle: the
+   * alternative is an agent that does exactly what its skill taught it, gets
+   * refused by the runtime, and presents as one that hallucinated a tool.
+   */
+  skills: {
+    list(params?: Scope & { status?: string } & PageParams, options?: RequestOptions): Promise<Paged<SkillRow>>;
+    get(id: string, scope?: Scope, options?: RequestOptions): Promise<SkillRow & { currentVersionDetail?: SkillVersionRow }>;
+    archive(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    holders(id: string, scope?: Scope, options?: RequestOptions): Promise<{ items: { agentId: string; agentName: string }[] }>;
+    catalog(scope?: Scope, options?: RequestOptions): Promise<{ items: SkillCatalogRow[] }>;
+    /** Copies a library entry into this workspace, binding its capabilities to real tools. */
+    install(slug: string, body: InstallSkillBody, scope?: Scope, options?: RequestOptions): Promise<SkillRow>;
+    grants(agentId: string, scope?: Scope, options?: RequestOptions): Promise<{ items: SkillGrantRow[] }>;
+    setGrants(agentId: string, skillIds: string[], scope?: Scope, options?: RequestOptions): Promise<unknown>;
   };
 
   approvals: {
@@ -1321,6 +1547,94 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<unknown>(`/api/schedules/${id}`, {
           method: "PATCH",
           body: { enabled },
+          ...req(scope, undefined, options),
+        }),
+    },
+
+    webhooks: {
+      list: ({ workspaceId, environmentId, workflowId } = {}, options) =>
+        call<{ items: WebhookRow[]; total: number }>(
+          "/api/webhooks",
+          req({ workspaceId, environmentId }, undefined, options, { workflowId }),
+        ),
+      create: (body, scope, options) =>
+        call<WebhookRow & { url: string }>("/api/webhooks", {
+          method: "POST", body, ...req(scope, undefined, options),
+        }),
+      remove: (id, scope, options) =>
+        call<void>(`/api/webhooks/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      /* Two endpoints, not a PATCH with a flag — that is how the API models it,
+         and mirroring it keeps the audit trail one action per row. */
+      setEnabled: (id, enabled, scope, options) =>
+        call<unknown>(`/api/webhooks/${id}/${enabled ? "enable" : "disable"}`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+      rotate: (id, scope, options) =>
+        call<{ url: string }>(`/api/webhooks/${id}/rotate`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+      deliveries: (id, { workspaceId, environmentId, page, pageSize } = {}, options) =>
+        call<Paged<WebhookDeliveryRow>>(
+          `/api/webhooks/${id}/deliveries`,
+          req({ workspaceId, environmentId }, undefined, options, { page, pageSize }),
+        ),
+      replay: (id, deliveryId, scope, options) =>
+        call<unknown>(`/api/webhooks/${id}/deliveries/${deliveryId}/replay`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+    },
+
+    eventTriggers: {
+      list: ({ workspaceId, environmentId, workflowId } = {}, options) =>
+        call<{ items: EventTriggerRow[]; total: number }>(
+          "/api/event-triggers",
+          req({ workspaceId, environmentId }, undefined, options, { workflowId }),
+        ),
+      create: (body, scope, options) =>
+        call<EventTriggerRow>("/api/event-triggers", {
+          method: "POST", body, ...req(scope, undefined, options),
+        }),
+      remove: (id, scope, options) =>
+        call<void>(`/api/event-triggers/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      setEnabled: (id, enabled, scope, options) =>
+        call<unknown>(`/api/event-triggers/${id}/${enabled ? "enable" : "disable"}`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+    },
+
+    skills: {
+      list: ({ workspaceId, environmentId, status, page, pageSize } = {}, options) =>
+        call<Paged<SkillRow>>(
+          "/api/skills",
+          req({ workspaceId, environmentId }, undefined, options, { status, page, pageSize }),
+        ),
+      get: (id, scope, options) =>
+        call<SkillRow & { currentVersionDetail?: SkillVersionRow }>(
+          `/api/skills/${id}`, req(scope, undefined, options),
+        ),
+      archive: (id, scope, options) =>
+        call<unknown>(`/api/skills/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      holders: (id, scope, options) =>
+        call<{ items: { agentId: string; agentName: string }[] }>(
+          `/api/skills/${id}/agents`, req(scope, undefined, options),
+        ),
+      catalog: (scope, options) =>
+        call<{ items: SkillCatalogRow[] }>("/api/skill-catalog", req(scope, undefined, options)),
+      install: (slug, body, scope, options) =>
+        call<SkillRow>(`/api/skill-catalog/${slug}/install`, {
+          method: "POST", body, ...req(scope, undefined, options),
+        }),
+      grants: (agentId, scope, options) =>
+        call<{ items: SkillGrantRow[] }>(`/api/agents/${agentId}/skills`, req(scope, undefined, options)),
+      /*
+       * PUT, and it REPLACES the list — the API models grants as a set, not as
+       * a stream of adds and removes, so a caller that sent only the new one
+       * would silently revoke the rest. Every call sends the whole intended set.
+       */
+      setGrants: (agentId, skillIds, scope, options) =>
+        call<unknown>(`/api/agents/${agentId}/skills`, {
+          method: "PUT",
+          body: { skills: skillIds.map((skillId) => ({ skillId })) },
           ...req(scope, undefined, options),
         }),
     },

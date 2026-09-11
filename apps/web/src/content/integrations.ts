@@ -111,6 +111,41 @@ export const INTEGRATION_SEEDS: {
     ],
   },
   {
+    /*
+     * ── SLACK IS BACK, AND THE REMOVAL WAS WRONG ────────────────────────────
+     *
+     * It went out with GitHub and HubSpot under "reachable through MCP". That
+     * is TRUE of Slack and it is not the whole story: a bot token in a Slack
+     * app is the thing most teams already have, the bot is how a workflow gets
+     * TRIGGERED (a mention in a channel) as well as how it reports back, and
+     * requiring somebody to stand up an MCP server before an agent can post a
+     * message is the "wrap your REST endpoint first" failure that MCP.md §1
+     * names as a worse product for a protocol preference.
+     *
+     * The rule the catalogue actually wants is narrower than the one applied:
+     * remove an adapter when the MCP server is STRICTLY BETTER — richer, and
+     * maintained by the vendor. For GitHub and HubSpot it is. For Slack, the
+     * two operations below plus the message read are what a workflow needs, a
+     * bot token is five minutes of setup, and the connection doubles as the
+     * identity a trigger listens on.
+     */
+    id: "slack", name: "Slack", category: "messaging",
+    description: "Post messages, read a channel or thread, and look up users — as a bot in your workspace.",
+    auth: ["api-key", "oauth"],
+    scopes: [
+      { name: "chat:write", description: "Post messages as the bot.", required: true },
+      { name: "channels:history", description: "Read messages in channels the bot is in.", required: false },
+      { name: "app_mentions:read", description: "Receive the mention events that can trigger a workflow.", required: false },
+      { name: "users:read.email", description: "Resolve an email address to a Slack user.", required: false },
+    ],
+    setup: [
+      "Create a Slack app in your workspace and add a bot user.",
+      "Give it chat:write, plus channels:history if an agent needs to READ messages and app_mentions:read if a mention should start a workflow.",
+      "Install it and paste the Bot User OAuth token — it starts xoxb-.",
+      "Invite the bot to each channel it works in. Slack grants per channel, not per workspace.",
+    ],
+  },
+  {
     id: "openai", name: "OpenAI", category: "ai",
     description: "Bring your own OpenAI key so model spend is billed to you rather than the workspace.",
     auth: ["api-key"],
@@ -706,6 +741,82 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
         binding: "input",
         help: "The parent message timestamp. Leave empty to post at top level.",
       },
+    ],
+  },
+  {
+    /*
+     * Reading was missing, and it is half of what a Slack bot is for.
+     *
+     * The catalogue had post and user-lookup, so an agent could announce and
+     * mention and could not read a word — which makes "an agent that answers
+     * the question somebody asked in #support" unbuildable, and that is the
+     * first thing anybody tries.
+     *
+     * `conversations.history` needs `channels:history` (and `groups:history`
+     * for private channels), which is why the seed above asks for it
+     * separately: it is a materially larger grant than posting and should be a
+     * separate decision.
+     */
+    id: "slack.read",
+    provider: "slack",
+    label: "Read recent messages",
+    description: "Reads the most recent messages in one channel.",
+    method: "GET",
+    path: "/conversations.history",
+    writes: false,
+    risk: "medium",
+    useCase: "Let an agent answer from what was already said in the channel, rather than asking the question again.",
+    params: [
+      {
+        name: "channel",
+        label: "Channel",
+        type: "string",
+        required: true,
+        binding: "config",
+        bindable: true,
+        placeholder: "C0123456789",
+        help: "The channel ID, not the #name — conversations.history takes an id. Fixed here, so the tool can only ever read this one channel.",
+      },
+      {
+        name: "limit",
+        label: "How many messages",
+        type: "number",
+        required: false,
+        binding: "config",
+        bindable: true,
+        placeholder: "20",
+        help: "Bound it. A channel's whole history in a prompt is the observation-size problem, and the agent reads the newest first anyway.",
+      },
+      {
+        name: "oldest",
+        label: "Since",
+        type: "string",
+        required: false,
+        binding: "input",
+        help: "A Slack timestamp. Leave empty for the most recent messages.",
+      },
+    ],
+  },
+  {
+    /*
+     * A thread, rather than a channel. Separate from `slack.read` because the
+     * common shape — a mention starts a workflow, the agent reads the thread it
+     * was mentioned in — needs the parent timestamp and nothing else, and
+     * making somebody configure a channel filter for that is asking the wrong
+     * question.
+     */
+    id: "slack.thread",
+    provider: "slack",
+    label: "Read a thread",
+    description: "Reads every reply under one message.",
+    method: "GET",
+    path: "/conversations.replies",
+    writes: false,
+    risk: "medium",
+    useCase: "The bot is mentioned in a thread. This is how the agent reads what was said before it was called in.",
+    params: [
+      { name: "channel", label: "Channel", type: "string", required: true, binding: "input", help: "The channel id from the event that started the run." },
+      { name: "ts", label: "Parent message", type: "string", required: true, binding: "input", help: "The thread's parent timestamp, from the triggering event." },
     ],
   },
   {

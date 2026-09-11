@@ -848,7 +848,18 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                       : "This adapter runs inside the worker and needs no external credential."
                 }
               >
-                {requiresConnection || spec.connectionTypes === "any" ? (
+                {/*
+                  CAN take one, not MUST take one.
+
+                  This read `requiresConnection || connectionTypes === "any"`,
+                  which was correct while http required a connection and became
+                  wrong the moment it stopped: an HTTP tool then fell to the
+                  "no connection required" branch and the picker disappeared
+                  altogether — so a Slack connection, sitting right there in the
+                  registry, could not be attached to a tool at all. Optional and
+                  unofferable are not the same thing.
+                */}
+                {spec.connectionTypes !== "none" ? (
                   <ConnectionPicker
                     label="Connection"
                     connections={compatible}

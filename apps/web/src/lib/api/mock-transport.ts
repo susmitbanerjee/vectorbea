@@ -122,6 +122,212 @@ const SAVED_VERSIONS = new Map<string, unknown[]>();
 const WORKSPACE_ID = uuidFrom("ws_acme");
 const ENVIRONMENT_ID = uuidFrom("env_production");
 
+/* ── Trigger and skill fixtures ───────────────────────────────────────────────
+ *
+ * Deliberately not all-green. A webhook with no signing secret, an event
+ * trigger the consumer disabled itself, and a skill that needs a tool are the
+ * three states these screens exist to make legible — a fixture set where
+ * everything is healthy lets all three ship unlooked-at. */
+
+const SCHEDULE_FIXTURES = [
+  {
+    id: uuidFrom("sched-renewals"),
+    jobId: WORKFLOWS[0]?.id ?? uuidFrom("wf-0"),
+    jobName: WORKFLOWS[0]?.name ?? "renewals-daily",
+    cron: "0 6 * * *",
+    timezone: "UTC",
+    status: "ACTIVE",
+    lastRun: new Date(Date.now() - 5 * 3600_000).toISOString(),
+    nextRun: new Date(Date.now() + 19 * 3600_000).toISOString(),
+  },
+  {
+    id: uuidFrom("sched-usage"),
+    jobId: WORKFLOWS[1]?.id ?? uuidFrom("wf-1"),
+    jobName: WORKFLOWS[1]?.name ?? "usage-rollup",
+    cron: "0 0 * * *",
+    timezone: "UTC",
+    status: "PAUSED",
+    lastRun: new Date(Date.now() - 40 * 3600_000).toISOString(),
+    nextRun: null,
+  },
+];
+
+const WEBHOOK_FIXTURES = [
+  {
+    id: uuidFrom("hook-slack"),
+    workflowId: WORKFLOWS[0]?.id ?? uuidFrom("wf-0"),
+    name: "Slack mentions",
+    signatureScheme: "hmac_sha256",
+    signed: true,
+    signatureHeader: "X-Slack-Signature",
+    timestampHeader: "X-Slack-Request-Timestamp",
+    toleranceSeconds: 300,
+    inputMapping: {},
+    eventTypePath: "event.type",
+    eventTypes: ["app_mention"],
+    dedupeHeader: null,
+    dedupePath: "event_id",
+    runDedupPath: "event.channel",
+    runPriority: null,
+    enabled: true,
+    createdAt: new Date(Date.now() - 9 * 86_400_000).toISOString(),
+  },
+  {
+    /* Unsigned, on purpose. Anybody who learns the url can start the workflow,
+       and the row is what says so. */
+    id: uuidFrom("hook-forms"),
+    workflowId: WORKFLOWS[1]?.id ?? uuidFrom("wf-1"),
+    name: "Contact form",
+    signatureScheme: "none",
+    signed: false,
+    signatureHeader: null,
+    timestampHeader: null,
+    toleranceSeconds: 300,
+    inputMapping: {},
+    eventTypePath: null,
+    eventTypes: [],
+    dedupeHeader: null,
+    dedupePath: null,
+    runDedupPath: null,
+    runPriority: null,
+    enabled: false,
+    createdAt: new Date(Date.now() - 21 * 86_400_000).toISOString(),
+  },
+];
+
+const EVENT_TRIGGER_FIXTURES = [
+  {
+    id: uuidFrom("evt-orders"),
+    workflowId: WORKFLOWS[0]?.id ?? uuidFrom("wf-0"),
+    name: "Order events",
+    broker: "kafka",
+    connectionId: null,
+    source: "orders.created",
+    consumerGroup: "vectorbea-orders",
+    inputMapping: {},
+    filterPath: null,
+    filterValues: [],
+    dedupePath: "id",
+    runDedupPath: null,
+    runPriority: null,
+    maxInFlight: 8,
+    batchSize: 1,
+    enabled: true,
+    disabledReason: null,
+    lastError: null,
+    lastMessageAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+    messagesConsumed: 4_182,
+    createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  },
+  {
+    /* Disabled by the consumer itself, with the reason. "My events stopped
+       arriving" is unanswerable without this row. */
+    id: uuidFrom("evt-alerts"),
+    workflowId: WORKFLOWS[1]?.id ?? uuidFrom("wf-1"),
+    name: "Alert stream",
+    broker: "sqs",
+    connectionId: null,
+    source: "https://sqs.eu-west-1.amazonaws.com/000/alerts",
+    consumerGroup: null,
+    inputMapping: {},
+    filterPath: "severity",
+    filterValues: ["P1", "P2"],
+    dedupePath: "MessageId",
+    runDedupPath: "service",
+    runPriority: 80,
+    maxInFlight: 4,
+    batchSize: 1,
+    enabled: false,
+    disabledReason: "The credential was rejected 20 times in a row.",
+    lastError: "AccessDenied: the queue refused ReceiveMessage",
+    lastMessageAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    messagesConsumed: 912,
+    createdAt: new Date(Date.now() - 60 * 86_400_000).toISOString(),
+  },
+];
+
+const SKILL_FIXTURES = [
+  {
+    id: uuidFrom("skill-incident-brief"),
+    workspaceId: WORKSPACE_ID,
+    environmentId: ENVIRONMENT_ID,
+    name: "Incident brief",
+    slug: "incident-brief",
+    description: "How to write a first-response message: impact, hypothesis, what is being checked.",
+    provenance: "first_party",
+    catalogEntryId: uuidFrom("cat-incident-brief"),
+    currentVersionId: uuidFrom("skill-incident-brief-v2"),
+    currentVersion: 2,
+    status: "active",
+    createdAt: new Date(Date.now() - 18 * 86_400_000).toISOString(),
+    updatedAt: new Date(Date.now() - 4 * 86_400_000).toISOString(),
+  },
+  {
+    id: uuidFrom("skill-support-voice"),
+    workspaceId: WORKSPACE_ID,
+    environmentId: ENVIRONMENT_ID,
+    name: "Support voice",
+    slug: "support-voice",
+    description: "The register support replies are written in, and the phrases that are never used.",
+    provenance: "workspace",
+    catalogEntryId: null,
+    currentVersionId: uuidFrom("skill-support-voice-v1"),
+    currentVersion: 1,
+    status: "active",
+    createdAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+    updatedAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+  },
+];
+
+const SKILL_CATALOG_FIXTURES = [
+  {
+    id: uuidFrom("cat-incident-brief"),
+    slug: "incident-brief",
+    version: 2,
+    name: "Incident brief",
+    summary: "Write a first-response message that leads with impact and states one hypothesis.",
+    category: "operations",
+    instructions: [
+      "When writing an incident's first response:",
+      "",
+      "1. Lead with impact — who cannot do what, right now.",
+      "2. State ONE hypothesis, and the evidence for it.",
+      "3. Say what is being checked next.",
+      "",
+      "Under 200 words. No apologies, no filler, no severity emoji. If you do not have a",
+      "hypothesis the evidence supports, say that instead of reaching for one.",
+    ].join("\n"),
+    outputContract: null,
+    examples: [],
+    requiredCapabilities: [],
+    provenance: "first_party",
+  },
+  {
+    id: uuidFrom("cat-ticket-triage"),
+    slug: "ticket-triage",
+    version: 1,
+    name: "Ticket triage",
+    summary: "Classify a support ticket and look up the account before answering.",
+    category: "support",
+    instructions: [
+      "Before drafting a reply, look the account up and read what it tells you.",
+      "",
+      "Classify: queue (billing, technical, account, other) and priority P1-P4. P1 is",
+      "production down, data loss, or a security report — nothing else, however the",
+      "customer worded it.",
+      "",
+      "Never promise a timeline.",
+    ].join("\n"),
+    examples: [],
+    /* Two capabilities, so the install dialog's binding step is exercised. */
+    requiredCapabilities: [
+      { key: "ticket_read", label: "a way to read a ticket", why: "The skill tells the agent to read the ticket's history before replying." },
+      { key: "account_read", label: "a way to look up an account", why: "Priority depends on the plan, which is on the account and not on the ticket." },
+    ],
+    provenance: "first_party",
+  },
+];
+
 /* ── The MCP fixture server, and what it advertises ───────────────────────────
  *
  * One place, read by three handlers — the tool list, the per-connection tool
@@ -1773,6 +1979,68 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       summary: null,
       workflowName: run.workflowName,
     })),
+  ],
+
+  /* ── Triggers and skills ───────────────────────────────────────────────────
+     All five endpoints below are complete on the API and had no mock, so the
+     screens that now render them would have thrown `notFound` in mock mode —
+     an empty product demo for two features that work. */
+  [
+    "GET",
+    "/api/schedules",
+    () => SCHEDULE_FIXTURES,
+  ],
+  [
+    "GET",
+    "/api/webhooks",
+    () => ({ items: WEBHOOK_FIXTURES, total: WEBHOOK_FIXTURES.length }),
+  ],
+  [
+    "POST",
+    "/api/webhooks",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; workflowId?: string };
+      const id = uuidFrom(`webhook-${body.name ?? "new"}`);
+      return {
+        ...WEBHOOK_FIXTURES[0],
+        id,
+        name: body.name ?? "New webhook",
+        workflowId: body.workflowId ?? WORKFLOWS[0]?.id ?? uuidFrom("wf"),
+        signed: false,
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        /* The url is returned on create and on rotate and nowhere else — the
+           fixture keeps that shape so the once-only dialog is exercised. */
+        url: `https://api.vectorbea.com/api/hooks/${id.replace(/-/g, "").slice(0, 24)}`,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/webhooks/:id/rotate",
+    (params) => ({
+      url: `https://api.vectorbea.com/api/hooks/${String(params.id).replace(/-/g, "").slice(0, 24)}r`,
+    }),
+  ],
+  [
+    "GET",
+    "/api/event-triggers",
+    () => ({ items: EVENT_TRIGGER_FIXTURES, total: EVENT_TRIGGER_FIXTURES.length }),
+  ],
+  [
+    "GET",
+    "/api/skills",
+    (_params, init) => paged(SKILL_FIXTURES, init),
+  ],
+  [
+    "GET",
+    "/api/skill-catalog",
+    () => ({ items: SKILL_CATALOG_FIXTURES }),
+  ],
+  [
+    "GET",
+    "/api/agents/:id/skills",
+    () => ({ items: [] }),
   ],
 ];
 
