@@ -48,6 +48,7 @@ ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx2g -Dorg.gradle.daemon=false"
 COPY apps/api-kotlin/settings.gradle.kts apps/api-kotlin/build.gradle.kts apps/api-kotlin/gradle.properties ./
 COPY packages/observability-kotlin/settings.gradle.kts packages/observability-kotlin/build.gradle.kts /workspace/packages/observability-kotlin/
 COPY packages/graph-kotlin/settings.gradle.kts packages/graph-kotlin/build.gradle.kts /workspace/packages/graph-kotlin/
+COPY packages/skills-kotlin/settings.gradle.kts packages/skills-kotlin/build.gradle.kts /workspace/packages/skills-kotlin/
 
 # Pre-resolve Gradle dependencies (separate cached layer)
 RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
@@ -66,6 +67,7 @@ COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/delivery /workspace
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging
 COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
 COPY packages/graph-kotlin/src /workspace/packages/graph-kotlin/src
+COPY packages/skills-kotlin/src /workspace/packages/skills-kotlin/src
 RUN gradle fatJar --no-daemon --console=plain --max-workers=1 -Pkotlin.compiler.execution.strategy=in-process -Pkotlin.incremental=false --info --stacktrace 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────

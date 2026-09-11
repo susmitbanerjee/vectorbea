@@ -5,8 +5,8 @@
 # Build context: REPO ROOT  (Railway Root Directory = / , Dockerfile Path =
 #                            apps/worker-kotlin/Dockerfile)
 #
-# The worker uses packages/observability-kotlin as a Gradle composite build,
-# so both directories must be available inside the Docker build context.
+# The worker includes observability-kotlin, graph-kotlin and skills-kotlin as
+# Gradle composite builds, so all must be available inside the build context.
 # recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/.
 # =============================================================================
 
@@ -39,13 +39,15 @@ FROM gradle:8.14-jdk17-alpine AS builder
 
 WORKDIR /workspace/apps/worker-kotlin
 
-# Limit JVM heap for Gradle + Kotlin compiler to stay within Railway build limits.
-ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false"
+# Compile in the Gradle JVM using the heap configured in gradle.properties.
+# Kotlin execution settings are project properties (-P on the build below).
+ENV GRADLE_OPTS="-Dorg.gradle.daemon=false"
 
 # Copy build scripts first — maximises Docker layer cache.
-COPY apps/worker-kotlin/settings.gradle.kts apps/worker-kotlin/build.gradle.kts ./
+COPY apps/worker-kotlin/settings.gradle.kts apps/worker-kotlin/build.gradle.kts apps/worker-kotlin/gradle.properties ./
 COPY packages/observability-kotlin/settings.gradle.kts packages/observability-kotlin/build.gradle.kts /workspace/packages/observability-kotlin/
 COPY packages/graph-kotlin/settings.gradle.kts packages/graph-kotlin/build.gradle.kts /workspace/packages/graph-kotlin/
+COPY packages/skills-kotlin/settings.gradle.kts packages/skills-kotlin/build.gradle.kts /workspace/packages/skills-kotlin/
 
 # Pre-resolve dependencies (separate cached layer)
 RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
@@ -56,7 +58,8 @@ RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/nu
 COPY apps/worker-kotlin/src ./src
 COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
 COPY packages/graph-kotlin/src /workspace/packages/graph-kotlin/src
-RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info --stacktrace 2>&1
+COPY packages/skills-kotlin/src /workspace/packages/skills-kotlin/src
+RUN gradle fatJar --no-daemon --console=plain --max-workers=1 -Pkotlin.compiler.execution.strategy=in-process -Pkotlin.incremental=false --info --stacktrace 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime
