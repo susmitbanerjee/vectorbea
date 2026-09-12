@@ -26,6 +26,7 @@ import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
+import { useRole } from "~/lib/auth/use-role";
 import { getPublicApiBaseUrl } from "~/lib/api/config";
 import type { ApiKeyRow, CreatedApiKey } from "~/lib/api/client";
 
@@ -62,6 +63,19 @@ export function ApiKeysView() {
   const api = useApi();
   const scope = useScope();
   const queryClient = useQueryClient();
+  /*
+   * `RbacGuard` holds create, rotate, revoke and rate-limit to WORKSPACE_WRITE
+   * — admin and owner. Reading the list is not gated, and is not gated here
+   * either: not being able to see which credentials exist in a workspace you
+   * belong to helps nobody.
+   *
+   * This is presentation. The API re-checks, and a developer who defeats it
+   * gets a 403 rather than a key. What it buys is a disabled button with a
+   * sentence naming the role to ask for, instead of an enabled one that throws.
+   */
+  const role = useRole();
+  const mayManage = role.can("apikey.manage");
+  const denial = role.denialReason("apikey.manage");
 
   const readScope = React.useMemo(
     () => ({ workspaceId: scope.workspaceId, environmentId: null }),
@@ -129,15 +143,19 @@ export function ApiKeysView() {
         title="API keys"
         description="A key lets your own code start runs and read results. It names a workspace, and it is held to exactly the limits the browser is."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!enabled || atLimit}
-            onClick={() => setCreating(true)}
-            iconLeft={<Icon icon={Key} size="sm" decorative />}
-          >
-            Create a key
-          </Button>
+          <Tooltip content={denial ?? (atLimit ? "This workspace is at its plan's key limit." : "")} disabled={mayManage && !atLimit}>
+            <span>
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={!enabled || atLimit || !mayManage}
+                onClick={() => setCreating(true)}
+                iconLeft={<Icon icon={Key} size="sm" decorative />}
+              >
+                Create a key
+              </Button>
+            </span>
+          </Tooltip>
         }
       />
 
@@ -158,17 +176,32 @@ export function ApiKeysView() {
             unaffected and still work.
           </Banner>
         ) : rows.length === 0 ? (
-          <Empty onCreate={() => setCreating(true)} disabled={!enabled} />
+          <Empty
+            onCreate={() => setCreating(true)}
+            disabled={!enabled || !mayManage}
+            denial={mayManage ? null : denial}
+          />
         ) : (
           <div className="grid grid-cols-1 gap-4">
             <KeyTable
               caption="Live keys"
               rows={live}
               busyId={busyId}
-              onRotate={rotate}
-              onRevoke={setRevoking}
+              /* Omitted rather than disabled for a reader who cannot act: the
+                 column disappears instead of showing two greyed buttons per
+                 row. The banner below says why once, which beats saying it
+                 n times in tooltips. */
+              onRotate={mayManage ? rotate : undefined}
+              onRevoke={mayManage ? setRevoking : undefined}
               emptyNote="Every key in this workspace has been revoked or has expired."
             />
+            {!mayManage && denial ? (
+              <Text variant="caption" tone="muted" className="block leading-snug">
+                {denial} You can see which keys exist and when they were last used; creating,
+                rotating and revoking them is an admin action because a key can be minted to spend
+                against the workspace rather than against any one member&rsquo;s budget.
+              </Text>
+            ) : null}
             {retired.length > 0 ? (
               <KeyTable
                 caption="Revoked and expired"
@@ -664,15 +697,24 @@ function UsageNote({ rateLimitPerMinute }: { rateLimitPerMinute: number | null }
   );
 }
 
-function Empty({ onCreate, disabled }: { onCreate: () => void; disabled: boolean }) {
+function Empty({
+  onCreate, disabled, denial,
+}: {
+  onCreate: () => void;
+  disabled: boolean;
+  denial: string | null;
+}) {
   return (
     <div className="border-subtle grid place-items-center rounded-lg border border-dashed px-4 py-14">
-      <div className="max-w-[44ch] text-center">
+      <div className="max-w-[46ch] text-center">
         <Text variant="heading-sm" tone="max" as="p" className="block">No API keys yet</Text>
         <Text variant="body-sm" tone="secondary" className="mt-1.5 block leading-snug">
           A key is what lets something other than this browser start a run — your backend, a cron, a
           CI job, somebody else&rsquo;s webhook. Nothing is exposed until you make one.
         </Text>
+        {denial ? (
+          <Text variant="caption" tone="muted" className="mt-2 block leading-snug">{denial}</Text>
+        ) : null}
         <div className="mt-4">
           <Button variant="primary" size="sm" disabled={disabled} onClick={onCreate}>
             Create the first key
