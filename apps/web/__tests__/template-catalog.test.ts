@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TEMPLATES, type WorkflowTemplate } from "~/lib/workflows/templates/catalog";
+import { TEMPLATES, PATTERN_LABEL, type WorkflowTemplate } from "~/lib/workflows/templates/catalog";
 import { validateGraph, blockingIssues } from "~/components/app/builder/validation";
 import { toStoredGraph, fromStoredGraph, triggerConfigFrom } from "~/lib/workflows/graph-codec";
 import { readTeamConfig, findDelegationCycle, reachableAliases } from "~/lib/workflows/team";
@@ -61,14 +61,41 @@ const WORKER_TOOL_TYPES = new Set([
 ]);
 
 describe("the catalogue covers the patterns it claims to", () => {
-  it("has one template per orchestration pattern", () => {
-    expect([...new Set(TEMPLATES.map((t) => t.pattern))].sort()).toEqual([
-      "approval", "batch", "review", "router", "single-agent", "supervisor",
-    ]);
+  it("covers every pattern it ships, and ships every pattern it names", () => {
+    /* Both directions, because each failure is invisible on its own. A pattern
+       in the union with no template is a filter option that always returns
+       nothing; a template whose pattern is not in the union does not compile,
+       but a pattern that merely disappeared from `PATTERNS` in the gallery
+       does — which is how `pipeline` shipped three templates nobody could
+       filter to. */
+    const used = [...new Set(TEMPLATES.map((t) => t.pattern))].sort();
+    expect(used).toEqual(["approval", "batch", "pipeline", "single-agent"]);
+    expect(Object.keys(PATTERN_LABEL).sort()).toEqual(used);
   });
 
   it("gives every template a unique id", () => {
     expect(new Set(TEMPLATES.map((t) => t.id)).size).toBe(TEMPLATES.length);
+  });
+
+  /*
+   * ── THE CATALOGUE IS INSTALLABLE IN A DEFAULT DEPLOYMENT ──────────────────
+   * This is the whole point of the removal that produced this test. Three
+   * templates were built on `agent_team`, which `AgentTeamNodeExecutor` refuses
+   * unless AGENT_TEAMS_ENABLED is true — and it defaults to false. So a third of
+   * the gallery was permanently disabled behind an environment variable, under
+   * a paragraph naming a worker flag the reader has no way to act on.
+   *
+   * A card nobody can click does not read as an unreleased feature. It reads as
+   * a product that does not work, in the one place built to prove the opposite.
+   */
+  it("ships nothing that a default deployment cannot install", () => {
+    const gated = TEMPLATES.filter(
+      (t) => t.requiresFlags.length > 0 || t.requiresFeatures.length > 0,
+    );
+    expect(
+      gated.map((t) => t.id),
+      "these templates render as disabled cards in a default deployment",
+    ).toEqual([]);
   });
 });
 
@@ -195,6 +222,11 @@ describe.each(TEMPLATES.map((t) => [t.id, t] as const))("%s", (_id, template) =>
     const graph = builtMinimal(template);
     const hasTeam = graph.nodes.some((n) => n.node.kind === "agent_team");
     if (hasTeam) {
+      /* Not reachable today — no shipped template uses `agent_team`, and the
+         catalogue-level test above is what keeps it that way. Kept because the
+         two assertions are what a re-added team template must satisfy, and a
+         template declaring the wrong flag fails in the worker rather than in
+         the gallery, where somebody can still see it. */
       expect(template.requiresFeatures).toContain("teams");
       expect(template.requiresFlags).toContain("agentTeams");
     } else {

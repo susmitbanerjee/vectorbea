@@ -246,7 +246,29 @@ const EVENT_TRIGGER_FIXTURES = [
   },
 ];
 
-const SKILL_FIXTURES = [
+/**
+ * The workspace's installed skills, MUTABLE.
+ *
+ * `let`-shaped state in a fixture file is a smell everywhere else here, and it
+ * is the right answer for exactly two endpoints: installing a skill and
+ * granting it are two calls that have to agree with each other within one
+ * click. A read-only fixture makes the second half of that flow unreviewable.
+ */
+const INSTALLED_SKILLS: {
+  id: string;
+  workspaceId: string;
+  environmentId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  provenance: string;
+  catalogEntryId: string | null;
+  currentVersionId: string | null;
+  currentVersion: number | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}[] = [
   {
     id: uuidFrom("skill-incident-brief"),
     workspaceId: WORKSPACE_ID,
@@ -278,6 +300,65 @@ const SKILL_FIXTURES = [
     updatedAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
   },
 ];
+
+/** Per-agent grants, keyed by agent id. Empty until somebody grants one. */
+const AGENT_SKILL_GRANTS: Record<string, {
+  skillId: string;
+  skillName: string;
+  skillVersionId: string | null;
+  version: number | null;
+}[]> = {};
+
+/*
+ * API keys.
+ *
+ * The one thing these fixtures have to get right is the SHAPE of the secret:
+ * present exactly once, on create and on rotate, and absent from every list row
+ * forever. A mock that echoed a key back on read would make the once-only
+ * dialog untestable and would quietly teach the screen a habit the live API
+ * cannot support — `ApiKeyService` stores SHA-256 and has no column to read
+ * from.
+ */
+const API_KEY_FIXTURES = [
+  {
+    id: uuidFrom("key-ci"),
+    name: "CI pipeline",
+    prefix: "vb_live_8fQ2",
+    actsAs: "ops@acme.example",
+    lastUsedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+    expiresAt: null as string | null,
+    revokedAt: null as string | null,
+    createdAt: new Date(Date.now() - 62 * 86_400_000).toISOString(),
+  },
+  {
+    id: uuidFrom("key-zapier"),
+    name: "Zapier",
+    prefix: "vb_live_c41K",
+    actsAs: "sam@acme.example",
+    lastUsedAt: new Date(Date.now() - 9 * 86_400_000).toISOString(),
+    expiresAt: new Date(Date.now() + 21 * 86_400_000).toISOString(),
+    revokedAt: null as string | null,
+    createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  },
+  {
+    /* A revoked row stays in the list. "This key was live until Tuesday" is the
+       first thing asked when one leaks, and deleting the row deletes the
+       answer. */
+    id: uuidFrom("key-old-laptop"),
+    name: "Old laptop",
+    prefix: "vb_live_0aB7",
+    actsAs: "sam@acme.example",
+    lastUsedAt: new Date(Date.now() - 55 * 86_400_000).toISOString(),
+    expiresAt: null as string | null,
+    revokedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+    createdAt: new Date(Date.now() - 120 * 86_400_000).toISOString(),
+  },
+];
+
+/** Long enough to look real, obviously fake to anyone who reads it. */
+function mockSecret(seed: string): string {
+  return `vb_live_${seed}_mock_not_a_real_credential_0000`;
+}
 
 const SKILL_CATALOG_FIXTURES = [
   {
@@ -2027,10 +2108,18 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "/api/event-triggers",
     () => ({ items: EVENT_TRIGGER_FIXTURES, total: EVENT_TRIGGER_FIXTURES.length }),
   ],
+  /* ── Skills ────────────────────────────────────────────────────────────────
+     Install and grant are STATEFUL here, unlike most mutations in this file,
+     which fall through to the `{ ok: true, echoed }` catch-all. They have to
+     be: the agent Skills tab installs a library entry and then immediately
+     grants it, and an echo returns no skill id and no name, so the flow ends in
+     a toast reading "undefined installed" and a checkbox that never ticks. A
+     screen that cannot be clicked through in mock mode is a screen nobody
+     reviews before it ships. */
   [
     "GET",
     "/api/skills",
-    (_params, init) => paged(SKILL_FIXTURES, init),
+    (_params, init) => paged(INSTALLED_SKILLS, init),
   ],
   [
     "GET",
@@ -2038,9 +2127,132 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     () => ({ items: SKILL_CATALOG_FIXTURES }),
   ],
   [
+    "POST",
+    "/api/skill-catalog/:slug/install",
+    (params) => {
+      const slug = String(params.slug);
+      const entry = SKILL_CATALOG_FIXTURES.find((e) => e.slug === slug);
+      const existing = INSTALLED_SKILLS.find((s) => s.slug === slug);
+      /* Re-installing is an UPGRADE, not a duplicate — the API adds a version
+         to the existing row rather than creating a second one, so every grant
+         in the workspace follows it. The mock has to agree or the gallery's
+         "Update to v2" button appears to create a second copy. */
+      if (existing) {
+        existing.currentVersion = entry?.version ?? (existing.currentVersion ?? 1) + 1;
+        existing.updatedAt = new Date().toISOString();
+        return existing;
+      }
+      const installed = {
+        id: uuidFrom(`skill-${slug}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name: entry?.name ?? slug,
+        slug,
+        description: entry?.summary ?? null,
+        provenance: "first_party",
+        catalogEntryId: entry?.id ?? null,
+        currentVersionId: uuidFrom(`skill-${slug}-v${entry?.version ?? 1}`),
+        currentVersion: entry?.version ?? 1,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      INSTALLED_SKILLS.push(installed);
+      return installed;
+    },
+  ],
+  [
     "GET",
     "/api/agents/:id/skills",
-    () => ({ items: [] }),
+    (params) => ({ items: AGENT_SKILL_GRANTS[String(params.id)] ?? [] }),
+  ],
+  [
+    "PUT",
+    "/api/agents/:id/skills",
+    (params, init) => {
+      const body = (init.body ?? {}) as { skills?: { skillId: string }[] };
+      AGENT_SKILL_GRANTS[String(params.id)] = (body.skills ?? []).flatMap((grant) => {
+        const skill = INSTALLED_SKILLS.find((s) => s.id === grant.skillId);
+        return skill
+          ? [{
+              skillId: skill.id,
+              skillName: skill.name,
+              skillVersionId: skill.currentVersionId,
+              version: skill.currentVersion,
+            }]
+          : [];
+      });
+      return { ok: true };
+    },
+  ],
+
+  /* ── API keys ──────────────────────────────────────────────────────────────
+     `ApiKeyRoutes` has been complete since V062 and nothing in the product
+     called it — the screen at /api-keys read a Supabase table no environment
+     points at. These mocks exist so the replacement screen can be exercised
+     without a live stack, and so the once-only secret dialog is demonstrable. */
+  [
+    "GET",
+    "/api/api-keys",
+    () => ({
+      keys: API_KEY_FIXTURES,
+      limit: 10,
+      used: API_KEY_FIXTURES.filter((k) => !k.revokedAt).length,
+      rateLimitPerMinute: 600,
+    }),
+  ],
+  [
+    "POST",
+    "/api/api-keys",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; expiresAt?: string };
+      const name = body.name ?? "New key";
+      const id = uuidFrom(`key-${name}`);
+      const secret = mockSecret(id.slice(0, 8));
+      return {
+        id,
+        name,
+        prefix: secret.slice(0, 12),
+        secret,
+        expiresAt: body.expiresAt ?? null,
+        message: "Copy this key now. It cannot be shown again.",
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/api-keys/:id/rotate",
+    (params) => {
+      const id = uuidFrom(`key-rotated-${String(params.id)}`);
+      const secret = mockSecret(id.slice(0, 8));
+      return {
+        id,
+        name: "Rotated key",
+        prefix: secret.slice(0, 12),
+        /* Spelled `key` and not `secret`, because that is what the live rotate
+           endpoint spells it. The client normalises the two; a mock that agreed
+           with `create` instead would hide the difference until production. */
+        key: secret,
+        rotatedFrom: String(params.id),
+        message: "The previous key keeps working for 24 hours. Deploy this one before then.",
+      };
+    },
+  ],
+  ["DELETE", "/api/api-keys/:id", () => null],
+  [
+    "PUT",
+    "/api/api-keys/:id/rate-limit",
+    (params, init) => {
+      const body = (init.body ?? {}) as { perMinute?: number | null };
+      return {
+        id: String(params.id),
+        rateLimitPerMinute: body.perMinute ?? null,
+        planCeiling: 600,
+        message: body.perMinute == null
+          ? "This key now uses the workspace's plan limit."
+          : `This key is limited to ${body.perMinute} requests per minute.`,
+      };
+    },
   ],
 ];
 

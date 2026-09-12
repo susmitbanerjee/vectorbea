@@ -1,5 +1,5 @@
 import type { Route } from "next";
-import { GearSix, UsersThree, Sparkle } from "@phosphor-icons/react/dist/ssr";
+import { GearSix, UsersThree, Sparkle, ListMagnifyingGlass } from "@phosphor-icons/react/dist/ssr";
 import type { IconComponent } from "~/components/icons/types";
 import {
   DurableRunIcon, IncidentIcon, ApprovalGateIcon, AgentBrainIcon, ToolCallIcon,
@@ -105,7 +105,21 @@ export const NAV: NavGroup[] = [
      * surface stops being consulted.
      */
     items: [
-      { label: "Audit log", href: "/audit-log" as Route, icon: ByokKeyIcon },
+      /*
+       * API keys is top-level for the same reason the audit log is: it is a
+       * CREDENTIAL surface, and the product tells people to come here. The
+       * workflow overview's trigger card says "the key goes in the
+       * Authorization header" and links to /api-keys — a route that existed,
+       * worked, and appeared in no menu, so the only way to reach it was to
+       * already be on a screen that mentioned it. A key you cannot find is a
+       * key nobody makes, and the API surface reads as unavailable.
+       */
+      /* `ByokKeyIcon` moves here from Audit log, where it never made sense — it
+         is the key mark, and this is the key screen. The audit log takes a
+         Phosphor glyph under the same rule as Settings: reading a record is not
+         one of the concepts the bespoke set exists for. */
+      { label: "API keys", href: "/api-keys" as Route, icon: ByokKeyIcon },
+      { label: "Audit log", href: "/audit-log" as Route, icon: ListMagnifyingGlass as IconComponent },
       { label: "Settings", href: "/settings" as Route, icon: GearSix as IconComponent },
     ],
   },
@@ -137,6 +151,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   usage: "Usage & limits",
   members: "Members",
   "audit-log": "Audit log",
+  "api-keys": "API keys",
   builder: "Builder",
   new: "New",
   architect: "AI Architect",

@@ -11,7 +11,9 @@
  * Components.
  */
 
-export { getApiBaseUrl, getDataMode, isMockMode, type DataMode } from "./config";
+export {
+  getApiBaseUrl, getPublicApiBaseUrl, getDataMode, isMockMode, type DataMode,
+} from "./config";
 
 export {
   VectorbeaApiError,

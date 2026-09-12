@@ -464,6 +464,66 @@ export interface SkillGrantRow {
   version: number | null;
 }
 
+/* ── API keys ─────────────────────────────────────────────────────────────── */
+
+/**
+ * A key as it can be LISTED, which is a deliberately thin row.
+ *
+ * `ApiKeyService` stores SHA-256 of the secret and nothing else. What survives
+ * in clear is `prefix` — the first twelve characters — which is enough to match
+ * a row to a log line and useless to whoever finds it. There is no field here
+ * that could carry the secret, because there is no column that holds it: losing
+ * a key means minting another, which is the right trade for a credential that
+ * can spend money.
+ */
+export interface ApiKeyRow {
+  id: string;
+  name: string;
+  /** First twelve characters. Identifies, never authenticates. */
+  prefix: string;
+  /**
+   * The member this key spends as, by email, or null for a service key.
+   *
+   * Not decoration. A key is charged against its creator's member cap, so a
+   * guest who mints one is still held to the budget their host set — "make an
+   * API key" is a different door into the same allowance, never a bigger one.
+   */
+  actsAs: string | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiKeyListResponse {
+  keys: ApiKeyRow[];
+  /** The plan's ceiling on how many keys this workspace may hold. */
+  limit: number | null;
+  used: number;
+  rateLimitPerMinute: number;
+}
+
+/** The response to a mint or a rotate. The ONLY time `secret` exists. */
+export interface CreatedApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  /**
+   * The secret, once.
+   *
+   * Named `secret` rather than `key` upstream so that a client logging the whole
+   * response is at least obvious about what it has just written to disk. The
+   * rotate endpoint spells the same value `key`; both are normalised here so a
+   * caller never has to know which it called.
+   */
+  secret: string;
+  expiresAt?: string | null;
+  /** Present on a rotate: the key this one replaces. */
+  rotatedFrom?: string | null;
+  /** Upstream's own sentence — when the old key stops working, in words. */
+  message?: string;
+}
+
 /**
  * `POST /api/workflows/:id/run`, as `RunRoutes.triggerRun` declares it.
  *
@@ -959,6 +1019,49 @@ export interface VectorbeaClient {
     install(slug: string, body: InstallSkillBody, scope?: Scope, options?: RequestOptions): Promise<SkillRow>;
     grants(agentId: string, scope?: Scope, options?: RequestOptions): Promise<{ items: SkillGrantRow[] }>;
     setGrants(agentId: string, skillIds: string[], scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /**
+   * Workspace API credentials — `ApiKeyRoutes`.
+   *
+   * ── THIS IS NOT THE ROUTE THE APP USED TO CALL ──────────────────────────
+   * `/app/api/keys` writes to a Supabase `api_keys` table that no environment
+   * points at any more, so the screen it backs could list nothing and mint
+   * nothing while reporting success. The live store is Postgres, behind the
+   * Kotlin API, and it is the same table `authenticate()` reads — which is the
+   * only property that makes a minted key actually work.
+   *
+   * `create` and `rotate` are the only calls that ever return a secret, and
+   * they return it once. Nothing here can read one back.
+   */
+  apiKeys: {
+    list(scope?: Scope, options?: RequestOptions): Promise<ApiKeyListResponse>;
+    create(
+      body: { name: string; actsAs?: string | null; expiresAt?: string | null },
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<CreatedApiKey>;
+    /**
+     * Mint a replacement and start a bounded clock on the old one.
+     *
+     * Not "revoke then create": that is an outage between the revoke and the
+     * new key reaching every deployment holding it, and "rotate your keys
+     * regularly" is advice nobody follows twice after that happens once.
+     */
+    rotate(
+      id: string,
+      graceSeconds?: number,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<CreatedApiKey>;
+    revoke(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    /** Null clears this key's own ceiling and leaves only the plan's. */
+    setRateLimit(
+      id: string,
+      perMinute: number | null,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ planCeiling: number; message: string }>;
   };
 
   approvals: {
@@ -1635,6 +1738,62 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<unknown>(`/api/agents/${agentId}/skills`, {
           method: "PUT",
           body: { skills: skillIds.map((skillId) => ({ skillId })) },
+          ...req(scope, undefined, options),
+        }),
+    },
+
+    apiKeys: {
+      list: (scope, options) =>
+        call<ApiKeyListResponse>("/api/api-keys", req(scope, undefined, options)),
+
+      create: (body, scope, options) =>
+        call<CreatedApiKey>("/api/api-keys", {
+          method: "POST",
+          /*
+           * `actsAs` is OMITTED, not sent as null, when the caller does not
+           * name one. The route reads the three cases apart: absent means "the
+           * person minting it", an empty string means an unattributed service
+           * key, and a uuid means that member. Sending null for "I did not
+           * choose" would mint an unattributed key — one charged to the
+           * workspace and to nobody's cap — which is the opposite of the
+           * default and is exactly how a guest would escape their budget.
+           */
+          body: {
+            name: body.name,
+            ...(body.actsAs === undefined ? {} : { actsAs: body.actsAs }),
+            ...(body.expiresAt ? { expiresAt: body.expiresAt } : {}),
+          },
+          ...req(scope, undefined, options),
+        }),
+
+      rotate: async (id, graceSeconds, scope, options) => {
+        /* Upstream calls the secret `key` here and `secret` on create. Same
+           value, same one-and-only-showing; normalised so a caller does not
+           have to remember which endpoint it reached. */
+        const payload = await call<CreatedApiKey & { key?: string }>(
+          `/api/api-keys/${id}/rotate`,
+          {
+            method: "POST",
+            body: {},
+            ...req(
+              scope, undefined, options,
+              graceSeconds == null ? undefined : { graceSeconds },
+            ),
+          },
+        );
+        return { ...payload, secret: payload.secret ?? payload.key ?? "" };
+      },
+
+      revoke: (id, scope, options) =>
+        call<void>(`/api/api-keys/${id}`, {
+          method: "DELETE",
+          ...req(scope, undefined, options),
+        }),
+
+      setRateLimit: (id, perMinute, scope, options) =>
+        call<{ planCeiling: number; message: string }>(`/api/api-keys/${id}/rate-limit`, {
+          method: "PUT",
+          body: { perMinute },
           ...req(scope, undefined, options),
         }),
     },

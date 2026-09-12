@@ -1,60 +1,31 @@
-import { cookies } from "next/headers";
+import * as React from "react";
+import { ApiKeysView } from "~/components/app/settings/api-keys-view";
+import { ControlSkeleton } from "~/components/app/control/skeletons";
 
-import { AppHeader } from "@/components/layout/app-header";
-import { ApiKeysClient } from "@/components/api-keys/api-keys-client";
-import type { ApiKeyView } from "@/lib/api";
-import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
-import { createVectorBeaAdminClient } from "@/lib/supabase-admin";
+export const metadata = { title: "API keys" };
 
-export const dynamic = "force-dynamic";
-
-export default async function ApiKeysPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ org?: string }>;
-}) {
-  const { org: workspaceId } = await searchParams;
-
-  let keys: ApiKeyView[] = [];
-
-  if (workspaceId) {
-    const cookieStore = await cookies();
-    const user = await getAuthenticatedUserFromCookies(cookieStore);
-
-    if (user) {
-      const supabase = createVectorBeaAdminClient();
-      const { data } = await supabase
-        .from("workspace_members")
-        .select("workspace_id")
-        .eq("workspace_id", workspaceId)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (data) {
-        const { data: keyRows } = await supabase
-          .from("api_keys")
-          .select("id, workspace_id, key_name, key_last_four, key_role, created_at, last_used_at, revoked_at")
-          .eq("workspace_id", workspaceId)
-          .order("created_at", { ascending: false });
-
-        keys = (keyRows ?? []).map((row) => ({
-          id: row.id,
-          workspaceId: row.workspace_id,
-          name: row.key_name ?? "",
-          maskedKey: `vb_****${row.key_last_four ?? ""}`,
-          createdAt: row.created_at,
-          lastUsedAt: row.last_used_at ?? null,
-          revokedAt: row.revoked_at ?? null,
-          active: !row.revoked_at,
-        }));
-      }
-    }
-  }
-
+/**
+ * API keys.
+ *
+ * ── WHY THIS ROUTE MOVED OFF THE LEGACY CLIENT ────────────────────────────
+ * The previous page read and wrote a Supabase `api_keys` table through
+ * `createVectorBeaAdminClient`. That schema is dead in every environment (see
+ * /docs/audit/CURRENT-STATE.md), so the list was always empty and "Create"
+ * returned a key that authenticated nothing — the API validates against a
+ * Postgres table those rows never reached.
+ *
+ * The live store is `ApiKeyRoutes` / `ApiKeyService`, which is the same table
+ * `authenticate()` reads. That is the only property that makes an issued key
+ * actually open anything.
+ *
+ * `components/api-keys/api-keys-client.tsx` and `/app/api/keys/*` are left in
+ * place: this is a screen-by-screen migration, and deleting a legacy component
+ * is a separate decision from routing around it.
+ */
+export default function ApiKeysPage() {
   return (
-    <div className="min-h-screen">
-      <AppHeader title="API Keys" subtitle="Issue and rotate workspace credentials for local proxies." />
-      <ApiKeysClient initialKeys={keys} />
-    </div>
+    <React.Suspense fallback={<ControlSkeleton />}>
+      <ApiKeysView />
+    </React.Suspense>
   );
 }

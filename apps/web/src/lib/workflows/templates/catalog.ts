@@ -1,5 +1,4 @@
 import type { BuilderGraph, BuilderEdge, GraphNode } from "../builder-graph";
-import { writeTeamConfig, type TeamConfig } from "../team";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE STARTER TEMPLATES.
@@ -32,33 +31,43 @@ import { writeTeamConfig, type TeamConfig } from "../team";
      first run, which is the worst possible outcome for a starter template —
      it teaches the person that the product is broken, on their first minute.
 
+   · NOTHING BEHIND A RUNTIME FLAG. This one was learned the expensive way.
+     Three templates here — supervisor, router and review loop — were built on
+     the `agent_team` node, which `AgentTeamNodeExecutor` refuses unless
+     AGENT_TEAMS_ENABLED is true, and that defaults to false in the worker and in
+     the web build. So the gallery's three most interesting cards were permanently
+     disabled, each under a paragraph naming an environment variable that means
+     nothing to the person reading it. A catalogue where half the shelf is
+     labelled "not available here" does not read as a product with an unreleased
+     feature; it reads as a product that does not work, which is the first
+     impression templates exist to prevent.
+
+     They are gone rather than hidden behind a flag check, because a card nobody
+     can click is worth less than the space it occupies, and the pattern they
+     demonstrated is still here: `pipeline` chains several agents without the
+     team primitive. Bring them back WITH the feature, not before it.
+
    ── PATTERNS, NOT SCENARIOS ─────────────────────────────────────────────────
    Each template is one ORCHESTRATION PATTERN with a plausible job attached, not
-   a vertical solution. Somebody adopting "supervisor and workers" is going to
-   replace the job; what they are keeping is the shape, the guards and the
-   budget. So the documentation leads with the shape.
+   a vertical solution. Somebody adopting "agent pipeline" is going to replace
+   the job; what they are keeping is the shape, the guards and the budget. So the
+   documentation leads with the shape.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export type TemplatePattern =
-  | "single-agent" | "supervisor" | "router" | "review" | "approval" | "batch"
+  | "single-agent" | "approval" | "batch"
   /**
    * Several agents, wired in sequence, each with its own instructions and its
    * own grants.
    *
-   * ── WHY THIS PATTERN EXISTS SEPARATELY FROM `supervisor` ────────────────
-   * Every multi-agent template in the original catalogue used an `agent_team`
-   * node, which is gated behind `agentTeams` and `agentDelegation` — both
-   * default FALSE in the worker and in the web build. So in a default
-   * deployment the catalogue offered six templates of which the three
-   * interesting ones could not be installed, and "templates" read as a feature
-   * that did not work.
+   * ── THIS IS THE MULTI-AGENT PATTERN THE CATALOGUE SHIPS ─────────────────
+   * `agent` nodes chained by ordinary edges are several agents doing several
+   * jobs — the thing people actually mean by multi-agent — with no team
+   * primitive, no delegation, no plan feature and no flag.
    *
-   * A pipeline needs none of that. `agent` nodes chained by ordinary edges are
-   * several agents doing several jobs — the thing people actually mean by
-   * multi-agent — with no team primitive, no delegation, no plan feature and no
-   * flag. The supervisor pattern is for when the SPLIT is a runtime decision;
-   * when the split is known in advance, which is most of the time, a pipeline
-   * is cheaper, easier to debug and runnable today.
+   * A supervisor is for when the SPLIT is a runtime decision. When the split is
+   * known in advance, which is most of the time, a pipeline is cheaper, easier
+   * to debug, and — unlike a team — runnable in a default deployment today.
    */
   | "pipeline";
 
@@ -137,7 +146,14 @@ export interface WorkflowTemplate {
   requiresConnection: ConnectionKind;
   /** Entitlement keys the workspace's plan must grant. Empty for most. */
   requiresFeatures: string[];
-  /** Runtime flags that must be on. Mirrors the worker's env switches. */
+  /**
+   * Runtime flags that must be on. Mirrors the worker's env switches.
+   *
+   * Empty on every shipped template, and kept anyway. The gallery still checks
+   * it and still disables a card whose flag is off, which is the guard that
+   * makes re-adding a flagged template a visible decision rather than a silent
+   * one — see the note at the top of this file about what happened last time.
+   */
   requiresFlags: ("agentTeams" | "agentDelegation")[];
   agents: TemplateAgentSpec[];
   optionalTools: TemplateToolSpec[];
@@ -202,10 +218,12 @@ function emailNode(name: string, to: string, subject: string, body: string): Gra
   });
 }
 
-/** A team node, written in the shape `TeamConfig.parse` reads. */
-function teamNode(name: string, team: TeamConfig): GraphNode {
-  return node("agent_team", name, writeTeamConfig(team));
-}
+/* There is deliberately no `teamNode` helper here any more. An `agent_team`
+   node cannot run in a default deployment (AGENT_TEAMS_ENABLED defaults false),
+   so a helper that makes one easy to add is a trap: the next template built on
+   it would install cleanly and be permanently disabled in the gallery, which is
+   exactly the state this file was just dug out of. Multi-agent templates use
+   the `pipeline` pattern. */
 
 /* Every template ships with a cost ceiling. A zero budget means NO ceiling in
    `BudgetVector`, and a starter template that can spend without bound is the
@@ -302,307 +320,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
 
-  /* ─────────────────────────────────────────────────────── 2. supervisor team */
-  {
-    id: "supervisor-and-workers",
-    name: "Supervisor and workers",
-    summary: "One agent owns the brief and hands pieces of it to two specialists.",
-    pattern: "supervisor",
-    category: "growth",
-    difficulty: "intermediate",
-    requiresConnection: "llm",
-    requiresFeatures: ["teams", "delegation"],
-    requiresFlags: ["agentTeams", "agentDelegation"],
-    agents: [
-      {
-        ref: "lead",
-        name: "Brief supervisor",
-        type: "supervisor",
-        role: "supervisor",
-        instructions:
-          "You own a research brief. Break it into research and writing, delegate each to the "
-          + "member whose role fits, and assemble their answers into one document. Delegate at "
-          + "most once per member unless the answer you get back is unusable — say why when it is.",
-        maxIterations: 6,
-      },
-      {
-        ref: "researcher",
-        name: "Researcher",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You gather and organise facts on a narrow question. Return a bulleted list of findings "
-          + "with a confidence note on each. Say plainly when you do not know something.",
-        maxIterations: 4,
-      },
-      {
-        ref: "writer",
-        name: "Writer",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You turn findings into prose. Keep the structure the findings came in. Do not add "
-          + "facts that were not given to you.",
-        maxIterations: 4,
-      },
-    ],
-    optionalTools: [],
-    sampleInput: {
-      brief: "Summarise how durable execution differs from a retry loop, for an engineering audience.",
-    },
-    doc: {
-      whatItDoes:
-        "A supervisor receives a brief, delegates the research to one member and the writing to "
-        + "another, and assembles what comes back. The delegation graph is on the canvas: the "
-        + "supervisor has grants to both workers and neither worker has a grant at all, which is "
-        + "what makes the shape a supervisor rather than a committee.",
-      whatItNeeds: [
-        "One LLM connection.",
-        "A plan that includes agent teams and delegation.",
-        "AGENT_TEAMS_ENABLED and AGENT_ACTIVATIONS_ENABLED on in the deployment.",
-      ],
-      costPerRun: {
-        range: "about 8–20¢",
-        drivers: [
-          "Three agents, so three sets of context",
-          "How many times the supervisor re-delegates",
-          "The length of the brief",
-        ],
-        ceiling: "25¢ and 60k tokens for the whole team, children included.",
-      },
-      changeFirst: [
-        { where: "The two workers' instructions", why: "‘Researcher’ and ‘writer’ are placeholders for the two halves of YOUR job. The split is the design decision." },
-        { where: "Max activations, on the team node", why: "12 is generous for three members. Lowering it is the cheapest way to bound a supervisor that re-delegates too eagerly." },
-        { where: "The cost ceiling", why: "A team spends more than one agent and the ceiling is what turns a runaway into a CeilingExceeded rather than an invoice." },
-      ],
-      patternNote:
-        "Supervisor and workers is for work that decomposes into pieces needing DIFFERENT context. "
-        + "If every piece needs the same context, one agent doing it in several iterations is "
-        + "cheaper and easier to debug.",
-    },
-    build: (refs) => {
-      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
-      const team = teamNode("Research and write", {
-        policy: "supervisor",
-        entryAlias: "supervisor",
-        objective: "Produce the brief the input asks for.",
-        joinPolicy: { kind: "wait_all" },
-        onChildFailure: "continue",
-        roster: [
-          { agentId: refs.agents.lead, alias: "supervisor", role: "supervisor", canDelegateTo: ["researcher", "writer"] },
-          { agentId: refs.agents.researcher, alias: "researcher", role: "worker", canDelegateTo: [] },
-          { agentId: refs.agents.writer, alias: "writer", role: "worker", canDelegateTo: [] },
-        ],
-        limits: {
-          maxDepth: 2, maxActivations: 8, maxHandoffsPerPair: 2,
-          maxTeamDurationMs: 600_000, maxContextChars: null,
-          maxRounds: 4, maxIterations: 6, maxToolCalls: 0,
-        },
-        budget: STARTER_BUDGET,
-      });
-      const commit = node("checkpoint", "Commit the draft", { scope: "run" });
-      const out = node("output", "Emit the document", { format: "json", destination: "run" });
-      const end = node("end", "Done");
-      return chain([trigger, team, commit, out, end]);
-    },
-  },
-
-  /* ────────────────────────────────────────────────────── 3. router + experts */
-  {
-    id: "router-and-specialists",
-    name: "Router and specialists",
-    summary: "One agent reads the request and hands it to exactly one specialist.",
-    pattern: "router",
-    category: "support",
-    difficulty: "intermediate",
-    requiresConnection: "llm",
-    requiresFeatures: ["teams"],
-    requiresFlags: ["agentTeams"],
-    agents: [
-      {
-        ref: "router",
-        name: "Request router",
-        type: "router_agent",
-        role: "router",
-        instructions:
-          "You read one inbound request and transfer it to exactly one specialist: billing for "
-          + "anything about money, technical for anything about the product not working. Transfer "
-          + "once. Do not attempt to answer the request yourself.",
-        maxIterations: 2,
-      },
-      {
-        ref: "billing",
-        name: "Billing specialist",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You answer billing questions: invoices, charges, refunds, plan changes. State what you "
-          + "would need to look up rather than inventing an amount.",
-        maxIterations: 4,
-      },
-      {
-        ref: "technical",
-        name: "Technical specialist",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You answer questions about the product not working. Ask for the one piece of "
-          + "information that would most narrow the cause, rather than listing everything it could be.",
-        maxIterations: 4,
-      },
-    ],
-    optionalTools: [],
-    sampleInput: {
-      request: "I was charged twice for March and the second charge has not been refunded.",
-    },
-    doc: {
-      whatItDoes:
-        "A router classifies one request and TRANSFERS it — a tail call, so control does not come "
-        + "back and the specialist's answer is the team's answer. The router's own activation ends "
-        + "`handed_off`, which is terminal and graded as neither success nor failure.",
-      whatItNeeds: [
-        "One LLM connection.",
-        "A plan that includes agent teams. Delegation is NOT required — a router transfers.",
-        "AGENT_TEAMS_ENABLED on in the deployment.",
-      ],
-      costPerRun: {
-        range: "about 4–10¢",
-        drivers: [
-          "Two agents run per request, not three — the router and whichever specialist it picked",
-          "The specialist's iteration count",
-        ],
-        ceiling: "25¢ and 60k tokens for the team.",
-      },
-      changeFirst: [
-        { where: "The router's instructions", why: "The two categories are the routing table. Adding a third means adding a specialist and a grant, in that order." },
-        { where: "The specialists' instructions", why: "A router is only as good as the difference between where it can send things." },
-        { where: "Nothing about depth", why: "A transfer does not grow the delegation depth, so the depth limit has no effect on this shape. Do not spend time tuning it." },
-      ],
-      patternNote:
-        "Reach for a router when the request decides WHO should handle it and one handler is "
-        + "enough. If the answer needs two specialists to contribute, that is a supervisor.",
-    },
-    build: (refs) => {
-      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
-      const team = teamNode("Route the request", {
-        policy: "router",
-        entryAlias: "router",
-        objective: "Route this request to the right specialist and return their answer.",
-        joinPolicy: { kind: "wait_all" },
-        onChildFailure: "continue",
-        roster: [
-          { agentId: refs.agents.router, alias: "router", role: "router", canDelegateTo: ["billing", "technical"] },
-          { agentId: refs.agents.billing, alias: "billing", role: "worker", canDelegateTo: [] },
-          { agentId: refs.agents.technical, alias: "technical", role: "worker", canDelegateTo: [] },
-        ],
-        limits: {
-          maxDepth: 1, maxActivations: 4, maxHandoffsPerPair: 1,
-          maxTeamDurationMs: 300_000, maxContextChars: null,
-          maxRounds: 4, maxIterations: 4, maxToolCalls: 0,
-        },
-        budget: STARTER_BUDGET,
-      });
-      const commit = node("checkpoint", "Commit the answer", { scope: "run" });
-      const out = node("output", "Emit the answer", { format: "json", destination: "run" });
-      const end = node("end", "Done");
-      return chain([trigger, team, commit, out, end]);
-    },
-  },
-
-  /* ──────────────────────────────────────────────────────── 4. review loop */
-  {
-    id: "draft-and-review",
-    name: "Draft and review",
-    summary: "One agent drafts, another reviews, for a bounded number of rounds.",
-    pattern: "review",
-    category: "growth",
-    difficulty: "intermediate",
-    requiresConnection: "llm",
-    requiresFeatures: ["teams", "delegation"],
-    requiresFlags: ["agentTeams", "agentDelegation"],
-    agents: [
-      {
-        ref: "drafter",
-        name: "Drafter",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You write a first draft from a brief, then revise it against the reviewer's notes. "
-          + "Change only what the notes ask for; a rewrite makes the next review useless.",
-        maxIterations: 5,
-      },
-      {
-        ref: "reviewer",
-        name: "Reviewer",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You review a draft against the brief. Either approve it, or give at most three specific "
-          + "changes. Say APPROVED as the first word when it is good enough — a review that never "
-          + "approves is a loop that only the round limit ends.",
-        maxIterations: 4,
-      },
-    ],
-    optionalTools: [],
-    sampleInput: {
-      brief: "A 150-word release note for durable resume across approvals, for existing customers.",
-    },
-    doc: {
-      whatItDoes:
-        "The drafter writes, delegates to the reviewer, and revises — for at most the configured "
-        + "number of rounds. A ‘round’ here is not a second counter: it resolves onto the "
-        + "repeated-handoff guard, which counts how many times the same (from, to, task) triple "
-        + "may repeat. One bound, not two that can disagree.",
-      whatItNeeds: [
-        "One LLM connection.",
-        "A plan that includes agent teams and delegation.",
-        "AGENT_TEAMS_ENABLED and AGENT_ACTIVATIONS_ENABLED on in the deployment.",
-      ],
-      costPerRun: {
-        range: "about 6–25¢",
-        drivers: [
-          "The number of rounds actually used — a reviewer that never approves uses all of them",
-          "Draft length, which both agents pay for on every round",
-        ],
-        ceiling: "25¢ and 60k tokens for the team; 3 rounds.",
-      },
-      changeFirst: [
-        { where: "The reviewer's approval condition", why: "‘APPROVED as the first word’ is the exit. Vague approval criteria are why review loops run to the round limit every time." },
-        { where: "Max rounds", why: "3 is a starting point. Watch the first ten runs: if they all use 3, the exit condition is wrong, not the limit." },
-        { where: "The brief in the sample input", why: "It is a release note. Yours is not." },
-      ],
-      patternNote:
-        "A review loop is worth its cost when a wrong answer is expensive and a second read "
-        + "reliably catches it. It is not a general quality improvement — two agents agreeing is "
-        + "not evidence, and you pay for both every round.",
-    },
-    build: (refs) => {
-      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
-      const team = teamNode("Draft and review", {
-        policy: "review",
-        entryAlias: "drafter",
-        objective: "Produce a draft that the reviewer approves.",
-        joinPolicy: { kind: "wait_all" },
-        onChildFailure: "fail_parent",
-        roster: [
-          { agentId: refs.agents.drafter, alias: "drafter", role: "worker", canDelegateTo: ["reviewer"] },
-          { agentId: refs.agents.reviewer, alias: "reviewer", role: "reviewer", canDelegateTo: [] },
-        ],
-        limits: {
-          maxDepth: 2, maxActivations: 8, maxHandoffsPerPair: 3,
-          maxTeamDurationMs: 600_000, maxContextChars: null,
-          maxRounds: 3, maxIterations: 5, maxToolCalls: 0,
-        },
-        budget: STARTER_BUDGET,
-      });
-      const commit = node("checkpoint", "Commit the approved draft", { scope: "run" });
-      const out = node("output", "Emit the draft", { format: "json", destination: "run" });
-      const end = node("end", "Done");
-      return chain([trigger, team, commit, out, end]);
-    },
-  },
-
-  /* ───────────────────────────────────────────── 5. human in the loop */
+  /* ───────────────────────────────────────────── 2. human in the loop */
   {
     id: "human-approval-before-send",
     name: "Draft, approve, then send",
@@ -681,7 +399,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
 
-  /* ────────────────────────────────────────────────────── 6. scheduled batch */
+  /* ────────────────────────────────────────────────────── 3. scheduled batch */
   {
     id: "scheduled-batch-digest",
     name: "Scheduled batch digest",
@@ -782,7 +500,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
      the shape is what they keep after replacing the job.
      ═══════════════════════════════════════════════════════════════════════ */
 
-  /* ──────────────────────────────────────── 7. incident first response */
+  /* ──────────────────────────────────────── 4. incident first response */
   {
     id: "incident-first-response",
     name: "Incident first response",
@@ -912,7 +630,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
 
-  /* ──────────────────────────────────────── 8. draft, check, approve */
+  /* ──────────────────────────────────────── 5. draft, check, approve */
   {
     id: "reply-draft-and-check",
     name: "Customer reply, drafted and checked",
@@ -1050,7 +768,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
 
-  /* ──────────────────────────────────────── 9. weekly competitive brief */
+  /* ──────────────────────────────────────── 6. weekly competitive brief */
   {
     id: "competitive-brief",
     name: "Weekly competitor brief",
@@ -1186,9 +904,6 @@ export function templateById(id: string): WorkflowTemplate | null {
 export const PATTERN_LABEL: Record<TemplatePattern, string> = {
   "single-agent": "Single agent",
   pipeline: "Agent pipeline",
-  supervisor: "Supervisor and workers",
-  router: "Router and specialists",
-  review: "Review loop",
   approval: "Human in the loop",
   batch: "Scheduled batch",
 };
