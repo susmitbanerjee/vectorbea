@@ -49,6 +49,13 @@ object RbacGuard {
          * here so the exemption is a decision rather than a side effect of one.
          */
         "/api/hooks/:token",
+        /*
+         * Completing an MCP sign-in. The browser that makes this call may carry a
+         * session, but the act is authorised by the single-use `state`, and the
+         * workspace comes from the row it names — not from a header a role could
+         * be measured against.
+         */
+        "/api/mcp/oauth/complete",
     )
 
     /**

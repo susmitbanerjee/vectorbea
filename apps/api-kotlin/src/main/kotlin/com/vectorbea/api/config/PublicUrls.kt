@@ -31,7 +31,9 @@ object PublicUrls {
 
     const val PROD_API = "https://api.vectorbea.com"
     const val DEV_API = "https://devapi.vectorbea.com"
-    const val PROD_APP = "https://app.vectorbea.com"
+    /* The web app answers on the apex in production — `app.vectorbea.com` has no
+       DNS record, and a sign-in redirected there would land nowhere. */
+    const val PROD_APP = "https://vectorbea.com"
     const val DEV_APP = "https://dev.vectorbea.com"
 
     fun apiBase(env: (String) -> String? = System::getenv): String {

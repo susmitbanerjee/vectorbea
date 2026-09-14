@@ -82,6 +82,7 @@ class McpConnectorRoutes(
     fun register(router: Router) {
         router.post("/api/mcp/probe", ::probe)
         router.post("/api/connections/:id/mcp/oauth/start", ::startSignIn)
+        router.post("/api/mcp/oauth/complete", ::complete)
         router.get("/api/mcp/oauth/callback", ::callback)
         router.post("/api/connections/:id/mcp/discover", ::discover)
         router.get("/api/connections/:id/mcp/tools", ::listTools)
@@ -125,7 +126,7 @@ class McpConnectorRoutes(
         val store = pending ?: throw ApiError.ValidationError(
             "This deployment cannot store credentials (SECRET_ENCRYPTION_KEY is not set), so it cannot sign in to a server.")
 
-        data class Body(val returnTo: String? = null)
+        data class Body(val returnTo: String? = null, val redirectOrigin: String? = null)
         val body = try { req.bodyAs<Body>() } catch (_: Exception) { Body() }
 
         val serverUrl = serverUrlOf(connection)
@@ -144,7 +145,24 @@ class McpConnectorRoutes(
             null
         }
 
-        val redirectUri = "${PublicUrls.apiBase()}/api/mcp/oauth/callback"
+        /*
+         * ── THE SIGN-IN COMES BACK TO THE WEB APP, NOT TO THE API ───────────────
+         * The redirect used to be the public API host. That made signing in depend
+         * on `api.`/`devapi.vectorbea.com` resolving — when it did not, the
+         * authorization server sent the browser to a dead hostname, no credential
+         * was ever stored, and every Discover afterwards failed with "sign in
+         * first". It also put an OAuth endpoint on the hostname that is meant to
+         * serve the run API and nothing else (`PublicHostGate`).
+         *
+         * The browser is already on the web app, so that is where it returns: the
+         * page there hands `state` and `code` to `POST /api/mcp/oauth/complete`.
+         * The origin comes from the client because the app answers on more than one
+         * host (production, dev, a local port) and the redirect must be the one the
+         * person is actually using — but only an origin we own is accepted, since a
+         * `redirect_uri` on somebody else's domain would hand them the code.
+         */
+        val appOrigin = PublicUrls.canonicalOwnedOrigin(body.redirectOrigin) ?: PublicUrls.appBase()
+        val redirectUri = "$appOrigin/mcp/oauth/callback"
         val (found, client) = try {
             val d = oauth.discover(serverUrl, challenge)
             d to oauth.registerClient(d.authorizationServer, redirectUri, "Vectorbea")
@@ -187,40 +205,82 @@ class McpConnectorRoutes(
         ))
     }
 
+    /** What a completed (or failed) sign-in came to. */
+    private data class SignInOutcome(
+        val connectionId: UUID?,
+        val status: String,
+        val reason: String?,
+        val toolsWritten: Int? = null,
+        val returnTo: String? = null,
+        val appOrigin: String? = null,
+    ) {
+        fun toResponse(): Map<String, Any?> = mapOf(
+            "connectionId" to connectionId?.toString(),
+            "status" to status,
+            "reason" to reason,
+            "toolsWritten" to toolsWritten,
+            "returnTo" to returnTo,
+        )
+    }
+
     /**
-     * The authorization server sends the browser back here.
+     * The web app's callback page hands the sign-in over here.
      *
-     * Unauthenticated by necessity — it is a redirect from somebody else's
-     * domain — and safe because the `state` is the only key: 32 random bytes,
-     * looked up by hash, deleted as it is read. Everything this does is scoped by
-     * the workspace that row carries, never by anything in the query string.
-     *
-     * Always answers with a redirect to the web app, success or failure, so a
-     * person is never left on a JSON error from an API they have never heard of.
+     * Unauthenticated by necessity — the browser has just come back from somebody
+     * else's domain, and the proof is the `state`: 32 random bytes, looked up by
+     * hash, deleted as it is read. Everything this does is scoped by the workspace
+     * that row carries, never by anything in the request.
+     */
+    private fun complete(req: Request): Response {
+        data class Body(val state: String? = null, val code: String? = null, val error: String? = null)
+        val body = try { req.bodyAs<Body>() } catch (_: Exception) { Body() }
+        return Response.ok(completeSignIn(body.state, body.code, body.error).toResponse())
+    }
+
+    /**
+     * The old redirect target, kept so a sign-in started before the callback moved
+     * to the web app still lands somewhere. Redirects to the web app either way.
      */
     private fun callback(req: Request): Response {
-        val state = req.query("state")?.takeIf { it.isNotBlank() } ?: return finish(null, "error", "missing_state")
-        val signIn = try { pending?.consume(state) } catch (e: Exception) {
-            log.warn("[mcp-oauth] callback lookup failed: {}", e.javaClass.simpleName); null
-        } ?: return finish(null, "error", "expired")
+        val outcome = completeSignIn(req.query("state"), req.query("code"), req.query("error"))
+        val params = buildList {
+            outcome.connectionId?.let { add("connection" to it.toString()) }
+            add("status" to outcome.status)
+            outcome.reason?.let { add("reason" to it) }
+            outcome.toolsWritten?.let { add("tools" to it.toString()) }
+            outcome.returnTo?.let { add("returnTo" to it) }
+        }.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, Charsets.UTF_8)}" }
+        return Response(status = 302, body = "", headers = mapOf(
+            "Location" to "${outcome.appOrigin ?: PublicUrls.appBase()}/mcp/oauth/complete?$params",
+            "Cache-Control" to "no-store",
+            "Referrer-Policy" to "no-referrer",
+        ))
+    }
 
-        req.query("error")?.let { error ->
-            val reason = if (error == "access_denied") "cancelled" else (McpSanitizer.name(error) ?: "denied")
-            return finish(signIn, "error", reason)
+    private fun completeSignIn(state: String?, code: String?, error: String?): SignInOutcome {
+        val key = state?.takeIf { it.isNotBlank() } ?: return SignInOutcome(null, "error", "missing_state")
+        val signIn = try { pending?.consume(key) } catch (e: Exception) {
+            log.warn("[mcp-oauth] sign-in lookup failed: {}", e.javaClass.simpleName); null
+        } ?: return SignInOutcome(null, "error", "expired")
+
+        fun fail(reason: String) = SignInOutcome(
+            signIn.connectionId, "error", reason, returnTo = signIn.returnTo, appOrigin = originOf(signIn.context.redirectUri))
+
+        error?.takeIf { it.isNotBlank() }?.let {
+            return fail(if (it == "access_denied") "cancelled" else (McpSanitizer.name(it) ?: "denied"))
         }
-        val code = req.query("code")?.takeIf { it.isNotBlank() } ?: return finish(signIn, "error", "missing_code")
+        val authCode = code?.takeIf { it.isNotBlank() } ?: return fail("missing_code")
 
-        val connection = connections.findById(signIn.connectionId, signIn.workspaceId)
-            ?: return finish(signIn, "error", "connection_deleted")
-        val svc = secretService ?: return finish(signIn, "error", "no_secret_store")
+        val connection = connections.findById(signIn.connectionId, signIn.workspaceId) ?: return fail("connection_deleted")
+        val svc = secretService ?: return fail("no_secret_store")
         val ctx = signIn.context
 
         val client = McpOAuth.ClientRegistration(ctx.clientId, ctx.clientSecret, ctx.tokenEndpointAuthMethod)
         val tokens = try {
-            oauth.exchangeCode(ctx.tokenEndpoint, client, code, ctx.verifier, ctx.redirectUri, ctx.resource)
+            oauth.exchangeCode(ctx.tokenEndpoint, client, authCode, ctx.verifier, ctx.redirectUri, ctx.resource)
         } catch (e: McpOAuth.McpOAuthException) {
-            log.warn("[mcp-oauth] code exchange failed for connection {}: {}", connection.id, e.code)
-            return finish(signIn, "error", "exchange_failed")
+            log.warn("[mcp-oauth] code exchange failed for connection {}: {} {}", connection.id, e.code, e.message)
+            return fail("exchange_failed")
         }
 
         val credential = McpCredential.OAuth(
@@ -243,7 +303,7 @@ class McpConnectorRoutes(
             )
         } catch (e: Exception) {
             log.warn("[mcp-oauth] storing the credential failed for connection {}: {}", connection.id, e.javaClass.simpleName)
-            return finish(signIn, "error", "store_failed")
+            return fail("store_failed")
         }
 
         audit?.record(
@@ -256,34 +316,18 @@ class McpConnectorRoutes(
            back to a list rather than to a second button. A failure here does not
            undo the sign-in — the connection is good and discovery can be retried. */
         val written = if (FLAG_ENABLED) runCatching {
-            val server = serverOf(connection, credential)
-            discovery.syncTools(server.copy(), connection.workspaceId, connection.environmentId)
+            discovery.syncTools(serverOf(connection, credential), connection.workspaceId, connection.environmentId)
         }.onFailure { log.warn("[mcp-oauth] post-sign-in discovery failed for {}: {}", connection.id, it.message) }
             .getOrNull() else null
 
-        return finish(signIn, "ok", null, written)
+        log.info("[mcp-oauth] connection {} signed in ({} tools registered)", connection.id, written)
+        return SignInOutcome(connection.id, "ok", null, written, signIn.returnTo, originOf(ctx.redirectUri))
     }
 
-    /** Redirect to the web app's completion page. Only ever to our own origin. */
-    private fun finish(
-        signIn: McpOAuthPendingRepository.Pending?,
-        status: String,
-        reason: String?,
-        toolsWritten: Int? = null,
-    ): Response {
-        val params = buildList {
-            signIn?.let { add("connection" to it.connectionId.toString()) }
-            add("status" to status)
-            reason?.let { add("reason" to it) }
-            toolsWritten?.let { add("tools" to it.toString()) }
-            signIn?.returnTo?.let { add("returnTo" to it) }
-        }.joinToString("&") { (k, v) -> "$k=${URLEncoder.encode(v, Charsets.UTF_8)}" }
-        return Response(status = 302, body = "", headers = mapOf(
-            "Location" to "${PublicUrls.appBase()}/mcp/oauth/complete?$params",
-            "Cache-Control" to "no-store",
-            "Referrer-Policy" to "no-referrer",
-        ))
-    }
+    private fun originOf(url: String): String? = runCatching {
+        val u = java.net.URI.create(url)
+        PublicUrls.canonicalOwnedOrigin("${u.scheme}://${u.authority}")
+    }.getOrNull()
 
     // ── Discover ─────────────────────────────────────────────────────────────
 
@@ -365,7 +409,12 @@ class McpConnectorRoutes(
             "items" to items.map { it.toResponse() },
             "manifest" to manifest?.toResponse(),
             "serverName" to connection.name,
-            "signedIn" to (connection.authType == "oauth2"),
+            /* A STORED sign-in, not the auth type. The connect dialog saves a
+               connection as `oauth2` before the person has signed in, so reading
+               the type alone reported "signed in" three seconds into a sign-in
+               nobody had completed — and the dialog then discovered against a
+               server it held no credential for, which is a 400 every time. */
+            "signedIn" to (connection.authType == "oauth2" && !connection.secretRef.isNullOrBlank()),
         ))
     }
 

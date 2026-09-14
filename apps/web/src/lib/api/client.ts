@@ -279,6 +279,15 @@ export interface McpProbeResult {
   toolCount: number | null;
 }
 
+/** `POST /api/mcp/oauth/complete`. `reason` is a short machine code, never provider prose. */
+export interface McpSignInOutcome {
+  connectionId: string | null;
+  status: "ok" | "error";
+  reason: string | null;
+  toolsWritten: number | null;
+  returnTo: string | null;
+}
+
 /** `POST /api/connections/:id/mcp/oauth/start`. */
 export interface McpSignInStart {
   /** Null when the server turned out to need no sign-in at all. */
@@ -1010,7 +1019,20 @@ export interface VectorbeaClient {
      * server redirects back to `/mcp/oauth/complete`, and the tools are
      * discovered on the way.
      */
-    mcpSignIn(id: string, body: { returnTo?: string | null }, scope?: Scope, options?: RequestOptions): Promise<McpSignInStart>;
+    mcpSignIn(
+      id: string,
+      body: { returnTo?: string | null; redirectOrigin?: string | null },
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<McpSignInStart>;
+    /**
+     * Hand a sign-in back to the API from the web app's `/mcp/oauth/callback`
+     * page. Needs no workspace: the single-use `state` names the connection.
+     */
+    mcpCompleteSignIn(
+      body: { state: string | null; code: string | null; error: string | null },
+      options?: RequestOptions,
+    ): Promise<McpSignInOutcome>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
@@ -1667,6 +1689,14 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
              OAuth metadata documents — several round trips, none of them ours. */
           timeoutMs: 30_000,
           ...req(scope, undefined, options),
+        }),
+      mcpCompleteSignIn: (body, options) =>
+        call<McpSignInOutcome>("/api/mcp/oauth/complete", {
+          method: "POST",
+          body,
+          /* A token exchange with somebody else's server, then discovery. */
+          timeoutMs: 45_000,
+          ...req(undefined, undefined, options),
         }),
       mcpSignIn: (id, body, scope, options) =>
         call<McpSignInStart>(`/api/connections/${id}/mcp/oauth/start`, {

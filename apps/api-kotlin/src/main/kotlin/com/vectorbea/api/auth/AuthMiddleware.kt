@@ -121,6 +121,9 @@ class AuthMiddleware(
          * the Vectorbea-as-MCP-server endpoint included — becomes public.
          */
         "/api/mcp/oauth/callback",
+        /* The same sign-in, handed over by the web app's callback page rather than
+           received as a redirect. Same proof (the single-use state), same scoping. */
+        "/api/mcp/oauth/complete",
     )
 
     /**

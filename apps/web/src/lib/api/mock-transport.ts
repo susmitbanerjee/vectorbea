@@ -1504,15 +1504,27 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "/api/connections/:id/mcp/oauth/start",
     (params) => {
       const origin = typeof window === "undefined" ? "" : window.location.origin;
-      const qs = new URLSearchParams({
-        connection: String(params.id), status: "ok", tools: String(MCP_REMOTE_TOOLS.length),
-      });
+      /* Straight to the web app's callback page, as a real authorization server
+         would after approval. The state carries the connection so the mock
+         completion below can name it. */
+      const qs = new URLSearchParams({ code: "mock-code", state: `mock:${String(params.id)}` });
       return {
-        authorizationUrl: `${origin}/mcp/oauth/complete?${qs.toString()}`,
+        authorizationUrl: `${origin}/mcp/oauth/callback?${qs.toString()}`,
         signInRequired: true,
         authorizationServer: "auth.example.com",
         expiresInSeconds: 900,
       };
+    },
+  ],
+  [
+    "POST",
+    "/api/mcp/oauth/complete",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { state?: string | null; code?: string | null; error?: string | null };
+      const connectionId = body.state?.startsWith("mock:") ? body.state.slice(5) : null;
+      if (!connectionId) return { connectionId: null, status: "error", reason: "expired", toolsWritten: null, returnTo: null };
+      if (body.error) return { connectionId, status: "error", reason: "cancelled", toolsWritten: null, returnTo: null };
+      return { connectionId, status: "ok", reason: null, toolsWritten: MCP_REMOTE_TOOLS.length, returnTo: null };
     },
   ],
   [

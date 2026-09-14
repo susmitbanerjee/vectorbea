@@ -143,16 +143,27 @@ person to create:
    browser only ever holds the state.
 2. The person approves at the authorization server. The request carries the
    `resource` indicator (RFC 8707), binding the token to this server.
-3. `GET /api/mcp/oauth/callback` (public; the state is the proof) consumes the
-   row with `DELETE … RETURNING` — single use by construction — exchanges the
+3. The authorization server redirects the browser to the WEB APP's
+   `/mcp/oauth/callback`, which posts `state` and `code` to
+   `POST /api/mcp/oauth/complete` (public; the state is the proof). That consumes
+   the row with `DELETE … RETURNING` — single use by construction — exchanges the
    code, writes the credential to the connection's secret, sets `auth_type =
    'oauth2'`, clears any refreshed token from a previous sign-in, discovers the
-   tools, and redirects to the web app's `/mcp/oauth/complete`.
+   tools, and returns the outcome for the page to report to the dialog.
 
-The `redirect_uri` is `PublicUrls.apiBase()` + `/api/mcp/oauth/callback` —
-`api.vectorbea.com` in production, `devapi.vectorbea.com` elsewhere. Never the
-hosting provider's hostname: it is registered with a third party and shown on
-their consent screen.
+**The `redirect_uri` is the web app's origin**, sent by the client and accepted
+only if it is a host we own (`*.vectorbea.com`, loopback); anything else falls
+back to `PublicUrls.appBase()`. It was originally the public API host, and that
+broke sign-in in the first deployment: `devapi.vectorbea.com` had no DNS record,
+the browser was sent to a dead hostname, no credential was stored, and every
+Discover afterwards failed with "sign in first". It would also have put an OAuth
+endpoint on a hostname meant to serve only the run API (`PublicHostGate`). The
+old `GET /api/mcp/oauth/callback` remains for sign-ins started before the move.
+
+**`signedIn` means a stored credential**, not `auth_type = 'oauth2'`. The connect
+dialog saves the connection as `oauth2` before sign-in; reading the type alone
+told the dialog's poll the sign-in had finished three seconds after it started,
+and it then discovered against a server it held no credential for.
 
 An authorization server that cannot do S256 is refused rather than downgraded.
 One that does not allow dynamic registration gets a sentence saying to paste a

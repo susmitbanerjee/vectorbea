@@ -113,6 +113,17 @@ class HttpServer(
 
         var response: Response? = null
         try {
+            // The public API hostname serves the run API and nothing else. Checked
+            // before the body is read or anybody is authenticated: a route that is
+            // not published on this host should cost nothing to refuse.
+            val hostHeaders = listOfNotNull(
+                exchange.requestHeaders["Host"],
+                exchange.requestHeaders["X-Forwarded-Host"],
+            ).flatten()
+            if (!PublicHostGate.allows(exchange.requestMethod, exchange.requestURI.path ?: "/", hostHeaders)) {
+                throw ApiError.NotFound("Route")
+            }
+
             // Parse request (may throw ApiError.ValidationError for body-too-large)
             val rawRequest = Request.from(exchange, requestId, config.maxRequestBodyBytes)
 

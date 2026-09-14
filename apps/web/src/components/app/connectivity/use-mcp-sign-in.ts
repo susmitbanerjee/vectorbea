@@ -54,7 +54,13 @@ export function useMcpSignIn(
     popupRef.current = popup;
     try {
       const connectionId = await connectionIdFor();
-      const started = await api.connections.mcpSignIn(connectionId, { returnTo: window.location.pathname }, scope);
+      /* The sign-in returns to THIS origin's `/mcp/oauth/callback`, so it works on
+         whichever host the app is being used on and never depends on the public
+         API hostname resolving. The API accepts only origins we own. */
+      const started = await api.connections.mcpSignIn(connectionId, {
+        returnTo: window.location.pathname,
+        redirectOrigin: window.location.origin,
+      }, scope);
       if (!started.signInRequired || !started.authorizationUrl) {
         popup?.close();
         return false;
