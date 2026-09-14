@@ -14,7 +14,8 @@ import { Text } from "~/components/ui/text";
 import { Icon } from "~/components/ui/icon";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
-import { Input } from "~/components/ui/input";
+import { Input, Textarea } from "~/components/ui/input";
+import { Checkbox } from "~/components/ui/choice";
 import { Select } from "~/components/ui/select";
 import { Tooltip } from "~/components/ui/tooltip";
 import {
@@ -91,6 +92,7 @@ export function SkillsView() {
   });
 
   const [search, setSearch] = React.useState("");
+  const [creatingSkill, setCreatingSkill] = React.useState(false);
   const installingSlug = params.get("install");
 
   const installedRows = installed.data?.items ?? [];
@@ -120,8 +122,20 @@ export function SkillsView() {
       <PageHeader
         eyebrow="Build"
         title="Skills"
-        description="Named, versioned instructions granted to an agent like a tool. A skill teaches an agent how to do something — it can never let it do something new."
+        description="Reusable instructions that shape how an agent works — a writing style, a design eye, a tighter token budget. Add a skill to any agent and it applies every time that agent runs."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={!enabled}
+            onClick={() => setCreatingSkill(true)}
+            iconLeft={<Icon icon={Plus} size="sm" decorative />}
+          >
+            Create a skill
+          </Button>
+        }
       />
+      <CreateSkillDialog open={creatingSkill} onOpenChange={setCreatingSkill} />
 
       <div className="grid gap-4">
         <div className="max-w-md">
@@ -139,8 +153,7 @@ export function SkillsView() {
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <Text variant="eyebrow" tone="muted">Installed in this workspace</Text>
             <Text variant="caption" tone="muted">
-              Installing does not grant. Tick these on an agent&rsquo;s Skills tab — which can also
-              install from the library without coming here.
+              Add these to an agent from its Skills tab, or while creating it.
             </Text>
           </div>
 
@@ -153,7 +166,7 @@ export function SkillsView() {
           ) : visibleInstalled.length === 0 ? (
             <Notice>
               {installedRows.length === 0
-                ? "Nothing installed yet. Install one from the library below — it copies the bundle into this workspace, where you can edit and version it."
+                ? "Nothing installed yet. Install one from the library below, or create your own."
                 : "None of your skills match that search."}
             </Notice>
           ) : (
@@ -164,7 +177,7 @@ export function SkillsView() {
                   skill={skill}
                   onArchive={async () => {
                     await api.skills.archive(skill.id, readScope);
-                    toast.success(`${skill.name} archived. Agents holding it keep the grant until you remove it.`);
+                    toast.success(`${skill.name} archived. It no longer applies to any agent.`);
                     await refresh();
                   }}
                 />
@@ -177,7 +190,7 @@ export function SkillsView() {
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <Text variant="eyebrow" tone="muted">Library</Text>
             <Text variant="caption" tone="muted">
-              First-party by construction — the table has no workspace column, so nothing a customer writes can reach it.
+              Ready-made skills from Vectorbea.
             </Text>
           </div>
 
@@ -399,7 +412,7 @@ export function SkillInstallDialog({
               <ModalDivider />
               <ModalSection
                 title="Bind its tools"
-                description="A library skill names what it needs to be able to DO; it cannot know the tool ids in your workspace. Pick one of yours for each."
+                description="This skill tells the agent to use a kind of tool. Pick which of your tools it should use for each."
               >
                 {toolsLoading ? (
                   <span className="bg-surface-sunken block h-8 rounded-sm" aria-hidden />
@@ -441,10 +454,9 @@ export function SkillInstallDialog({
             </ModalNote>
           )}
 
-          <ModalNote title="A skill cannot widen anything">
-            Granting this never adds a tool, an agent it may delegate to, or an output schema. The
-            grant check reads your database and takes no skill as input — so the worst a wrong skill
-            can do is waste a prompt.
+          <ModalNote title="Skills never add permissions">
+            A skill changes how an agent works, not what it&rsquo;s allowed to do. It can&rsquo;t give an
+            agent a tool, a teammate or access it doesn&rsquo;t already have.
           </ModalNote>
 
           {error ? <ModalNote tone="danger" title="Not installed">{error}</ModalNote> : null}
@@ -587,6 +599,7 @@ export function AgentSkillGrants({
   const [saving, setSaving] = React.useState(false);
   const [refusal, setRefusal] = React.useState<string | null>(null);
   const [browsing, setBrowsing] = React.useState(false);
+  const [writing, setWriting] = React.useState(false);
   const [installing, setInstalling] = React.useState<SkillCatalogRow | null>(null);
 
   const held = new Set((grants.data?.items ?? []).map((g) => g.skillId));
@@ -699,8 +712,8 @@ export function AgentSkillGrants({
                 <Icon icon={Users} size="sm" decorative className="text-fg-muted" />
                 <Text variant="caption" tone="muted">
                   {held.size === 0
-                    ? "No skills granted. This agent works from its own instructions alone."
-                    : `${held.size} granted. They compose after this agent's own instructions and before its observations.`}
+                    ? "No skills yet. This agent works from its own instructions alone."
+                    : `${held.size} skill${held.size === 1 ? "" : "s"} applied every time this agent runs, after its own instructions.`}
                 </Text>
               </span>
             )}
@@ -721,15 +734,13 @@ export function AgentSkillGrants({
         <div className="border-status-failed-border bg-status-failed-subtle flex items-start gap-2 rounded-sm border p-2.5">
           <Icon icon={WarningCircle} size="sm" decorative className="text-status-failed mt-px shrink-0" />
           <div className="min-w-0">
-            <Text variant="body-sm" tone="primary" className="block">This grant was refused</Text>
+            <Text variant="body-sm" tone="primary" className="block">This skill can&rsquo;t be added yet</Text>
             <Text variant="caption" tone="secondary" className="mt-0.5 block leading-snug">
               {refusal}
             </Text>
             <Text variant="caption" tone="muted" className="mt-1 block leading-snug">
-              Refused rather than warned on purpose. A skill that tells an agent to call a tool it
-              does not hold produces a run that fails at iteration four and reads as a model
-              inventing a tool — which it did not. Grant the tool on this agent&rsquo;s Tool grants
-              tab, then come back.
+              This skill tells the agent to use a tool it doesn&rsquo;t have, so it would fail
+              mid-run. Give the agent that tool on its Tool grants tab, then add the skill.
             </Text>
           </div>
         </div>
@@ -743,6 +754,17 @@ export function AgentSkillGrants({
         error={catalog.error?.message ?? null}
         onClose={() => setBrowsing(false)}
         onPick={(entry) => { setBrowsing(false); setInstalling(entry); }}
+        onWrite={() => { setBrowsing(false); setWriting(true); }}
+      />
+
+      <CreateSkillDialog
+        open={writing}
+        onOpenChange={setWriting}
+        onCreated={async (skill) => {
+          await refreshAll();
+          const added = await setGrants(new Set([...held, skill.id]));
+          if (added) toast.success(`${skill.name} added to ${agentName}.`);
+        }}
       />
 
       <SkillInstallDialog
@@ -761,10 +783,10 @@ export function AgentSkillGrants({
            */
           const granted = await setGrants(new Set([...held, skill.id]));
           if (granted) {
-            toast.success(`${skill.name} installed and granted to ${agentName}.`);
+            toast.success(`${skill.name} added to ${agentName}.`);
           } else {
             toast.warning(
-              `${skill.name} is installed in this workspace, but ${agentName} was not granted it.`,
+              `${skill.name} is installed, but it needs a tool ${agentName} doesn't have yet.`,
             );
           }
         }}
@@ -793,12 +815,12 @@ function EmptyGrants({
     <div className="border-subtle grid place-items-center rounded-md border border-dashed px-4 py-8">
       <div className="max-w-[52ch] text-center">
         <Text variant="body-sm" tone="primary" className="block">
-          {agentName} holds no skills
+          {agentName} has no skills yet
         </Text>
         <Text variant="caption" tone="muted" className="mt-1 block leading-snug">
-          A skill is a named, versioned set of instructions — how a competent person does this job,
-          composed into the agent&rsquo;s prompt after its own instructions. It teaches; it can
-          never let the agent do something it was not already allowed to do.
+          Skills are reusable instructions — a writing style, a design eye, a tighter token budget —
+          applied every time this agent runs. They shape how it works, never what it&rsquo;s allowed
+          to do.
         </Text>
         <div className="mt-3">
           <Button
@@ -826,7 +848,7 @@ function EmptyGrants({
  * weighs before adding a capability to something that spends money.
  */
 function SkillLibraryPanel({
-  open, agentName, entries, loading, error, onClose, onPick,
+  open, agentName, entries, loading, error, onClose, onPick, onWrite,
 }: {
   open: boolean;
   agentName: string;
@@ -835,6 +857,8 @@ function SkillLibraryPanel({
   error: string | null;
   onClose: () => void;
   onPick: (entry: SkillCatalogRow) => void;
+  /** Write a new skill and add it to this agent. */
+  onWrite: () => void;
 }) {
   const [search, setSearch] = React.useState("");
 
@@ -850,7 +874,7 @@ function SkillLibraryPanel({
       <ModalHeader
         eyebrow="Build · Skills"
         title={`Add a skill to ${agentName}`}
-        description="Installing copies the bundle into this workspace and grants it to this agent in one step. Other agents are unaffected until you grant it to them too."
+        description="Adding a skill installs it in this workspace and applies it to this agent. Other agents are unaffected until you add it to them too."
       />
       <ModalBody>
         <div className="grid grid-cols-1 gap-3">
@@ -870,8 +894,7 @@ function SkillLibraryPanel({
             <ModalNote tone="danger" title="The library could not be read">{error}</ModalNote>
           ) : entries.length === 0 ? (
             <ModalNote title="Everything in the library is already installed">
-              Close this and tick the ones {agentName} should hold. To write a skill of your own,
-              go to Build → Skills.
+              Close this and tick the ones {agentName} should use, or write your own.
             </ModalNote>
           ) : shown.length === 0 ? (
             <ModalNote title="Nothing matches that search">
@@ -918,6 +941,325 @@ function SkillLibraryPanel({
       </ModalBody>
       <ModalFooter>
         <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        <Button variant="secondary" size="sm" onClick={onWrite} iconLeft={<Icon icon={Plus} size="sm" decorative />}>
+          Write your own
+        </Button>
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   SKILLS WHILE CREATING AN AGENT
+
+   The Skills tab on an existing agent was the only place a skill could be added,
+   so a new agent always started without one and somebody had to know to go back.
+   Choosing skills is part of deciding what an agent IS — the same moment as
+   writing its instructions and picking its tools — so the create dialog offers
+   them as a step, and they are in place before the agent's first run.
+
+   Two things are offered: skills already installed in the workspace, and library
+   skills that need no tools (those install and attach in one go). A library
+   skill that needs tools asks which of your tools to use, which is its own
+   decision with its own screen, so it is pointed at rather than squeezed in.
+══════════════════════════════════════════════════════════════════════════════ */
+
+export interface SkillSelection {
+  /** Installed skills, by id. */
+  skillIds: string[];
+  /** Library entries to install first, by slug. Only ones that need no tools. */
+  librarySlugs: string[];
+}
+
+export function AgentSkillPicker({
+  value, onChange,
+}: {
+  value: SkillSelection;
+  onChange: (next: SkillSelection) => void;
+}) {
+  const api = useApi();
+  const scope = useScope();
+  const readScope = React.useMemo(
+    () => ({ workspaceId: scope.workspaceId, environmentId: null }),
+    [scope.workspaceId],
+  );
+  const enabled = Boolean(scope.workspaceId);
+
+  const installed = useApiQuery({
+    queryKey: [...queryKeys.env(scope.workspaceId, null), "skills"] as const,
+    queryFn: () => api.skills.list({ ...readScope, page: 1, pageSize: 100 }),
+    enabled,
+  });
+  const catalog = useApiQuery({
+    queryKey: [...queryKeys.env(scope.workspaceId, null), "skill-catalog"] as const,
+    queryFn: () => api.skills.catalog(readScope),
+    enabled,
+  });
+  const [search, setSearch] = React.useState("");
+
+  const active = (installed.data?.items ?? []).filter((s) => s.status === "active");
+  const installedSlugs = new Set((installed.data?.items ?? []).map((s) => s.slug));
+  const library = (catalog.data?.items ?? []).filter((e) => !installedSlugs.has(e.slug));
+
+  const needle = search.trim().toLowerCase();
+  const hit = (text: string) => !needle || text.toLowerCase().includes(needle);
+
+  function toggle(list: "skillIds" | "librarySlugs", key: string, on: boolean) {
+    const current = new Set(value[list]);
+    if (on) current.add(key); else current.delete(key);
+    onChange({ ...value, [list]: [...current] });
+  }
+
+  if (installed.isPending || catalog.isPending) {
+    return <SkeletonGrid />;
+  }
+
+  const shownInstalled = active.filter((s) => hit(`${s.name} ${s.description ?? ""}`));
+  const shownLibrary = library.filter((e) => hit(`${e.name} ${e.summary ?? ""} ${e.category ?? ""}`));
+
+  return (
+    <div className="grid grid-cols-1 gap-4">
+      <div className="max-w-sm">
+        <Field label="Search skills" labelHidden>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search skills"
+            prefix={<Icon icon={MagnifyingGlass} size="sm" decorative />}
+          />
+        </Field>
+      </div>
+
+      {active.length > 0 ? (
+        <ModalSection title="Your skills">
+          {shownInstalled.length === 0 ? (
+            <Text variant="caption" tone="muted" className="block">None match that search.</Text>
+          ) : (
+            <ul className="divide-subtle border-subtle divide-y rounded-md border">
+              {shownInstalled.map((skill) => (
+                <li key={skill.id} className="px-3 py-2.5">
+                  <Checkbox
+                    checked={value.skillIds.includes(skill.id)}
+                    onCheckedChange={(on) => toggle("skillIds", skill.id, on === true)}
+                    description={skill.description ?? undefined}
+                  >
+                    {skill.name}
+                  </Checkbox>
+                </li>
+              ))}
+            </ul>
+          )}
+        </ModalSection>
+      ) : null}
+
+      <ModalSection
+        title="From the library"
+        description="Ready-made skills from Vectorbea. Ones you pick are installed in this workspace and added to the agent."
+      >
+        {catalog.error ? (
+          <Text variant="caption" tone="muted" className="block">
+            The library couldn&rsquo;t be loaded. You can add skills later from the agent&rsquo;s Skills tab.
+          </Text>
+        ) : shownLibrary.length === 0 ? (
+          <Text variant="caption" tone="muted" className="block">
+            {library.length === 0 ? "Everything in the library is already installed." : "None match that search."}
+          </Text>
+        ) : (
+          <ul className="divide-subtle border-subtle divide-y rounded-md border">
+            {shownLibrary.map((entry) => {
+              const needsTools = entry.requiredCapabilities.length > 0;
+              return (
+                <li key={entry.id} className="px-3 py-2.5">
+                  <Checkbox
+                    checked={value.librarySlugs.includes(entry.slug)}
+                    disabled={needsTools}
+                    onCheckedChange={(on) => toggle("librarySlugs", entry.slug, on === true)}
+                    description={needsTools
+                      ? `${entry.summary ?? ""} Needs ${entry.requiredCapabilities.map((c) => c.label).join(", ")} — add it from the agent's Skills tab after creating, where you choose which tools it uses.`.trim()
+                      : entry.summary ?? undefined}
+                  >
+                    {entry.name}
+                  </Checkbox>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </ModalSection>
+    </div>
+  );
+}
+
+/**
+ * Install what needs installing, then attach every chosen skill to [agentId].
+ *
+ * Attaching is a replace-the-set call, and the API refuses the WHOLE set if any
+ * one skill needs a tool the agent lacks. So a refusal is narrowed one skill at
+ * a time: the ones that fit are kept, and the ones that do not are returned by
+ * name with the API's own reason. A new agent never loses every skill because
+ * one of them could not apply.
+ */
+export async function attachSkills(
+  api: ReturnType<typeof useApi>,
+  agentId: string,
+  selection: SkillSelection,
+  scope: { workspaceId: string | null; environmentId: string | null },
+): Promise<{ attached: string[]; refused: { name: string; reason: string }[] }> {
+  const ids = new Set(selection.skillIds);
+  const names = new Map<string, string>();
+  const refused: { name: string; reason: string }[] = [];
+
+  for (const slug of selection.librarySlugs) {
+    try {
+      const skill = await api.skills.install(slug, { toolBindings: {} }, scope);
+      ids.add(skill.id);
+      names.set(skill.id, skill.name);
+    } catch (error) {
+      refused.push({ name: slug, reason: error instanceof Error ? error.message : "It could not be installed." });
+    }
+  }
+  if (ids.size === 0) return { attached: [], refused };
+
+  try {
+    await api.skills.setGrants(agentId, [...ids], scope);
+    return { attached: [...ids], refused };
+  } catch {
+    const kept: string[] = [];
+    for (const id of ids) {
+      try {
+        await api.skills.setGrants(agentId, [...kept, id], scope);
+        kept.push(id);
+      } catch (error) {
+        refused.push({
+          name: names.get(id) ?? "A skill",
+          reason: error instanceof Error ? error.message : "It needs a tool this agent doesn't have.",
+        });
+      }
+    }
+    return { attached: kept, refused };
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   WRITE YOUR OWN
+
+   A skill is how a team fine-tunes execution without touching an agent's
+   instructions: the house style, the design review checklist, the rule that
+   answers stay under a hundred words. Writing one is a name, a line saying what
+   it's for, and the instructions — the rest (versions, sanitizing, where it sits
+   in the prompt) is the platform's job.
+══════════════════════════════════════════════════════════════════════════════ */
+
+const SKILL_PLACEHOLDER = [
+  "Answer in as few words as the question allows.",
+  "",
+  "1. Lead with the answer. No restating the question, no preamble.",
+  "2. Use a list only when there are three or more items.",
+  "3. Stop when the question is answered — no summary, no offer to help further.",
+].join("\n");
+
+export function CreateSkillDialog({
+  open, onOpenChange, onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onCreated?: (skill: SkillRow) => void | Promise<void>;
+}) {
+  const api = useApi();
+  const scope = useScope();
+  const queryClient = useQueryClient();
+  const [name, setName] = React.useState("");
+  const [description, setDescription] = React.useState("");
+  const [instructions, setInstructions] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setName(""); setDescription(""); setInstructions(""); setError(null);
+  }, [open]);
+
+  const tooShort = instructions.trim().length > 0 && instructions.trim().length < 20;
+  const ready = name.trim().length > 0 && instructions.trim().length >= 20;
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const skill = await api.skills.create({
+        name: name.trim(),
+        description: description.trim() || null,
+        summary: description.trim() || null,
+        instructions: instructions.trim(),
+      }, { workspaceId: scope.workspaceId, environmentId: scope.environmentId ?? null });
+      await queryClient.invalidateQueries({ queryKey: [...queryKeys.env(scope.workspaceId, null), "skills"] });
+      toast.success(`${skill.name} created. Add it to an agent from the agent's Skills tab.`);
+      await onCreated?.(skill);
+      onOpenChange(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The skill couldn't be created.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onOpenChange={(next) => { if (!saving) onOpenChange(next); }} dismissible={!saving} size="lg">
+      <ModalHeader
+        eyebrow="Build · Skills"
+        title="Create a skill"
+        description="Write down how a job should be done, once, and add it to any agent that does that job."
+        closeDisabled={saving}
+      />
+      <ModalBody>
+        <div className="grid grid-cols-1 gap-4">
+          <Field label="Name" required description="What someone picking skills for an agent will look for.">
+            <Input value={name} maxLength={120} autoFocus onChange={(e) => setName(e.target.value)} placeholder="Concise answers" />
+          </Field>
+          <Field label="What it's for" description="One line, shown in skill lists.">
+            <Input
+              value={description}
+              maxLength={240}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Keeps responses short and skips preamble to save tokens."
+            />
+          </Field>
+          <Field
+            label="Instructions"
+            required
+            description="Written to the agent. Say what to do, in what order, and what to avoid. They're added after the agent's own instructions on every run."
+            characterCount={{ value: instructions.length, max: 20_000 }}
+            error={tooShort ? "Add a little more detail — a sentence or two at least." : undefined}
+          >
+            <Textarea
+              value={instructions}
+              minRows={8}
+              maxRows={20}
+              maxLength={20_000}
+              onChange={(e) => setInstructions(e.target.value)}
+              placeholder={SKILL_PLACEHOLDER}
+            />
+          </Field>
+          <ModalNote title="Skills never add permissions">
+            A skill changes how an agent works, not what it&rsquo;s allowed to do. It can&rsquo;t give an agent a
+            tool or access it doesn&rsquo;t already have.
+          </ModalNote>
+          {error ? <ModalNote tone="danger" title="Not created">{error}</ModalNote> : null}
+        </div>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="ghost" size="sm" disabled={saving} onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button
+          variant="primary"
+          size="sm"
+          loading={saving}
+          loadingLabel="Creating"
+          disabled={!ready}
+          onClick={() => void save()}
+          iconLeft={<Icon icon={Plus} size="sm" decorative />}
+        >
+          Create skill
+        </Button>
       </ModalFooter>
     </Modal>
   );

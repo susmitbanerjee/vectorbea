@@ -496,6 +496,22 @@
   border-color: var(--border-focus);
 }
 
+/* The same names for `divide-*`. Without these, `divide-subtle` was not a class
+   at all: the dividers kept the global reset's LEGACY border colour, which is a
+   light-theme grey, so every divided list on the dark theme drew near-white
+   rules between its rows. Used across ten screens and silently wrong on all of
+   them. Mirrors Tailwind's own `divide-*` selector. */
+@utility divide-subtle {
+  & > :not(:last-child) {
+    border-color: var(--border-subtle);
+  }
+}
+@utility divide-default {
+  & > :not(:last-child) {
+    border-color: var(--border-default);
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    PRINT
 

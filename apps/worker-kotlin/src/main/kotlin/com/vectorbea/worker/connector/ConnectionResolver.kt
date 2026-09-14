@@ -28,6 +28,17 @@ open class ConnectionResolver(
     private val mapper = jacksonObjectMapper()
 
     /**
+     * The secret service this resolver decrypts with, for executors built from it.
+     *
+     * Exposed so the agent brain's tool executor is wired with the SAME secrets a
+     * workflow `tool` node gets. It was built without one, so an agent calling a
+     * tool that needs to read or seal a credential — a signed-in MCP server's
+     * refresh, a spec-driven HTTP tool's named secret fields — took a degraded
+     * path the identical workflow step never did.
+     */
+    val secrets: SecretService get() = secretService
+
+    /**
      * Load and return a [ResolvedConnection] for the given [connectionId] scoped
      * to [workspaceId].
      *

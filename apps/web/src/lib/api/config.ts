@@ -44,75 +44,54 @@ export function getApiBaseUrl(): string {
    Printing it is a different act. The endpoint card, the curl snippet and the
    docs are things a customer copies into their own backend, their CI, a
    third party's console and, eventually, a support thread. Every one of those
-   turns our hosting provider and our internal service name into something they
-   depend on and something an attacker can address directly — bypassing whatever
-   sits in front of the vanity domain. It is also a promise we cannot keep: the
-   day the API moves off that provider, every snippet anybody ever copied stops
-   working.
+   turns our hosting provider into something they depend on and something an
+   attacker can address directly — past whatever sits in front of the vanity
+   domain. It is also a promise we cannot keep: the day the API moves off that
+   provider, every snippet anybody ever copied stops working.
 
    So there are two functions. Transport reads the first; anything a human is
    meant to copy reads [getPublicApiBaseUrl].
 
-   ── AND WHEN IT IS NOT CONFIGURED, WE SAY SO RATHER THAN GUESS ──────────────
-   `WebhookRoutes.urlFor` already made this decision on the API side: without
-   `PUBLIC_API_BASE_URL` it returns the path alone, because a confidently
-   incorrect absolute URL pasted into Stripe is worse than a relative one
-   somebody has to complete. The same reasoning applies here, so the same answer
-   is given — `null`, and the caller renders the path with a line naming the
-   variable to set.
+   ── THE PUBLIC HOST FOLLOWS THE ENVIRONMENT ─────────────────────────────────
+   `NEXT_PUBLIC_VECTORBEA_ENV` already segments production from everything else
+   (lib/env.ts), so the public host is derived from it:
+
+     prod / production   → https://api.vectorbea.com
+     anything else       → https://devapi.vectorbea.com
+
+   The API makes the same decision from `VECTORBEA_ENV` (`PublicUrls.apiBase`),
+   which is what keeps a webhook URL the API mints and a curl snippet this app
+   prints on the same host. `NEXT_PUBLIC_PUBLIC_API_BASE_URL` overrides both
+   directions, for a deployment that fronts the API somewhere else.
 
    localhost is the one exception, and it is not a leak: on a developer's own
-   machine the internal origin IS the public one, and hiding it would make the
-   card useless in the only environment where somebody is likely to try the
-   snippet immediately.
+   machine the transport origin IS the public one, and a snippet pointing at
+   devapi from a laptop would call a different database.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-/** Hosts that are an implementation detail of where we happen to run today. */
-const INTERNAL_HOST_PATTERNS = [
-  /\.railway\.app$/i,
-  /\.railway\.internal$/i,
-  /\.onrender\.com$/i,
-  /\.fly\.dev$/i,
-  /\.herokuapp\.com$/i,
-  /\.vercel\.app$/i,
-  /\.internal$/i,
-];
+export const PUBLIC_API_PRODUCTION = "https://api.vectorbea.com";
+export const PUBLIC_API_DEVELOPMENT = "https://devapi.vectorbea.com";
 
 function isLoopback(host: string): boolean {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "0.0.0.0";
 }
 
-/**
- * The origin a CUSTOMER should call, or null when nobody has configured one.
- *
- * Mirrors the API's own `PUBLIC_API_BASE_URL`, deliberately: an operator
- * setting one and not the other would get a webhook URL and a workflow endpoint
- * on two different hostnames, which reads as a bug in the product rather than a
- * gap in the deployment.
- */
-export function getPublicApiBaseUrl(): string | null {
+/** The origin a CUSTOMER should call. Never the hosting provider's. */
+export function getPublicApiBaseUrl(): string {
   const declared =
     process.env.NEXT_PUBLIC_PUBLIC_API_BASE_URL ??
     process.env.NEXT_PUBLIC_API_PUBLIC_URL;
   if (declared && declared.trim() !== "") return declared.trim().replace(/\/+$/, "");
 
   const internal = getApiBaseUrl();
-  let host: string;
   try {
-    host = new URL(internal).hostname;
+    if (isLoopback(new URL(internal).hostname)) return internal;
   } catch {
-    /* An unparseable value is not something to publish either. */
-    return null;
+    /* An unparseable transport origin says nothing about the public one. */
   }
 
-  if (isLoopback(host)) return internal;
-  if (INTERNAL_HOST_PATTERNS.some((pattern) => pattern.test(host))) return null;
-
-  /* A hostname nobody flagged as infrastructure — a vanity domain somebody
-     pointed at the API — is publishable. This is the case an operator lands in
-     once they put `api.<their domain>` in front of it and forget the variable,
-     and refusing it there would be pedantry. */
-  return internal;
+  const env = (process.env.NEXT_PUBLIC_VECTORBEA_ENV ?? "").trim().toLowerCase();
+  return env === "prod" || env === "production" ? PUBLIC_API_PRODUCTION : PUBLIC_API_DEVELOPMENT;
 }
 
 /** Default per-request timeout. Overridable per call. */

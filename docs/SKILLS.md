@@ -135,6 +135,22 @@ Within the block, skills appear in GRANT order (`agent_skills.position`), becaus
 an author who lists "research, then script, then video" is describing a pipeline
 and re-sorting by name would silently discard that.
 
+### Both execution paths compose them
+
+An agent runs either the tool-calling loop or a single model call
+(`AgentNodeExecutor.shouldUseToolLoop`: an agent with no granted tools and a
+non-tool type takes the single call). Skills originally composed only in the
+loop, so the agents most likely to hold a skill and nothing else — a writer with
+a style, a summariser with a token budget — ran without it while the Skills tab
+said it was applied.
+
+The single-call path now composes them with the same `SkillLoader`, the same
+`SkillComposer` share of the default context budget, at the same position (after
+the agent's own instructions, as the start of the system message), and records
+to `agent_activation_skills` with a null activation id. Asserted by
+`SkillPipelineAcceptanceTest > a single-call agent with no tools still runs with
+its skills`.
+
 ### The budget
 
 Skills get a **share of the context budget** — a quarter, floored at 2,000
@@ -230,6 +246,17 @@ this feature removes.
 Re-installing is an **upgrade in place**: a second row with the same text and a
 different id would silently split every grant in the workspace across two skills.
 
+### What ships in it
+
+V073 seeded the three skills its acceptance pipeline needed (research brief,
+video script, video production), two of which need a tool bound. V075 adds
+everyday skills that need no tools and so install and apply in one click, on any
+model: **Token-efficient answers**, **Structured JSON output**, **Clear, human
+writing**, **Design critique**, **Check your work** and **Customer support
+reply**. Written to the same rule — what a competent practitioner does, in order,
+and the one thing never to do — and free of prompt-frame text the sanitizer would
+defang.
+
 ---
 
 ## 8. Versions
@@ -314,10 +341,11 @@ section, no rows, no span attributes.
 
 Stated here rather than left to be discovered:
 
-- **No skills UI beyond the Debug tab.** The API is complete — list, create,
-  version, install, grant — and the grant refusal renders as a normal form error,
-  but there is no skills screen and no picker on the agent editor. The grant is
-  set through the API today.
+- **Editing a skill's text in the UI.** The Skills page lists, installs,
+  archives and CREATES skills; an agent's Skills tab adds them (installing from
+  the library in the same gesture, or writing a new one); and the create-agent
+  dialog has a Skills step. Writing a new VERSION of an existing skill is still
+  API-only (`POST /api/skills/:id/versions`).
 - **The async-tool leg of the worked scenario is not in the pipeline test.** An
   async tool ends the tick and parks the run on a `run_waits` row, so a pipeline
   including one becomes a test of suspend-and-resume with a pipeline attached —

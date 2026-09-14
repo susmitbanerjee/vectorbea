@@ -23,11 +23,13 @@ import {
   Modal, ModalBody, ModalDivider, ModalFooter, ModalHeader, ModalLayout,
   ModalNote, ModalRail, ModalSection, ModalStepBar, type ModalStep,
 } from "~/components/ui/modal";
+import { toast } from "sonner";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiMutation } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { SummaryList, SummaryRow, ConnectionPicker } from "./create-atoms";
+import { AgentSkillPicker, attachSkills, type SkillSelection } from "./skills-view";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    REGISTER AN AGENT
@@ -100,6 +102,9 @@ const STEPS: ModalStep[] = [
   { id: "model", label: "Model", summary: "Connection, model and limits" },
   { id: "instructions", label: "Instructions", summary: "The system prompt" },
   { id: "grants", label: "Grants", summary: "Which tools it may call" },
+  /* Skills sit after grants because a skill that uses a tool can only apply to
+     an agent that holds it — picking tools first is what lets that work. */
+  { id: "skills", label: "Skills", summary: "How it should work" },
   { id: "review", label: "Review", summary: "Check, then register" },
 ];
 
@@ -144,6 +149,8 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
   const [grants, setGrants] = React.useState<string[]>([]);
   const [toolQuery, setToolQuery] = React.useState("");
+  const [skills, setSkills] = React.useState<SkillSelection>({ skillIds: [], librarySlugs: [] });
+  const skillCount = skills.skillIds.length + skills.librarySlugs.length;
 
   React.useEffect(() => {
     if (!open) return;
@@ -285,7 +292,28 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
         { workspaceId: scope.workspaceId, environmentId: null },
       );
     },
-    onSuccess: (agent) => {
+    onSuccess: async (agent) => {
+      const readScope = { workspaceId: scope.workspaceId, environmentId: null };
+      /* Skills attach AFTER the agent exists — a grant needs an agent id. A
+         failure here never undoes the agent: it is created, and the toast says
+         which skills did not attach and why, in the API's own words. */
+      if (skillCount > 0) {
+        try {
+          const { attached, refused } = await attachSkills(api, agent.id, skills, readScope);
+          void queryClient.invalidateQueries({ queryKey: [...queryKeys.env(scope.workspaceId, null), "skills"] });
+          void queryClient.invalidateQueries({ queryKey: [...queryKeys.env(scope.workspaceId, null), "agent-skills", agent.id] });
+          if (refused.length > 0) {
+            toast.warning(
+              `${agent.name} was created with ${attached.length} skill${attached.length === 1 ? "" : "s"}. ` +
+              `Not added: ${refused.map((r) => `${r.name} (${r.reason})`).join("; ")}`,
+            );
+          } else {
+            toast.success(`${agent.name} created with ${attached.length} skill${attached.length === 1 ? "" : "s"}.`);
+          }
+        } catch {
+          toast.warning(`${agent.name} was created, but its skills couldn't be added. Add them from its Skills tab.`);
+        }
+      }
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agents.all({ workspaceId: scope.workspaceId, environmentId: null }),
       });
@@ -302,6 +330,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
       setConnectionId(null); setModelName(""); setTemperature(0.1);
       setMaxTokens("4096"); setMaxIterations("10");
       setInstructions(""); setGrants([]); setToolQuery("");
+      setSkills({ skillIds: [], librarySlugs: [] });
       create.reset();
     }, 200);
     return () => window.clearTimeout(timer);
@@ -336,7 +365,8 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
         : index === 1 ? (trimmedModel || (spec.needsModel ? undefined : "Not model-backed"))
           : index === 2 ? (trimmedInstructions ? `${trimmedInstructions.length} characters` : undefined)
             : index === 3 ? (grants.length > 0 ? `${grants.length} tool${grants.length === 1 ? "" : "s"}` : "No grants")
-              : undefined,
+              : index === 4 ? (skillCount > 0 ? `${skillCount} skill${skillCount === 1 ? "" : "s"}` : "No skills")
+                : undefined,
   }));
 
   const error = stepErrors[step];
@@ -725,6 +755,16 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
           {step === 4 ? (
             <div className="grid gap-4">
+              <ModalNote title="Skills shape how the agent works">
+                Pick reusable instructions — a writing style, a design eye, a tighter token budget. They apply
+                every time this agent runs, after its own instructions, and never add permissions.
+              </ModalNote>
+              <AgentSkillPicker value={skills} onChange={setSkills} />
+            </div>
+          ) : null}
+
+          {step === 5 ? (
+            <div className="grid gap-4">
               <ModalSection title="What will be registered">
                 <SummaryList>
                   <SummaryRow label="Name" onEdit={() => setStep(0)}>{trimmedName}</SummaryRow>
@@ -751,6 +791,9 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                     {grantedTools.length === 0
                       ? "No tools granted"
                       : grantedTools.map((tool) => tool.name).join(", ")}
+                  </SummaryRow>
+                  <SummaryRow label="Skills" onEdit={() => setStep(4)}>
+                    {skillCount === 0 ? "None" : `${skillCount} skill${skillCount === 1 ? "" : "s"}`}
                   </SummaryRow>
                 </SummaryList>
               </ModalSection>
@@ -793,6 +836,10 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                 {grants.length === 0
                   ? "No grants yet — the agent can be created and granted tools later."
                   : `${grants.length} of ${tools.length} tools granted.`}
+              </Text>
+            ) : step === 4 ? (
+              <Text variant="caption" tone="muted">
+                {skillCount === 0 ? "Optional — skills can be added later from the agent's Skills tab." : `${skillCount} skill${skillCount === 1 ? "" : "s"} selected.`}
               </Text>
             ) : null
           }

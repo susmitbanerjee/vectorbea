@@ -215,14 +215,14 @@ export const INTEGRATION_SEEDS: {
      * somebody expected a single switch and found twelve checkboxes.
      */
     description:
-      "Connect a Model Context Protocol server and use the tools it advertises. " +
-      "Each tool is granted to an agent individually.",
-    auth: ["none", "api-key"],
+      "Paste a Model Context Protocol server's URL, sign in if it asks, and its tools " +
+      "are ready to hand to your agents.",
+    auth: ["oauth", "none", "api-key"],
     scopes: [],
     setup: [
-      "Give the server's streamable-HTTP endpoint — the single URL it answers JSON-RPC on, usually ending in /mcp.",
-      "Add a bearer token if the server requires one. SSE and stdio servers are not supported.",
-      "Discover its tools after connecting. Each one becomes a tool in your registry, granted to an agent individually.",
+      "Paste the server's URL — the streamable-HTTP endpoint, usually ending in /mcp.",
+      "Sign in if the server uses sign-in. Vectorbea registers itself with the server, so there is no OAuth app to create and no token to copy.",
+      "Its tools are discovered as soon as it is connected. Pick the agents that should use them.",
     ],
   },
 ];

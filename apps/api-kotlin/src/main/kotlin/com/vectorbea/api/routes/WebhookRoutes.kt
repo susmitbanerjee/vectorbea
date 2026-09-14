@@ -396,13 +396,11 @@ class WebhookRoutes(
     /**
      * The address a sender is given.
      *
-     * `PUBLIC_API_BASE_URL` is the origin the platform is reachable at. Without
-     * it the path is returned alone rather than a wrong absolute URL — a
-     * confidently incorrect `http://localhost:8080/...` pasted into Stripe is a
-     * worse failure than a relative path somebody has to complete.
+     * The PUBLIC origin — `api.vectorbea.com` in production, `devapi` elsewhere,
+     * `PUBLIC_API_BASE_URL` when a deployment fronts the API somewhere else. Never
+     * the host the API happens to run on: this string is pasted into Stripe and
+     * GitHub and lives there for years. See [com.vectorbea.api.config.PublicUrls].
      */
-    private fun urlFor(token: String): String {
-        val base = System.getenv("PUBLIC_API_BASE_URL")?.trimEnd('/')
-        return if (base.isNullOrBlank()) "/api/hooks/$token" else "$base/api/hooks/$token"
-    }
+    private fun urlFor(token: String): String =
+        "${com.vectorbea.api.config.PublicUrls.apiBase()}/api/hooks/$token"
 }

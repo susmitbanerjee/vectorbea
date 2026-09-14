@@ -107,6 +107,20 @@ class AuthMiddleware(
          * this middleware knows how to check.
          */
         "/api/runner/",
+        /*
+         * The redirect back from an MCP server's sign-in.
+         *
+         * It arrives from somebody else's authorization server, carrying no
+         * session of ours and never able to. The `state` parameter is the proof:
+         * 32 random bytes, stored only as a hash, bound to one workspace and one
+         * connection, and deleted in the same statement that reads it — so it
+         * works once, for fifteen minutes, and a leaked one names a sign-in that
+         * has already completed. `McpConnectorRoutes.callback` scopes everything
+         * by the row, never by the query string, and redirects only to our own
+         * origin. The full path is listed, so nothing else under `/api/mcp` —
+         * the Vectorbea-as-MCP-server endpoint included — becomes public.
+         */
+        "/api/mcp/oauth/callback",
     )
 
     /**

@@ -181,6 +181,11 @@ object RbacGuard {
          * may add what it offers, and whoever may not, may not.
          */
         "POST /api/connections/:id/mcp/discover"     to Permission.CONNECTION_WRITE,
+        /* Signing in writes a credential onto the connection, which is what
+           CONNECTION_WRITE governs; probing an unsaved URL writes nothing and is
+           the same act as testing an unsaved connection. */
+        "POST /api/connections/:id/mcp/oauth/start"  to Permission.CONNECTION_WRITE,
+        "POST /api/mcp/probe"                        to Permission.CONNECTION_TEST,
         /* A negotiated rate moves every cost figure the connection produces, and
            budget ceilings are measured against those figures — so setting one is
            a connection write, not a read dressed up as configuration. */

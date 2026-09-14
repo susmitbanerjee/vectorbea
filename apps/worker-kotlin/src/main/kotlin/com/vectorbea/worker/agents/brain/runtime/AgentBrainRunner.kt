@@ -502,7 +502,11 @@ class AgentBrainRunner(
     private val toolExecutor: ToolNodeExecutor? by lazy {
         val ds = dataSource ?: return@lazy null
         val pools = dbPoolManager ?: return@lazy null
-        ToolNodeExecutor(ds, connectionResolver, pools, eventStore)
+        ToolNodeExecutor(ds, connectionResolver, pools, eventStore,
+            /* The same secrets a workflow `tool` node is built with — see
+               `ConnectionResolver.secrets`. Without them a signed-in MCP server
+               could not refresh its token for an agent, only for a workflow. */
+            secretService = connectionResolver.secrets)
     }
 
     private val activationStore: ActivationStore? by lazy {

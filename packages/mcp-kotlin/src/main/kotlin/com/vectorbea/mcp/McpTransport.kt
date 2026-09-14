@@ -35,6 +35,25 @@ fun interface McpTransport {
      */
     fun send(request: HttpRequest, totalCallMs: Long, maxResponseBytes: Long): Response
 
-    /** What came back. Headers are deliberately absent: nothing here reads one. */
-    data class Response(val statusCode: Int, val body: String)
+    /**
+     * What came back.
+     *
+     * Headers were absent while nothing read one. Three things now do, and each
+     * is part of the protocol rather than a convenience: `WWW-Authenticate`
+     * names where an OAuth server describes itself (RFC 9728), `Mcp-Session-Id`
+     * is how a stateful server knows a call belongs to the session it
+     * initialised, and `Content-Type` decides whether the body is plain JSON or
+     * a server-sent event stream carrying it.
+     *
+     * Names are matched case-insensitively by [header]; HTTP header names are.
+     */
+    data class Response(
+        val statusCode: Int,
+        val body: String,
+        val headers: Map<String, List<String>> = emptyMap(),
+    ) {
+        fun header(name: String): String? =
+            headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }
+                ?.value?.firstOrNull()
+    }
 }

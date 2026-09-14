@@ -111,7 +111,7 @@ export function AgentDetail({
           {tab === "skills" ? (
             <Section
               title="Skills"
-              help="Named instructions this agent works from. A skill teaches it how — it can never let it do something it was not already granted."
+              help="Instructions that shape how this agent works. They apply on every run, after the agent's own instructions."
             >
               <AgentSkillGrants agentId={agent.id} agentName={agent.name} />
             </Section>

@@ -76,6 +76,23 @@ interface SecretService {
      * NEVER store the result — it is for UI rendering only.
      */
     fun maskSecret(plaintext: String): String
+
+    /**
+     * Encrypt [plaintext] bound to [workspaceId], WITHOUT creating a row.
+     *
+     * For the two places a credential is stored somewhere other than
+     * `encrypted_secrets`: `connection_oauth_tokens` (a refreshed token, V064)
+     * and `mcp_oauth_authorizations` (a sign-in in flight, V074). Same
+     * `Encryption`, same key, same workspace-as-associated-data, so a blob
+     * written here opens in the worker and fails in any other tenant's row.
+     *
+     * Null when no key is configured — callers treat that as "cannot store a
+     * credential", never as "store it in clear".
+     */
+    fun sealForWorkspace(plaintext: String, workspaceId: UUID): String? = null
+
+    /** The inverse of [sealForWorkspace]. Null on any failure; never throws. */
+    fun openForWorkspace(token: String?, workspaceId: UUID): String? = null
 }
 
 /**

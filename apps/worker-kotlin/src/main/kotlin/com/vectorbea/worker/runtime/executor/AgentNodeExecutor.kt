@@ -136,7 +136,11 @@ class AgentNodeExecutor(
         /* An agent loop is where one run becomes twenty provider calls, so it is
            where a wrong price multiplies twentyfold. `pricing` is not optional
            here for the same reason `capacity` is not. */
-        LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity,
+        LlmNodeExecutor(connectionResolver, eventStore,
+            /* The same seam the brain gets, so a test can script the provider for
+               a single-call agent too. Null in production. */
+            httpClient = llmHttpClient ?: com.vectorbea.worker.net.OutboundHttp.client,
+            capacity = capacity,
             pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
     }
 
@@ -220,7 +224,29 @@ class AgentNodeExecutor(
 
         // ── Build messages ────────────────────────────────────────────────────
 
-        val systemPrompt  = agent.instructions
+        /*
+         * ── SKILLS COMPOSE HERE TOO ─────────────────────────────────────────
+         *
+         * They used to compose only inside the tool loop, so the agents most
+         * likely to hold a skill and nothing else — a writer with a brand-voice
+         * skill, a summariser with a token-budget skill — took this path and ran
+         * without it. A skill granted on the agent's Skills tab was saved,
+         * listed, and silently absent from every run that did not also have a
+         * tool: exactly the "agent ignored a skill it was never shown" failure
+         * docs/SKILLS.md §9 exists to make impossible.
+         *
+         * Same loader, same composer, same budget share, same recorder, same
+         * position as `AgentPromptBuilder`: after the agent's own instructions and
+         * before anything the task brings in. The position is not re-decided
+         * here, it is copied, because the precedence claim has to be one claim.
+         * The grant check runs against the agent's granted tools — a skill whose
+         * tools were revoked is dropped and recorded, here as in the loop.
+         */
+        val skillsBlock = composeSkillsForSingleCall(agent, node, ctx)
+        val systemPrompt  = listOfNotNull(
+            agent.instructions?.takeIf { it.isNotBlank() },
+            skillsBlock.takeIf { it.isNotBlank() },
+        ).joinToString("\n\n").takeIf { it.isNotBlank() }
         // Node-level taskInstruction overrides; fall back to resolved input keys
         val taskInstruction: String? = node.config["taskInstruction"] as? String
             ?: resolvedInputs["taskInstruction"] as? String
@@ -318,6 +344,41 @@ class AgentNodeExecutor(
             title = "Agent ${if (enrichedResult is NodeResult.Completed) "completed" else "failed"}: ${agent.name}")
 
         return enrichedResult
+    }
+
+    /**
+     * The skills block for a single model call, and its bookkeeping.
+     *
+     * Records to `agent_activation_skills` with no activation id — the key the
+     * recorder already accepts for exactly this case — keyed on (run, step,
+     * skill), so a retried step overwrites its own row (invariant 2). Never
+     * throws: a skill adds competence and takes nothing away, so a failure here
+     * yields an agent without its skills, logged, rather than a failed step.
+     */
+    private fun composeSkillsForSingleCall(
+        agent: AgentRow,
+        node: WorkflowNode,
+        ctx: RuntimeContext,
+    ): String = try {
+        val loader = skillsEnabled
+            ?.let { com.vectorbea.worker.agents.skills.SkillLoader(dataSource, enabled = it) }
+            ?: com.vectorbea.worker.agents.skills.SkillLoader(dataSource)
+        val agentUuid = UUID.fromString(agent.id)
+        val grantedTools = agent.allowedToolIds.mapNotNull { runCatching { UUID.fromString(it) }.getOrNull() }.toSet()
+        val loaded = loader.load(agentUuid, ctx.workspaceId, grantedTools)
+        if (loaded.isEmpty) ""
+        else {
+            val composed = loader.compose(
+                loaded, com.vectorbea.worker.agents.brain.prompts.AgentPromptBuilder.CONTEXT_CHAR_BUDGET)
+            com.vectorbea.worker.agents.skills.ActivationSkillRecorder(dataSource).record(
+                runId = ctx.runId, workspaceId = ctx.workspaceId, agentId = agentUuid,
+                stepId = node.id, activationId = null, composed = composed,
+            )
+            composed.text
+        }
+    } catch (e: Exception) {
+        log.warn("[skills] single-call composition failed for agent={}: {}", agent.id, e.message)
+        ""
     }
 
     /**

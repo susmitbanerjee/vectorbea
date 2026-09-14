@@ -118,6 +118,99 @@ forgets is the one that matters.
 
 ---
 
+## 4a. Authentication: none, a pasted token, or signing in
+
+A server says which it needs; nothing is configured up front.
+
+**Probe first.** `POST /api/mcp/probe` runs the handshake cold. A server that
+answers needs no credential. A 401 is not an error but a question: its
+`WWW-Authenticate: Bearer resource_metadata="…"` names where the server
+describes its sign-in (RFC 9728). If that document — or the well-known fallback,
+path-aware per RFC 9728 §3 — names an authorization server whose metadata can be
+read (RFC 8414, then OpenID discovery), the answer is **sign in**. Otherwise it is
+**paste a token**. The previous connector asked for a token first, and for OAuth
+servers the verify step reported "the server rejected the token" for a token
+nobody had sent.
+
+**Signing in** is the MCP authorization flow, end to end, with nothing for the
+person to create:
+
+1. `POST /api/connections/:id/mcp/oauth/start` discovers the authorization
+   server, registers Vectorbea as a client (RFC 7591 dynamic registration —
+   public client by preference, PKCE is the protection), generates a PKCE S256
+   pair and a 32-byte `state`, and stores the verifier and registration SEALED
+   in `mcp_oauth_authorizations` (V074), keyed by SHA-256 of the state. The
+   browser only ever holds the state.
+2. The person approves at the authorization server. The request carries the
+   `resource` indicator (RFC 8707), binding the token to this server.
+3. `GET /api/mcp/oauth/callback` (public; the state is the proof) consumes the
+   row with `DELETE … RETURNING` — single use by construction — exchanges the
+   code, writes the credential to the connection's secret, sets `auth_type =
+   'oauth2'`, clears any refreshed token from a previous sign-in, discovers the
+   tools, and redirects to the web app's `/mcp/oauth/complete`.
+
+The `redirect_uri` is `PublicUrls.apiBase()` + `/api/mcp/oauth/callback` —
+`api.vectorbea.com` in production, `devapi.vectorbea.com` elsewhere. Never the
+hosting provider's hostname: it is registered with a third party and shown on
+their consent screen.
+
+An authorization server that cannot do S256 is refused rather than downgraded.
+One that does not allow dynamic registration gets a sentence saying to paste a
+token instead.
+
+**The credential** is a JSON document in the connection's existing secret
+(`"kind": "mcp_oauth"`: access and refresh token, expiry, token endpoint, client
+id and secret, resource). A secret that is not that document is a bearer token,
+exactly as before, so every connection created before sign-in existed is
+unchanged. The split is on data, not a flag. A credential never appears in
+`config_json`.
+
+**Refreshing** is `McpCredentials` in `packages/mcp-kotlin`, shared by both
+services: a token within a minute of expiry is refreshed before use, and a 401 on
+a token believed valid triggers one refresh and one retry (safe: a call refused
+at the authorization layer never reached the tool). Refreshes are serialised per
+connection and re-read the store after taking the lock, so a rotation another
+thread or process just persisted is used rather than spent again. The refreshed
+credential is persisted to `connection_oauth_tokens` BEFORE it is used — on a
+rotating server the refresh token just spent is already dead. The API and the
+worker read and write the same row in the same sealed format.
+
+**A sign-in that cannot be refreshed** (revoked, `invalid_grant`, no refresh token)
+becomes a tool error with `kind = auth`, `retryable = false`, telling the agent a
+person must sign in again. Never a run failure, and never counted by the circuit
+breaker — the server answered.
+
+The agent brain's tool executor is now built with the connection resolver's
+secret service, the same as a workflow `tool` node's, so an agent can refresh a
+sign-in exactly as a workflow step can.
+
+---
+
+## 4b. The streamable-HTTP handshake
+
+`McpClient` originally sent `tools/list` cold with `Accept: application/json`
+and read one JSON body. That works against a stateless server that never streams
+(our own `/api/mcp`) and fails against most servers built on the reference SDKs,
+each way looking like "not an MCP server":
+
+- **`initialize` first**, then `notifications/initialized`. A server without
+  `initialize` (JSON-RPC `-32601`) is used session-less.
+- **`Accept: application/json, text/event-stream`**, always — required by the
+  specification and enforced with 406.
+- **Event-stream replies.** A POST may be answered with a one-shot SSE body; the
+  response is the last message carrying an `id` and a `result` or `error`,
+  skipping notifications.
+- **Sessions.** `Mcp-Session-Id` from `initialize` is sent on every later call,
+  cached per (connection, url, credential fingerprint). A 404 on a session
+  re-initialises once and retries.
+- **Pagination.** `tools/list` and `resources/list` follow `nextCursor`, bounded
+  at 20 pages.
+
+The legacy HTTP+SSE transport (a long-lived GET stream) is still refused by name;
+a streamable-HTTP server that replies with an event stream is not that.
+
+---
+
 ## 5. Resources
 
 `resources/list` and `resources/read`, exposed by passing `resourceUri` to an MCP
@@ -181,6 +274,10 @@ with that sentence** rather than silently downgraded.
 | An injected description cannot change what the agent may call | `McpSanitizerTest` — asserted on the grant check, which takes no description as input, plus the sanitizer separately |
 | An unreachable server degrades to a tool error with a legible cause | `McpToolPathTest` — `Completed` with `error=server`, `retryable=true`, and a message naming the blast radius |
 | Granting is per tool; a server-level grant is impossible | `McpSanitizerTest` (the type) and `McpDiscoveryTest` (no row is ever created for a server) |
+| The handshake, sessions, event-stream replies and pagination | `McpClientProtocolTest` (`packages/mcp-kotlin`) |
+| Discovery, registration, PKCE, exchange, refresh, one refresh under concurrency | `McpOAuthTest` (`packages/mcp-kotlin`) |
+| A sign-in state works once, is stored hashed and sealed, and expires | `McpOAuthStorageTest` (API, real Postgres) |
+| An agent's call on an expired sign-in refreshes and completes; a revoked one is a legible tool error | `McpSignedInToolCallTest` (worker) |
 
 ---
 
@@ -190,10 +287,12 @@ with that sentence** rather than silently downgraded.
 - **A discovery scheduler.** `syncTools` exists and is correct; nothing calls it
   on a timer yet. Discovery happens when an operator triggers it. A background
   refresh is a scheduler decision, not a protocol one.
-- **The granting UI.** `mcp_tools_available` is the query it needs; the screen is
-  web work.
-- **Anything an operator triggers discovery *with*.** `syncTools` has no caller
-  outside its own tests, so in the shipped product no MCP tool row is ever
-  written and nothing is grantable. The endpoint, the connection test that works
-  against a spec-correct server, and the screens are specified in
-  [MCP-CONNECTOR-UI.md](./MCP-CONNECTOR-UI.md).
+- **Pre-registered OAuth clients.** A server whose authorization server does not
+  allow dynamic client registration (GitHub's remote server, for one) cannot be
+  signed in to; the connect flow says so and offers a token instead. Configuring
+  a client id per server is not built.
+- **Cross-process refresh locking.** Refreshes are serialised per connection
+  within a process and re-read the stored credential after locking; two
+  processes refreshing the same rotating token in the same instant can still
+  race. A Postgres advisory lock would close it at the cost of holding a pooled
+  connection across the token request.

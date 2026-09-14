@@ -22,12 +22,21 @@ source of truth.
 | Service   | Prod                      | Staging                       |
 | --------- | ------------------------- | ----------------------------- |
 | Web       | `vectorbea.com`           | `dev.vectorbea.com`           |
-| API       | `api.vectorbea.com`       | `api-dev.vectorbea.com`       |
+| API       | `api.vectorbea.com`       | `devapi.vectorbea.com`        |
 | Telemetry | `telemetry.vectorbea.com` | `telemetry-dev.vectorbea.com` |
 
-Worker has no public domain (it consumes the Redis queue). Adjust the staging
-subdomains if you prefer `staging-*` — just keep them consistent with the env
-vars below.
+Worker has no public domain (it consumes the Redis queue).
+
+**The API hosts are not optional names.** They are what the product prints: the
+workflow "Run it from anywhere" snippet, the API keys page, every webhook URL,
+and the OAuth `redirect_uri` an MCP server's sign-in is registered with. Both the
+API (`PublicUrls.apiBase`) and the web app (`getPublicApiBaseUrl`) derive them
+from the environment tag — `VECTORBEA_ENV=prod` → `api.vectorbea.com`, anything
+else → `devapi.vectorbea.com` — so both custom domains must exist and point at
+the right Railway service. The Railway-provided `*.up.railway.app` hostname is
+never printed anywhere. Override only if a deployment fronts the API somewhere
+else: `PUBLIC_API_BASE_URL` on the API and `NEXT_PUBLIC_PUBLIC_API_BASE_URL` on
+the web, to the same value.
 
 ---
 
@@ -111,6 +120,9 @@ TELEMETRY_ENABLED=true
 TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
 TELEMETRY_INTERNAL_TOKEN=<shared internal token>
 CORS_ALLOWED_ORIGINS=https://vectorbea.com             # staging → https://dev.vectorbea.com
+APP_URL=https://app.vectorbea.com                      # staging → https://dev.vectorbea.com
+# PUBLIC_API_BASE_URL is derived from VECTORBEA_ENV (api / devapi.vectorbea.com); set only to override
+MCP_DISCOVERY_ENABLED=true      # connecting MCP servers: probe, sign-in, discovery
 ```
 
 **`worker` service**
@@ -126,6 +138,7 @@ WORKER_LEASE_TTL_SECONDS=60
 WORKER_DEFAULT_NODE_TIMEOUT_MS=120000
 WORKER_MAX_RUN_DURATION_MS=600000
 WORKER_MAX_BRANCH_THREADS=16
+AGENT_SKILLS_ENABLED=true       # skills apply to agent runs; off = granted skills are ignored at run time
 TELEMETRY_ENABLED=true
 TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
 TELEMETRY_INTERNAL_TOKEN=<shared internal token>
@@ -181,12 +194,14 @@ URLs.
 ```
 # Production scope
 NEXT_PUBLIC_VECTORBEA_API_URL=https://api.vectorbea.com
+NEXT_PUBLIC_VECTORBEA_ENV=prod                  # picks the public API host printed in snippets
 NEXT_PUBLIC_SUPABASE_URL=<prod supabase url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<prod anon key>
 NEXT_PUBLIC_PRIVATE_BETA_MODE=true
 
 # Preview scope (staging)
-NEXT_PUBLIC_VECTORBEA_API_URL=https://api-dev.vectorbea.com
+NEXT_PUBLIC_VECTORBEA_API_URL=https://devapi.vectorbea.com
+NEXT_PUBLIC_VECTORBEA_ENV=dev
 NEXT_PUBLIC_SUPABASE_URL=<staging supabase url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<staging anon key>
 NEXT_PUBLIC_PRIVATE_BETA_MODE=true

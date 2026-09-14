@@ -77,7 +77,7 @@ object ApiMcpTransport : McpTransport {
         if (body.size > maxResponseBytes) {
             throw ResponseTooLargeException(maxResponseBytes)
         }
-        return McpTransport.Response(response.statusCode(), String(body, Charsets.UTF_8))
+        return McpTransport.Response(response.statusCode(), String(body, Charsets.UTF_8), response.headers().map())
     }
 
     /**

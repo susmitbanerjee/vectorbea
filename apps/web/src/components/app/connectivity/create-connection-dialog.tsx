@@ -22,6 +22,7 @@ import {
   ModalNote, ModalRail, ModalSection, ModalStepBar, type ModalStep,
 } from "~/components/ui/modal";
 import { SummaryList, SummaryRow } from "~/components/app/registry/create-atoms";
+import { ConnectMcpDialog } from "./connect-mcp-dialog";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiMutation } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
@@ -269,11 +270,35 @@ export function CreateConnectionDialog({
   open, onOpenChange, presetProvider, onCreated,
 }: CreateConnectionDialogProps) {
   const [session, setSession] = React.useState(0);
+  const [mcp, setMcp] = React.useState(presetProvider === "mcp");
   const wasOpen = React.useRef(open);
   React.useEffect(() => {
-    if (open && !wasOpen.current) setSession((current) => current + 1);
+    if (open && !wasOpen.current) {
+      setSession((current) => current + 1);
+      setMcp(presetProvider === "mcp");
+    }
     wasOpen.current = open;
-  }, [open]);
+  }, [open, presetProvider]);
+
+  /*
+   * MCP has its own flow. It is not a credential form: the server is asked
+   * what it needs, and the answer decides between connecting, signing in and
+   * asking for a token — see `ConnectMcpDialog`. Routing it through this
+   * wizard's "method → secret → test" steps is what produced a verify screen
+   * reporting "the server rejected the token" for servers that use sign-in and
+   * were never sent one.
+   */
+  if (mcp) {
+    return (
+      <ConnectMcpDialog
+        key={`mcp-${session}`}
+        open={open}
+        onOpenChange={onOpenChange}
+        onCreated={onCreated}
+        onBack={presetProvider === "mcp" ? undefined : () => setMcp(false)}
+      />
+    );
+  }
 
   return (
     <CreateConnectionDialogBody
@@ -282,17 +307,19 @@ export function CreateConnectionDialog({
       onOpenChange={onOpenChange}
       presetProvider={presetProvider ?? null}
       onCreated={onCreated}
+      onChooseMcp={() => setMcp(true)}
     />
   );
 }
 
 function CreateConnectionDialogBody({
-  open, onOpenChange, presetProvider, onCreated,
+  open, onOpenChange, presetProvider, onCreated, onChooseMcp,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   presetProvider: ProviderId | null;
   onCreated?: (connection: contracts.Connection) => void;
+  onChooseMcp: () => void;
 }) {
   const api = useApi();
   const scope = useScope();
@@ -644,7 +671,10 @@ function CreateConnectionDialogBody({
               search={search}
               onSearch={setSearch}
               selected={providerId}
-              onSelect={(id) => { setProviderId(id); setStep(1); }}
+              onSelect={(id) => {
+                if (id === "mcp") { onChooseMcp(); return; }
+                setProviderId(id); setStep(1);
+              }}
             />
           ) : null}
 

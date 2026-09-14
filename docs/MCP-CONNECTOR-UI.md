@@ -7,6 +7,17 @@ Companion to [MCP.md](./MCP.md), which describes the runtime. That document ends
 at §9 with "the granting UI … is web work". This is that work, specified —
 including the backend it cannot be built without.
 
+> **Revised.** §5's four-step wizard (Server → Credential → Verify → Discover)
+> is superseded by `connect-mcp-dialog.tsx`: **Server → Connect → Tools →
+> Agents**. The person pastes a URL; `POST /api/mcp/probe` decides between
+> connected, sign in (OAuth, see MCP.md §4a) and paste a token; tools are
+> discovered on the way in; and the last step adds them to chosen agents by
+> writing N explicit tool ids into each agent's `allowedToolIds` through the
+> ordinary agent PATCH. That is the same convenience §8 already allowed ("Select
+> all 12"), offered at the moment the tools appear — it still creates no
+> server-level grant, and the button names the count. The connection's Tools tab
+> gains "Sign in again" for signed-in servers.
+>
 > **Status: built.** All ten items in §11 are implemented. Discovery ships behind
 > `MCP_DISCOVERY_ENABLED`, off by default, per the conventions — reading
 > `mcp_tools_available` is deliberately not gated, so a workspace that already
@@ -564,7 +575,7 @@ observations, the circuit breaker — and the API has no business holding it.
   the COUNT, so a server offering them is not invisible; browsing them is a real
   gap and a separate one.
 - **SSE and stdio.** Refused by name, surfaced as a fact in the form.
-- **OAuth to an MCP server.** Bearer only, matching `McpClient`.
+- ~~**OAuth to an MCP server.**~~ Built — MCP.md §4a.
 
 ---
 

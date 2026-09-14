@@ -39,8 +39,12 @@ class McpDiscoveryTest {
         var failWith: Exception? = null
         var calls = 0
         fun send(req: HttpRequest, total: Long, maxBytes: Long): McpTransport.Response {
+            failWith?.let { calls++; throw it }
+            when (rpcMethodOf(req)) {
+                "initialize" -> return McpTransport.Response(200, FAKE_INITIALIZE_REPLY)
+                "notifications/initialized" -> return McpTransport.Response(202, "")
+            }
             calls++
-            failWith?.let { throw it }
             return McpTransport.Response(200, replies.removeFirstOrNull() ?: "{}")
         }
     }
@@ -347,3 +351,28 @@ class McpDiscoveryTest {
             "rather than broken")
     }
 }
+
+/**
+ * The JSON-RPC method of a request the client sent, read off its body publisher.
+ *
+ * The client now opens every session with `initialize` and
+ * `notifications/initialized`. The fakes below answer those two themselves and
+ * script only the calls under test, so a protocol handshake cannot silently
+ * shift every scripted reply by one.
+ */
+internal fun rpcMethodOf(req: java.net.http.HttpRequest): String? {
+    val publisher = req.bodyPublisher().orElse(null) ?: return null
+    val out = StringBuilder()
+    publisher.subscribe(object : java.util.concurrent.Flow.Subscriber<java.nio.ByteBuffer> {
+        override fun onSubscribe(s: java.util.concurrent.Flow.Subscription) = s.request(Long.MAX_VALUE)
+        override fun onNext(item: java.nio.ByteBuffer) {
+            val b = ByteArray(item.remaining()); item.get(b); out.append(String(b, Charsets.UTF_8))
+        }
+        override fun onError(throwable: Throwable) = Unit
+        override fun onComplete() = Unit
+    })
+    return runCatching { com.fasterxml.jackson.databind.ObjectMapper().readTree(out.toString())["method"]?.asText() }.getOrNull()
+}
+
+internal const val FAKE_INITIALIZE_REPLY =
+    """{"jsonrpc":"2.0","id":"init","result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fake","version":"1"}}}"""

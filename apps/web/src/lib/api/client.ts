@@ -260,6 +260,35 @@ export interface McpDiscoverResult {
   tools: { name: string; description: string | null; descriptionWasAltered: boolean }[];
 }
 
+/**
+ * `POST /api/mcp/probe` — what an MCP server needs, before anything is saved.
+ *
+ * `auth` is the answer the connect screen is built around: `none` means it is
+ * already connected, `oauth` means show a sign-in button, `token` means ask for
+ * a token. The rest of the shape is the ordinary test result.
+ */
+export interface McpProbeResult {
+  status: "connected" | "failed" | "private_runner_required" | "whitelist_required";
+  errorCode: string | null;
+  message: string;
+  latencyMs: number;
+  auth: "none" | "oauth" | "token";
+  serverName: string | null;
+  /** The sign-in host, for "Sign in with auth.example.com". */
+  authorizationServer: string | null;
+  toolCount: number | null;
+}
+
+/** `POST /api/connections/:id/mcp/oauth/start`. */
+export interface McpSignInStart {
+  /** Null when the server turned out to need no sign-in at all. */
+  authorizationUrl: string | null;
+  signInRequired: boolean;
+  authorizationServer?: string | null;
+  expiresInSeconds?: number;
+  message?: string;
+}
+
 /** One row of `mcp_tools_available`, as the API returns it. */
 export interface McpToolRow {
   toolId: string;
@@ -292,6 +321,8 @@ export interface McpToolsResponse {
   items: McpToolRow[];
   manifest: McpManifest | null;
   serverName: string;
+  /** The connection holds a sign-in (OAuth) rather than a pasted token or nothing. */
+  signedIn?: boolean;
 }
 
 /* ── Triggers ─────────────────────────────────────────────────────────────── */
@@ -455,6 +486,16 @@ export interface InstallSkillBody {
   slug?: string;
   /** capability key → tool uuid. Every declared capability must appear. */
   toolBindings: Record<string, string>;
+}
+
+export interface CreateSkillBody {
+  name: string;
+  description?: string | null;
+  summary?: string | null;
+  instructions: string;
+  /** What the agent's answer should look like, in prose. Optional. */
+  outputContract?: string | null;
+  examples?: { title: string; body: string }[];
 }
 
 export interface SkillGrantRow {
@@ -959,6 +1000,17 @@ export interface VectorbeaClient {
     mcpDiscover(id: string, scope?: Scope, options?: RequestOptions): Promise<McpDiscoverResult>;
     /** What this server has advertised, including what it has stopped advertising. */
     mcpTools(id: string, scope?: Scope, options?: RequestOptions): Promise<McpToolsResponse>;
+    /**
+     * Ask an unsaved server what it needs: nothing, a sign-in, or a token.
+     * A `token` is tested as a bearer token when given.
+     */
+    mcpProbe(body: { serverUrl: string; token?: string | null }, scope?: Scope, options?: RequestOptions): Promise<McpProbeResult>;
+    /**
+     * Begin signing in to a saved MCP connection. Returns the URL to open; the
+     * server redirects back to `/mcp/oauth/complete`, and the tools are
+     * discovered on the way.
+     */
+    mcpSignIn(id: string, body: { returnTo?: string | null }, scope?: Scope, options?: RequestOptions): Promise<McpSignInStart>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
@@ -1013,6 +1065,12 @@ export interface VectorbeaClient {
     list(params?: Scope & { status?: string } & PageParams, options?: RequestOptions): Promise<Paged<SkillRow>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<SkillRow & { currentVersionDetail?: SkillVersionRow }>;
     archive(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /**
+     * Write a skill of your own. Sanitized at the API's write boundary, versioned
+     * from v1, and — like every skill — it shapes how an agent works without
+     * granting it anything.
+     */
+    create(body: CreateSkillBody, scope?: Scope, options?: RequestOptions): Promise<SkillRow>;
     holders(id: string, scope?: Scope, options?: RequestOptions): Promise<{ items: { agentId: string; agentName: string }[] }>;
     catalog(scope?: Scope, options?: RequestOptions): Promise<{ items: SkillCatalogRow[] }>;
     /** Copies a library entry into this workspace, binding its capabilities to real tools. */
@@ -1601,6 +1659,22 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         }),
       mcpTools: (id, scope, options) =>
         call<McpToolsResponse>(`/api/connections/${id}/mcp/tools`, req(scope, undefined, options)),
+      mcpProbe: (body, scope, options) =>
+        call<McpProbeResult>("/api/mcp/probe", {
+          method: "POST",
+          body,
+          /* A handshake with somebody else's server, and on a 401 a walk of its
+             OAuth metadata documents — several round trips, none of them ours. */
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
+      mcpSignIn: (id, body, scope, options) =>
+        call<McpSignInStart>(`/api/connections/${id}/mcp/oauth/start`, {
+          method: "POST",
+          body,
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
     },
 
     approvals: {
@@ -1717,6 +1791,8 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         ),
       archive: (id, scope, options) =>
         call<unknown>(`/api/skills/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      create: (body, scope, options) =>
+        call<SkillRow>("/api/skills", { method: "POST", body, ...req(scope, undefined, options) }),
       holders: (id, scope, options) =>
         call<{ items: { agentId: string; agentName: string }[] }>(
           `/api/skills/${id}/agents`, req(scope, undefined, options),

@@ -31,6 +31,6 @@ object WorkerMcpTransport : McpTransport {
             OutboundHttp.policy().clampTotalCallMs(totalCallMs),
             maxResponseBytes,
         )
-        return McpTransport.Response(result.statusCode, result.body)
+        return McpTransport.Response(result.statusCode, result.body, result.headers)
     }
 }

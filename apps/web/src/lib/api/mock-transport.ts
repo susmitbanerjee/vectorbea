@@ -1461,6 +1461,60 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
      `tools` row per remote tool. A mock can do neither, so it reports on the
      same fixture set the tool list serves — one source, so the count here and
      the rows on the Tools tab cannot disagree. */
+  /* Probe and sign-in, so the connect flow is clickable end to end in mock mode.
+     The mock decides what a server needs from its URL, the way a person
+     demoing would expect: hosted servers that use sign-in ask for it, a URL
+     mentioning "token" wants one, anything else connects straight away. The
+     sign-in URL is the web app's own completion page, which is what the real
+     callback redirects to — so the popup, the completion message and the
+     discovered-tools step all run as they would against a live server. */
+  [
+    "POST",
+    "/api/mcp/probe",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { serverUrl?: string; token?: string | null };
+      const url = (body.serverUrl ?? "").toLowerCase();
+      const host = (() => { try { return new URL(body.serverUrl ?? "").host; } catch { return null; } })();
+      const oauth = /higgsfield|notion|linear|sentry|oauth|atlassian|asana/.test(url);
+      const wantsToken = url.includes("token");
+      if (wantsToken && !body.token) {
+        return {
+          status: "failed", errorCode: "AUTH_REQUIRED", latencyMs: 180,
+          message: "This server needs a credential and does not publish a sign-in. Paste an access token from the server's own settings.",
+          auth: "token", serverName: null, authorizationServer: null, toolCount: null,
+        };
+      }
+      if (oauth) {
+        return {
+          status: "failed", errorCode: "OAUTH_REQUIRED", latencyMs: 240,
+          message: `This server uses sign-in. Sign in with ${host ?? "its provider"} to connect it — there is no token to paste.`,
+          auth: "oauth", serverName: null, authorizationServer: host, toolCount: null,
+        };
+      }
+      return {
+        status: "connected", errorCode: null, latencyMs: 210,
+        message: `Connected to ${MCP_SERVER_NAME}. This server advertises ${MCP_REMOTE_TOOLS.length} tools.`,
+        auth: body.token ? "token" : "none", serverName: MCP_SERVER_NAME, authorizationServer: null,
+        toolCount: MCP_REMOTE_TOOLS.length,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/connections/:id/mcp/oauth/start",
+    (params) => {
+      const origin = typeof window === "undefined" ? "" : window.location.origin;
+      const qs = new URLSearchParams({
+        connection: String(params.id), status: "ok", tools: String(MCP_REMOTE_TOOLS.length),
+      });
+      return {
+        authorizationUrl: `${origin}/mcp/oauth/complete?${qs.toString()}`,
+        signInRequired: true,
+        authorizationServer: "auth.example.com",
+        expiresInSeconds: 900,
+      };
+    },
+  ],
   [
     "POST",
     "/api/connections/:id/mcp/discover",
@@ -2120,6 +2174,32 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "GET",
     "/api/skills",
     (_params, init) => paged(INSTALLED_SKILLS, init),
+  ],
+  [
+    "POST",
+    "/api/skills",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; description?: string | null };
+      const name = body.name ?? "Untitled skill";
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const created = {
+        id: uuidFrom(`skill-custom-${slug}-${INSTALLED_SKILLS.length}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name,
+        slug,
+        description: body.description ?? null,
+        provenance: "customer",
+        catalogEntryId: null,
+        currentVersionId: uuidFrom(`skill-custom-${slug}-v1`),
+        currentVersion: 1,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      INSTALLED_SKILLS.push(created);
+      return created;
+    },
   ],
   [
     "GET",

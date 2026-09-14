@@ -322,7 +322,7 @@ class ConnectionRoutesTest {
             allowedHosts: List<String>?, allowedPaths: List<String>?,
             allowedSchemas: List<String>?, allowedTables: List<String>?, status: String?,
             secretRef: String?, egressPolicy: String?, egressPolicySetBy: UUID?,
-            protocol: String?,
+            protocol: String?, authType: String?,
         ): Connection? {
             val existing = store[id]?.takeIf { it.workspaceId == workspaceId } ?: return null
             val updated = existing.copy(

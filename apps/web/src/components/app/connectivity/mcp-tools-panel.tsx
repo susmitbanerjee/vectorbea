@@ -4,7 +4,7 @@ import * as React from "react";
 import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  MagnifyingGlass, WarningCircle, CloudSlash, CaretRight,
+  MagnifyingGlass, WarningCircle, CloudSlash, CaretRight, SignIn,
 } from "@phosphor-icons/react/dist/ssr";
 
 import { cn } from "~/lib/cn";
@@ -21,6 +21,7 @@ import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useEntitlements, upgradeReason, ENTITLEMENT } from "~/lib/entitlements/use-entitlements";
 import type { McpToolRow, Scope } from "~/lib/api/client";
+import { useMcpSignIn } from "./use-mcp-sign-in";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WHAT THIS SERVER OFFERS
@@ -95,6 +96,41 @@ export function McpToolsPanel({
     }
   }
 
+  /* Signing in again: the one fix for a server whose sign-in was revoked or
+     whose refresh token expired, reachable from where that failure is seen. */
+  const signInFlow = useMcpSignIn(scope, (outcome) => {
+    if (outcome.status === "ok") {
+      toast.success(`Signed in to ${connectionName}.`);
+      void query.refetch();
+      void queryClient.invalidateQueries({ queryKey: queryKeys.tools.all(keyScope) });
+    } else {
+      toast.error(`The sign-in to ${connectionName} didn't complete. Start it again when you're ready.`);
+    }
+  }, { poll: false });
+
+  async function signInAgain() {
+    try {
+      const required = await signInFlow.start(async () => connectionId);
+      if (!required) toast.success(`${connectionName} doesn't need a sign-in.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "The sign-in could not be started.");
+    }
+  }
+
+  const signInButton = query.data?.signedIn ? (
+    <Button
+      size="xs"
+      variant="ghost"
+      loading={Boolean(signInFlow.pending)}
+      loadingLabel="Waiting for sign-in"
+      disabled={!allowed}
+      onClick={() => void signInAgain()}
+      iconLeft={<Icon icon={SignIn} size="sm" decorative />}
+    >
+      Sign in again
+    </Button>
+  ) : null;
+
   const discoverButton = (
     <Button
       size="xs"
@@ -118,7 +154,9 @@ export function McpToolsPanel({
    * plan: a Pro member acting inside a Free workspace gets Free limits, at every
    * enforcement point including this one.
    */
-  const action = allowed ? discoverButton : (
+  const action = allowed ? (
+    <span className="flex items-center gap-1.5">{signInButton}{discoverButton}</span>
+  ) : (
     <Tooltip content={`${upgradeReason(entitlements, ENTITLEMENT.MCP_TOOLS)} Upgrade to connect your own servers.`}>
       {/* A disabled button is not a tooltip trigger in every browser, so the
           wrapper carries the hover and the button stays genuinely disabled. */}

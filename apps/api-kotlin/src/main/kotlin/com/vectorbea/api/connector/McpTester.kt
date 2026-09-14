@@ -3,175 +3,195 @@ package com.vectorbea.api.connector
 import com.vectorbea.api.mcp.ApiMcpTransport
 import com.vectorbea.api.security.SsrfGuard
 import com.vectorbea.mcp.McpClient
+import com.vectorbea.mcp.McpCredential
+import com.vectorbea.mcp.McpCredentials
+import com.vectorbea.mcp.McpOAuth
+import java.net.URI
 import java.util.UUID
 
 /**
- * Test an MCP connection by asking it what it offers.
+ * Proving an MCP server works: a handshake and a `tools/list`, not a reachability probe.
  *
- * ── WHY THIS IS NOT `HttpTester` ────────────────────────────────────────────
- * It used to be, and the result was that a correctly-implemented MCP server
- * could not be connected at all.
+ * ── WHY NOT HEAD/GET ────────────────────────────────────────────────────────
+ * A streamable-HTTP endpoint is POST-only JSON-RPC; the specification's answer to
+ * a GET it will not stream is 405, and the old HEAD-then-GET test therefore
+ * failed every correct server, including Vectorbea's own (MCP-CONNECTOR-UI.md
+ * §2.2). A `tools/list` proves the endpoint speaks MCP, that the credential was
+ * accepted, and how many tools there are — the number the next screen shows.
  *
- * `HttpTester` issues HEAD, then GET. An MCP streamable-HTTP endpoint is a
- * POST-only JSON-RPC URL, and the specification's own answer to a GET it cannot
- * stream is **405** — which lands in `doRequest`'s final branch as
- * `UNEXPECTED_STATUS`. Vectorbea's own `/api/mcp` returns 405 on GET, on
- * purpose (`McpRoutes.noStream`), so the product could not pass its own
- * connection test. The connect wizard's whole claim is that nothing is saved
- * until it has been proven to work; a verify step that fails on every correct
- * server turns that claim into a wall and makes the override path the normal
- * one.
- *
- * ── AND WHY THE REPLACEMENT IS BETTER, NOT JUST CORRECT ─────────────────────
- * A HEAD proves a host is up. `tools/list` proves the endpoint speaks MCP, that
- * the credential was accepted, and how many tools the server advertises — which
- * is the number the next screen is about to show. The test and the product are
- * the same call.
- *
- * It is the SHARED client (`packages/mcp-kotlin`), not a second implementation:
- * the count this reports has to be a fact about the code that will run the
- * customer's tools, or it is a number nobody should trust. See the module's
- * build file.
- *
- * ── SIDE-EFFECT FREE ────────────────────────────────────────────────────────
- * `tools/list` is a read. Probing a customer's server never changes anything at
- * their end, which is the contract every other tester in this package keeps.
+ * ── A 401 IS A QUESTION, NOT ALWAYS AN ERROR ────────────────────────────────
+ * A server that answers a cold call with 401 is usually not refusing anything:
+ * it is an OAuth resource server saying "sign in first". Reporting that as "the
+ * server rejected the token" — for a token nobody sent — was the message on the
+ * connect screen for every hosted server that uses sign-in, and it pointed at a
+ * token field that could never be filled in. [probe] tells the three cases
+ * apart: no credential needed, sign in, or paste a token.
  */
 object McpTester {
 
-    /**
-     * Dial [serverUrl] and report what answered.
-     *
-     * [transport] is the server's configured transport, so an `sse` connection
-     * is refused with the sentence that names why rather than being dialled as
-     * something it is not.
-     */
+    /** How a server wants to be authenticated, as far as a cold probe can tell. */
+    enum class AuthMode { NONE, OAUTH, TOKEN }
+
+    data class ProbeResult(
+        val result: ConnectionTestResult,
+        val auth: AuthMode,
+        val serverName: String? = null,
+        val authorizationServer: String? = null,
+        val toolCount: Int? = null,
+    ) {
+        fun toResponse(): Map<String, Any?> = result.toResponse() + mapOf(
+            "auth" to auth.name.lowercase(),
+            "serverName" to serverName,
+            "authorizationServer" to authorizationServer,
+            "toolCount" to toolCount,
+        )
+    }
+
     fun test(
         serverUrl: String,
         bearerToken: String?,
         transport: String = "streamable-http",
         connectionId: UUID = UUID(0L, 0L),
-    ): ConnectionTestResult {
-        val start = System.currentTimeMillis()
+    ): ConnectionTestResult = probe(serverUrl, McpCredential.parse(bearerToken), transport, connectionId).result
 
+    fun probe(
+        serverUrl: String,
+        credential: McpCredential?,
+        transport: String = "streamable-http",
+        connectionId: UUID = UUID(0L, 0L),
+    ): ProbeResult {
+        val start = System.currentTimeMillis()
         try {
             SsrfGuard.validate(serverUrl)
         } catch (_: SsrfGuard.SsrfBlockedException) {
-            /*
-             * Not `ConnectionTestResult.privateHost`'s default message. That one
-             * says "enable private runner mode", which is a different feature —
-             * the fix here is the connection's own egress policy plus an
-             * allow-list, and naming the wrong setting is how somebody spends an
-             * afternoon in the wrong screen.
-             */
-            return ConnectionTestResult(
+            return ProbeResult(ConnectionTestResult(
                 ConnectionTestResult.TestStatus.PRIVATE_RUNNER_REQUIRED,
                 System.currentTimeMillis() - start,
                 "PRIVATE_HOST",
                 "This MCP server is on a private network. Set this connection's egress " +
                 "to private allowed and name its host in the allow-list, then test again.",
-            )
+            ), AuthMode.NONE)
         } catch (e: IllegalArgumentException) {
-            return ConnectionTestResult.failed(0, "INVALID_URL",
-                "That is not a valid URL. Enter the MCP server's full endpoint, " +
-                "including https://.")
+            return ProbeResult(ConnectionTestResult.failed(0, "INVALID_URL",
+                "That is not a valid URL. Enter the MCP server's full endpoint, including https://."), AuthMode.NONE)
         }
 
         val server = McpClient.Server(
             connectionId = connectionId,
             url = serverUrl,
             transport = transport.ifBlank { "streamable-http" },
-            authToken = bearerToken,
+            authToken = McpCredentials.tokenOf(credential),
         )
-
+        val mode = when (credential) {
+            is McpCredential.OAuth -> AuthMode.OAUTH
+            is McpCredential.Bearer -> AuthMode.TOKEN
+            null -> AuthMode.NONE
+        }
         return try {
-            val tools = McpClient(ApiMcpTransport).listTools(server)
-            val latency = System.currentTimeMillis() - start
-            ConnectionTestResult.connected(
-                latency,
-                when (tools.size) {
-                    0 -> "Connected. This server advertises no tools yet."
-                    1 -> "Connected. This server advertises 1 tool."
-                    else -> "Connected. This server advertises ${tools.size} tools."
-                },
-                details = mapOf(
-                    "toolCount" to tools.size,
-                    /* The wizard shows the credential claim honestly: reaching a
-                       server that needs no token proves nothing about a token. */
-                    "credentialVerified" to !bearerToken.isNullOrBlank(),
+            val probe = McpClient(ApiMcpTransport).probe(server)
+            val count = probe.tools.size
+            val name = probe.info.name
+            ProbeResult(
+                ConnectionTestResult.connected(
+                    System.currentTimeMillis() - start,
+                    buildString {
+                        append("Connected")
+                        name?.let { append(" to $it") }
+                        append(". ")
+                        append(when (count) {
+                            0 -> "This server advertises no tools yet."
+                            1 -> "This server advertises 1 tool."
+                            else -> "This server advertises $count tools."
+                        })
+                    },
+                    details = mapOf(
+                        "toolCount" to count,
+                        /* A server that needs no credential proves nothing about one. */
+                        "credentialVerified" to (credential != null),
+                        "serverName" to name,
+                        "protocolVersion" to probe.info.protocolVersion,
+                    ),
                 ),
+                auth = mode, serverName = name, toolCount = count,
             )
+        } catch (e: McpClient.McpAuthRequiredException) {
+            authOutcome(e, credential, serverUrl, System.currentTimeMillis() - start)
         } catch (e: McpClient.McpException) {
-            ConnectionTestResult.failed(
-                System.currentTimeMillis() - start,
-                codeFor(e),
-                messageFor(e),
-            )
+            ProbeResult(ConnectionTestResult.failed(System.currentTimeMillis() - start, codeFor(e), messageFor(e)), mode)
         } catch (e: Exception) {
-            ConnectionTestResult.failed(
+            ProbeResult(ConnectionTestResult.failed(
                 System.currentTimeMillis() - start, "MCP_UNREACHABLE",
                 "Could not reach the MCP server (${e.javaClass.simpleName}). Vectorbea " +
                 "calls it from the public internet — if it is on a private network, set " +
-                "this connection's egress policy and allow-list first.")
+                "this connection's egress policy and allow-list first."), mode)
         }
     }
 
-    /**
-     * The machine-readable half.
-     *
-     * Kept distinct from the HTTP tester's codes: `AUTH_FAILED` on an MCP
-     * connection and on a REST one need the same word, but "the server answered
-     * something that is not an MCP tool list" has no equivalent there and must
-     * not be flattened into `UNEXPECTED_STATUS`, which is what it looked like
-     * before.
-     */
+    private fun authOutcome(
+        e: McpClient.McpAuthRequiredException,
+        credential: McpCredential?,
+        serverUrl: String,
+        latency: Long,
+    ): ProbeResult = when (credential) {
+        is McpCredential.OAuth -> ProbeResult(ConnectionTestResult.failed(latency, "OAUTH_EXPIRED",
+            "The sign-in to this server has expired or was revoked. Sign in again from the connection."), AuthMode.OAUTH)
+        is McpCredential.Bearer -> ProbeResult(ConnectionTestResult.failed(latency, "AUTH_FAILED",
+            "The server rejected the token (HTTP ${e.httpStatus}). Check that it is current and has " +
+            "not been scoped to a different workspace."), AuthMode.TOKEN)
+        null -> {
+            /* No credential was sent, so this is the server describing how to
+               authenticate. Find out whether it publishes a sign-in. */
+            val discovery = runCatching { McpOAuth(ApiMcpTransport).discover(serverUrl, e.challenge) }.getOrNull()
+            if (discovery != null) {
+                val host = runCatching { URI.create(discovery.authorizationServer.issuer).host }.getOrNull()
+                ProbeResult(
+                    ConnectionTestResult.failed(latency, "OAUTH_REQUIRED",
+                        "This server uses sign-in. Sign in${host?.let { " with $it" } ?: ""} to connect it — " +
+                        "there is no token to paste."),
+                    AuthMode.OAUTH, authorizationServer = host,
+                )
+            } else ProbeResult(
+                ConnectionTestResult.failed(latency, "AUTH_REQUIRED",
+                    "This server needs a credential and does not publish a sign-in. Paste an access " +
+                    "token from the server's own settings."),
+                AuthMode.TOKEN,
+            )
+        }
+    }
+
     private fun codeFor(e: McpClient.McpException): String = when {
-        e.httpStatus == 401 || e.httpStatus == 403 -> "AUTH_FAILED"
         e.httpStatus == 404 -> "MCP_ENDPOINT_NOT_FOUND"
+        e.httpStatus == 406 -> "MCP_HTTP_ERROR"
         (e.httpStatus ?: 0) >= 500 -> "SERVER_ERROR"
         e.httpStatus != null -> "MCP_HTTP_ERROR"
         e.rpcCode == -32601 -> "MCP_NOT_SUPPORTED"
         e.rpcCode != null -> "MCP_REFUSED"
         e.message?.contains("not supported") == true -> "MCP_TRANSPORT_UNSUPPORTED"
-        e.message?.contains("not JSON") == true -> "MCP_NOT_AN_MCP_SERVER"
+        e.message?.contains("not JSON") == true || e.message?.contains("event stream") == true -> "MCP_NOT_AN_MCP_SERVER"
         else -> "MCP_UNREACHABLE"
     }
 
-    /**
-     * The half a person reads.
-     *
-     * Every branch names what happened and what to do about it, because the
-     * error IS the product on this screen — the copy rules, and the reason
-     * `DbTester.hostGuidance` exists one file over.
-     */
     private fun messageFor(e: McpClient.McpException): String = when {
-        e.httpStatus == 401 || e.httpStatus == 403 ->
-            "The server rejected the token (HTTP ${e.httpStatus}). Check that it is " +
-            "current and has not been scoped to a different workspace."
         e.httpStatus == 404 ->
             "The server answered, but there is nothing at that path (HTTP 404). Check " +
             "the URL points at the MCP endpoint — it usually ends in /mcp."
         e.httpStatus == 405 ->
             "That URL refused a POST (HTTP 405), so it is not a streamable-HTTP MCP " +
-            "endpoint. Check the URL, or whether the server is configured for SSE, " +
-            "which Vectorbea does not support."
+            "endpoint. Check the URL, or whether the server only offers the older SSE " +
+            "transport, which Vectorbea does not support."
         (e.httpStatus ?: 0) >= 500 ->
             "The server returned HTTP ${e.httpStatus}. It is reachable but failing — " +
             "check its own logs, then test again."
         e.httpStatus != null ->
-            "The server returned HTTP ${e.httpStatus}. Check the URL and the token."
+            "The server returned HTTP ${e.httpStatus}. Check the URL."
         e.rpcCode == -32601 ->
             "The server answered, but does not implement tools/list. It speaks " +
             "JSON-RPC without offering tools, so there is nothing to discover."
         e.rpcCode != null ->
-            "The server refused the request (code ${e.rpcCode}). Check the token and " +
-            "the server's own logs."
-        e.message?.contains("not supported") == true ->
-            /* The client's own sentence about the transport, which is already
-               the right one. Passed through rather than rephrased. */
-            e.message!!
-        e.message?.contains("not JSON") == true ->
-            "The server answered, but not with an MCP tool list. Check the URL points " +
+            "The server refused the request (code ${e.rpcCode}). Check the server's own logs."
+        e.message?.contains("not supported") == true -> e.message!!
+        e.message?.contains("not JSON") == true || e.message?.contains("event stream") == true ->
+            "The server answered, but not with an MCP reply. Check the URL points " +
             "at the MCP endpoint rather than the application root."
         else ->
             "Could not reach the MCP server. Vectorbea calls it from the public " +

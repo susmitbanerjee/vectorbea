@@ -62,8 +62,12 @@ class McpToolPathTest {
         val calls = mutableListOf<String>()
 
         fun send(req: HttpRequest, total: Long, maxBytes: Long): McpTransport.Response {
+            failWith?.let { calls += req.uri().toString(); throw it }
+            when (rpcMethodOf(req)) {
+                "initialize" -> return McpTransport.Response(200, FAKE_INITIALIZE_REPLY)
+                "notifications/initialized" -> return McpTransport.Response(202, "")
+            }
             calls += req.uri().toString()
-            failWith?.let { throw it }
             return McpTransport.Response(statusCode = 200, body = reply ?: "{}")
         }
     }

@@ -168,6 +168,12 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
         egressPolicySetBy: UUID? = null,
         /** `openai` | `anthropic` | `gemini`, when it differs from the provider. */
         protocol: String? = null,
+        /**
+         * How the credential is presented. Changes when an MCP server that was
+         * saved unauthenticated is signed in to, which is the only time a
+         * connection's auth type moves after creation.
+         */
+        authType: String? = null,
     ): Connection? {
         val setClauses = buildList {
             if (name != null) add("name = ?")
@@ -186,6 +192,7 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
                 add("egress_policy_set_at = now()")
             }
             if (protocol != null) add("protocol = ?")
+            if (authType != null) add("auth_type = ?")
             add("updated_at = now()")
         }
         if (setClauses.size == 1) return findById(id, workspaceId)
@@ -206,6 +213,7 @@ open class ConnectionRepository(dataSource: DataSource) : BaseRepository(dataSou
                     setUuidOrNull(i++, egressPolicySetBy)
                 }
                 if (protocol != null) setString(i++, protocol)
+                if (authType != null) setString(i++, authType)
                 setUuid(i++, id)
                 setUuid(i, workspaceId)
             },

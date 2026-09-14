@@ -442,10 +442,68 @@ class SkillPipelineAcceptanceTest {
         workflowInput = emptyMap(), graph = WorkflowGraph(),
     )
 
+    // ── A single-call agent applies its skills too ──────────────────────────
+
+    /**
+     * An agent with no tools takes the single model call, not the loop — and that
+     * path used to compose no skills at all. The agents most likely to hold a
+     * skill and nothing else (a writer with a style, a summariser with a token
+     * budget) therefore ran without it, while the Skills tab said it was applied.
+     */
+    @Test
+    fun `a single-call agent with no tools still runs with its skills`() {
+        ds.connection.use { c ->
+            val id = UUID.randomUUID()
+            c.prepareStatement(
+                "INSERT INTO agents (id,workspace_id,environment_id,name,slug,type,instructions," +
+                    " llm_connection_id,model_name,temperature,max_tokens,max_iterations," +
+                    " max_tool_calls,max_cost_cents,status,allowed_tool_ids) " +
+                    "VALUES (?,?,?,'summariser',?,'native_llm_agent','You summarise.',?,'gpt-4o-mini',0.2,512,1,0,100,'active','{}')"
+            ).use {
+                it.setObject(1, id); it.setObject(2, w.workspaceId); it.setObject(3, w.environmentId)
+                it.setString(4, "summariser-$id"); it.setObject(5, w.llmConnectionId); it.executeUpdate()
+            }
+            w.agents["summariser"] = id
+            w.skills["token-efficient"] = installFromCatalogue(c, w, "token-efficient", emptyMap())
+            grantSkill(c, w, "summariser", "token-efficient")
+        }
+
+        val llm = ScriptedLlmProvider().thenContent("March revenue: \$41,200.")
+        val node = WorkflowNode(
+            id = "summarise", type = "agent",
+            config = mapOf("agentId" to w["summariser"].toString(), "taskInstruction" to "Summarise March."),
+        )
+        val result = runBlocking { executor(llm, RecordingEventStore()).execute(node, emptyMap(), ctx()) }
+
+        assertTrue(result is NodeResult.Completed, "the call did not complete: ${(result as? NodeResult.Failed)?.reason}")
+        val system = llm.requests().single().systemPrompt ?: ""
+        assertTrue(system.startsWith("You summarise."), "the agent's own instructions come first")
+        assertTrue(system.contains("Lead with the answer"), "the granted skill reached the prompt: $system")
+
+        val recorded = ds.connection.use { c ->
+            c.prepareStatement(
+                "SELECT count(*) FROM agent_activation_skills WHERE run_id = ? AND step_id = 'summarise' AND included AND activation_id IS NULL"
+            ).use { st -> st.setObject(1, w.runId); st.executeQuery().use { rs -> rs.next(); rs.getInt(1) } }
+        }
+        assertEquals(1, recorded, "the composition is recorded, keyed without an activation")
+    }
+
     // ── HTTP handlers ────────────────────────────────────────────────────────
 
     private fun handleMcp(ex: HttpExchange) {
         val body = ex.requestBody.readBytes().toString(Charsets.UTF_8)
+        /* The client opens a session before its first call, as the streamable
+           HTTP specification requires. The handshake is answered here and kept
+           out of `mcpCalls`, which records what the AGENT asked the server to
+           do — the thing this test asserts on. */
+        when {
+            body.contains("\"notifications/initialized\"") -> { respond(ex, 202, ""); return }
+            body.contains("\"initialize\"") -> {
+                respond(ex, 200, """{"jsonrpc":"2.0","id":"init","result":{"protocolVersion":"2025-06-18",""" +
+                    """"capabilities":{},"serverInfo":{"name":"video","version":"1"}}}""")
+                return
+            }
+        }
         mcpCalls += body
         val reply = """{"jsonrpc":"2.0","id":"1","result":{"content":[{"type":"text",""" +
             """"text":"{\"assetRef\":\"asset://shot-1\",\"seconds\":8}"}]}}"""

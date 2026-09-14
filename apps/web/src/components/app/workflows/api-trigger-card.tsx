@@ -48,10 +48,9 @@ import { getPublicApiBaseUrl } from "~/lib/api/config";
    fronts the vanity domain, and makes a provider we might leave next quarter a
    thing every integration depends on.
 
-   So the snippets read `getPublicApiBaseUrl()`, which returns null rather than
-   a wrong guess when nobody has configured one. In that case the card shows the
-   PATH and names the variable to set — the same call `WebhookRoutes.urlFor`
-   makes for the same reason.
+   So the snippets read `getPublicApiBaseUrl()`: `api.vectorbea.com` in
+   production, `devapi.vectorbea.com` everywhere else — the same host the API
+   puts in the webhook URLs it mints, so the two cannot disagree.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 type Mode = "async" | "sync" | "stream";
@@ -74,12 +73,7 @@ export function ApiTriggerCard({
      render agree: `process.env.NEXT_PUBLIC_*` is inlined at build time and is
      identical on both, but reading it through a helper inside the render body
      of a card that also holds state has bitten this file's neighbours. */
-  const base = React.useMemo(() => getPublicApiBaseUrl(), []);
-  /* A shell variable rather than a bare path when no public origin is
-     configured. `curl /api/...` is simply broken, and `$VECTORBEA_API_URL`
-     sits beside the `$VECTORBEA_API_KEY` two lines below it — the reader
-     already knows what to do with that shape. */
-  const origin = base ?? "$VECTORBEA_API_URL";
+  const origin = React.useMemo(() => getPublicApiBaseUrl(), []);
   const snippet = curlFor(origin, workflowId, mode);
 
   return (
@@ -104,15 +98,6 @@ export function ApiTriggerCard({
       <div className="min-w-0">
         <Text variant="caption" tone="muted" className="mb-1 block">Endpoint</Text>
         <CopyLine value={`POST ${origin}/api/workflows/${workflowId}/run`} />
-        {base === null ? (
-          <Text variant="caption" tone="muted" className="mt-1.5 block leading-snug">
-            A placeholder, not the real origin: this deployment has no public API address
-            configured, and printing the internal one would publish where the platform happens to be
-            hosted. Set <span className="font-code">PUBLIC_API_BASE_URL</span> on the API and{" "}
-            <span className="font-code">NEXT_PUBLIC_PUBLIC_API_BASE_URL</span> here, to the same
-            value, and this becomes a complete URL.
-          </Text>
-        ) : null}
       </div>
 
       <div className="min-w-0">

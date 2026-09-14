@@ -117,6 +117,15 @@ class ToolNodeExecutor(
                     com.vectorbea.worker.agents.tools.mcp.WorkerMcpTransport),
             ),
             circuit = circuit,
+            /* Only when this executor can seal a credential. Without a secret
+               service a signed-in server's token is still sent — it just is not
+               refreshed, and the error on expiry says to sign in again. */
+            credentials = secretService?.let {
+                com.vectorbea.mcp.McpCredentials(
+                    com.vectorbea.mcp.McpOAuth(com.vectorbea.worker.agents.tools.mcp.WorkerMcpTransport),
+                    com.vectorbea.worker.agents.tools.mcp.WorkerMcpTokenStore(dataSource, it),
+                )
+            },
         )
     }
     private val dbReadExecutor  by lazy { DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore) }

@@ -553,8 +553,7 @@ function SecretOnceDialog({
   onClose: () => void;
 }) {
   const [copied, setCopied] = React.useState(false);
-  const base = React.useMemo(() => getPublicApiBaseUrl(), []);
-  const origin = base ?? "$VECTORBEA_API_URL";
+  const origin = React.useMemo(() => getPublicApiBaseUrl(), []);
 
   React.useEffect(() => { if (value) setCopied(false); }, [value]);
 
@@ -659,20 +658,9 @@ function UsageNote({ rateLimitPerMinute }: { rateLimitPerMinute: number | null }
               {`Authorization: Bearer <your key>`}
             </code>
           </pre>
-          {base === null ? (
-            <Text variant="caption" tone="muted" className="mt-1.5 block leading-snug">
-              The address to send it to is not printed here: this deployment has no public API
-              origin configured, and the internal one is where the platform happens to be hosted
-              rather than something to publish. Set{" "}
-              <span className="font-code">PUBLIC_API_BASE_URL</span> on the API and{" "}
-              <span className="font-code">NEXT_PUBLIC_PUBLIC_API_BASE_URL</span> here, to the same
-              value.
-            </Text>
-          ) : (
-            <Text variant="caption" tone="muted" className="mt-1.5 block leading-snug">
-              Against <span className="font-code">{base}</span>.
-            </Text>
-          )}
+          <Text variant="caption" tone="muted" className="mt-1.5 block leading-snug">
+            Against <span className="font-code">{base}</span>.
+          </Text>
         </div>
 
         <Text variant="body-sm" tone="secondary" className="block max-w-[80ch] leading-snug">
