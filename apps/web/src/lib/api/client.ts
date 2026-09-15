@@ -51,6 +51,9 @@ export interface ConnectionTestResult {
   details: Record<string, unknown>;
 }
 export interface RegistryTestResult { valid: boolean; message: string; details?: Record<string, unknown> }
+/** `POST /api/tools/test-message`. `errorCode` is the provider's own (`not_in_channel`) or ours. */
+export interface TestMessageResult { delivered: boolean; errorCode: string | null; message: string; latencyMs: number }
+export interface TestMessageBody { connectionId: string; operationId: string; parameters: Record<string, string> }
 
 /**
  * `POST /api/connections/test-unsaved` body, as `ConnectionTestRoutes.UnsavedTestBody`
@@ -918,6 +921,13 @@ export interface VectorbeaClient {
      * must be checkable without being fired.
      */
     testDraft(body: TestToolDraftBody, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
+    /**
+     * Send ONE REAL MESSAGE through a messaging connection — Slack, Teams,
+     * Google Chat, Discord. Unlike `testDraft` this has a side effect by design:
+     * the failures that matter (bot not in the channel, wrong channel id, deleted
+     * webhook) are only reported when something is posted.
+     */
+    testMessage(body: TestMessageBody, scope?: Scope, options?: RequestOptions): Promise<TestMessageResult>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     /** `GET /api/tools/:id/versions` — the definition's history. */
@@ -1559,6 +1569,12 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<RegistryTestResult>("/api/tools/test-unsaved", {
           method: "POST",
           body: { ...body, connectionId: body.connectionId ?? null },
+          ...req(scope, undefined, options),
+        }),
+      testMessage: (body, scope, options) =>
+        call<TestMessageResult>("/api/tools/test-message", {
+          method: "POST",
+          body,
           ...req(scope, undefined, options),
         }),
       update: (id, patch, scope, options) =>

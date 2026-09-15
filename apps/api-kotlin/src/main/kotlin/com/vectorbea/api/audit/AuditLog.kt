@@ -67,6 +67,9 @@ class AuditLog(private val dataSource: DataSource?) {
         const val CONNECTION_DELETE = "connection.delete"
         const val CONNECTION_TEST = "connection.test"
 
+        // Tools — a test message is a real post in somebody's channel
+        const val TOOL_TEST_MESSAGE = "tool.test_message"
+
         // Membership
         const val MEMBER_INVITE = "member.invite"
         const val MEMBER_ROLE_CHANGE = "member.role_change"

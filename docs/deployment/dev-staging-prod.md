@@ -142,6 +142,7 @@ CORS_ALLOWED_ORIGINS=https://vectorbea.com             # staging → https://dev
 APP_URL=https://vectorbea.com                          # staging → https://dev.vectorbea.com
 # PUBLIC_API_BASE_URL is derived from VECTORBEA_ENV (api / devapi.vectorbea.com); set only to override
 MCP_DISCOVERY_ENABLED=true      # connecting MCP servers: probe, sign-in, discovery
+MESSAGING_WEBHOOKS_ENABLED=true # "Send test message" for Teams / Google Chat / Discord; set on the worker too
 ```
 
 **`worker` service**

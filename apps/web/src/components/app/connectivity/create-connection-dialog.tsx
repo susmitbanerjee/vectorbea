@@ -297,6 +297,13 @@ function secretHint(
       help: "Encrypted at rest and never shown again. Rotating replaces it.",
     };
   }
+  if (integration.id === "slack") {
+    return {
+      label: "Bot token",
+      placeholder: "xoxb-…",
+      help: "In your Slack app, open OAuth & Permissions and copy the Bot User OAuth Token. Encrypted at rest and never shown again.",
+    };
+  }
   /* MCP carries its credential as `Authorization: Bearer <token>` and nothing
      else. Calling it an "API key" would send somebody looking for a field the
      protocol does not have. */
@@ -1023,7 +1030,7 @@ function ProviderStep({
                     {entry.name}
                   </Text>
                   <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">
-                    {entry.auth.map((m) => AUTH_LABEL[m]).join(" · ")}
+                    {entry.credentialLabel ?? entry.auth.map((m) => AUTH_LABEL[m]).join(" · ")}
                   </Text>
                 </span>
               </button>

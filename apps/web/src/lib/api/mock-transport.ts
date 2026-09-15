@@ -1735,6 +1735,23 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       message: "Configuration validated against fixtures. No external action was executed.",
     }),
   ],
+  /* A test message, as a fixture. Nothing is posted in demo mode, and the
+     answer says so; a missing channel is refused the way the real route
+     refuses it, so the dialog's error path is clickable too. */
+  [
+    "POST",
+    "/api/tools/test-message",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { operationId?: string; parameters?: Record<string, string> };
+      const params = body.parameters ?? {};
+      if (body.operationId === "slack.post" && !params.channel?.trim()) {
+        return { delivered: false, errorCode: "CHANNEL_MISSING", latencyMs: 0,
+          message: "Enter the channel to send the test to — its ID (starts with C) or its #name." };
+      }
+      return { delivered: true, errorCode: null, latencyMs: 240,
+        message: "Demo mode: nothing was posted. On a live workspace the message would be in the channel now." };
+    },
+  ],
   [
     "POST",
     "/api/tools",

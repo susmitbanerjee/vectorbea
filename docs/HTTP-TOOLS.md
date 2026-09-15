@@ -378,11 +378,36 @@ per channel. Posting only — reading and replying need each vendor's bot API.
   `MESSAGING_WEBHOOKS_ENABLED` on the worker, default off. Off, the call fails with a
   sentence naming the variable and sends nothing.
 
+### 4a.2 Registering from an app, and the test message
+
+Starting from the app picker switches **Register a tool** to a three-step path —
+App, Details, Test and register — because choosing "Slack → Post a message" has
+already answered the adapter, connection and contract questions. Details asks only
+for the operation's parameters (what is set once, what each run fills in) and the
+name; there is no operation list to re-pick and no JSON. Risk and timeout keep the
+catalogue defaults under "More options". The long five-step path is unchanged for
+hand-built tools, except that a catalogue operation no longer shows the generated
+schema or the additional-configuration editor — its parameters are its contract.
+
+`POST /api/tools/test-message` (`ToolTestMessageRoutes`, `TestMessageSender`) posts
+**one real message** — a deliberate side effect, kept separate from the
+side-effect-free `test-unsaved`, because the failures that matter for a message
+tool (bot not in the channel, wrong channel ID, missing `chat:write`, a deleted
+webhook) are only reported when something is posted. It accepts only
+`slack.post`, `teams.post`, `google-chat.post` and `discord.post`, builds the
+request itself from the channel and text (the browser never supplies a request),
+maps Slack's error codes to a fix ("invite the bot with /invite"), never returns a
+webhook URL or a raw response body, is gated at `TOOL_WRITE` (a developer who can
+register the tool can already make it post by running it), and writes a
+`tool.test_message` audit row whether or not it was delivered. Webhook posts honour
+`MESSAGING_WEBHOOKS_ENABLED` read on the API too, so a test cannot pass on a
+deployment whose worker would refuse the same post. Tests: `TestMessageSenderTest`.
+
 Adapters the worker cannot run (`code`, `builtin`, `llm_generate`, `custom`) are
 shown disabled with the reason rather than registered and failed on first call. MCP
 tools come from connecting the server, not from this dialog.
 
-Tests: `MessagingDeliveryTest` (worker), `WebhookUrlTesterTest` (API).
+Tests: `MessagingDeliveryTest` (worker), `WebhookUrlTesterTest` and `TestMessageSenderTest` (API).
 
 ---
 

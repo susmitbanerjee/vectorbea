@@ -82,6 +82,9 @@ object RbacGuard {
         "PATCH /api/tools/:id"                       to Permission.TOOL_WRITE,
         "DELETE /api/tools/:id"                      to Permission.TOOL_DELETE,
         "POST /api/tools/test-unsaved"               to Permission.TOOL_WRITE,
+        /* Posts a real message. TOOL_WRITE because the person registering a
+           message tool can already make it post by running it. */
+        "POST /api/tools/test-message"               to Permission.TOOL_WRITE,
 
         /* Exporting is a BULK EXTRACTION of every run, event and trace the
            workspace holds, so it sits with the governance surfaces rather than

@@ -99,6 +99,8 @@ export const INTEGRATION_SEEDS: {
   category: IntegrationCategory;
   description: string;
   auth: AuthMethod[];
+  /** What the credential is called for this provider, when "API key" is the wrong word. */
+  credentialLabel?: string;
   scopes: { name: string; description: string; required: boolean }[];
   setup: string[];
 }[] = [
@@ -138,7 +140,11 @@ export const INTEGRATION_SEEDS: {
      */
     id: "slack", name: "Slack", category: "messaging",
     description: "Post messages, read a channel or thread, and look up users — as a bot in your workspace.",
-    auth: ["api-key", "oauth"],
+    /* One method. Slack's "Bot User OAuth Token" is what both of the old
+       choices ended up asking for, and offering "API key" and "OAuth 2.0" side
+       by side sent people looking for two different credentials. */
+    auth: ["api-key"],
+    credentialLabel: "Bot token",
     scopes: [
       { name: "chat:write", description: "Post messages as the bot.", required: true },
       { name: "channels:history", description: "Read messages in channels the bot is in.", required: false },
@@ -701,6 +707,12 @@ export interface ProviderOperation {
    * whole value is a template the caller left empty is dropped.
    */
   bodyTemplate?: Record<string, unknown>;
+  /**
+   * Offers "Send test message" when registering the tool. Only operations the
+   * API's `TestMessageSender` knows how to post — it builds the request itself
+   * rather than taking one from the browser.
+   */
+  sendsTestMessage?: boolean;
 }
 
 const RECIPIENT: OperationParam = {
@@ -781,6 +793,7 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
      same reason: the URL was issued for one channel. */
   {
     id: "teams.post",
+    sendsTestMessage: true,
     provider: "teams",
     label: "Post a message",
     description: "Posts a card with your message into the connected Teams channel.",
@@ -818,6 +831,7 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
   },
   {
     id: "google-chat.post",
+    sendsTestMessage: true,
     provider: "google-chat",
     label: "Post a message",
     description: "Posts your message into the connected Google Chat space.",
@@ -840,6 +854,7 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
   },
   {
     id: "discord.post",
+    sendsTestMessage: true,
     provider: "discord",
     label: "Post a message",
     description: "Posts your message into the connected Discord channel.",
@@ -874,6 +889,7 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
   /* ── Slack ──────────────────────────────────────────────────────────────── */
   {
     id: "slack.post",
+    sendsTestMessage: true,
     provider: "slack",
     label: "Post a message",
     description: "Posts to a channel as the Vectorbea app.",
@@ -891,7 +907,7 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
         binding: "config",
         bindable: true,
         placeholder: "C0123456789 or #ops-alerts",
-        help: "Fixed here, the agent can only post to this channel. Use the channel ID (channel details, at the bottom) or its #name, and invite the bot with /invite first — Slack refuses channels the bot is not in.",
+        help: "The channel ID (in Slack, open the channel details — it's at the bottom) or the #channel-name. Invite the bot first by typing /invite @your-bot in the channel.",
       },
       {
         name: "text",

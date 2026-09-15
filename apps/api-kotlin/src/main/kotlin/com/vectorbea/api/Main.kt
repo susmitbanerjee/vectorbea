@@ -394,6 +394,7 @@ fun main() {
             environmentRepo,
         ).register(router)
         ConnectionTestRoutes(connectionRepo, secretService, cacheService, auditLog).register(router)
+        com.vectorbea.api.routes.ToolTestMessageRoutes(connectionRepo, secretService, auditLog).register(router)
         /* A customer's negotiated rate, per connection. Without it every call
            through their own gateway is priced at our list rate, which
            over-reports their spend — the first number a finance team reconciles
