@@ -13,6 +13,7 @@ import { readTeamConfig, POLICY_INFO, joinPolicyLabel, depthCounts, longestChain
 import type { BoundResource, NodeChrome } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 import type { NodeKind } from "~/mocks/domain";
+import { nodeSummary } from "./node-summary";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE NODE — one component, twelve type variants, eleven states.
@@ -261,9 +262,7 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
                     </span>
                   ) : (
                     <span className="font-ui text-caption text-fg-disabled truncate">
-                      {node.kind === "branch" && !node.config.condition ? "No condition set"
-                        : node.kind === "approval" && !node.config.approverGroup ? "No approver group"
-                          : mark?.meaning.split(" — ")[0] ?? node.kind}
+                      {nodeSummary(node)}
                     </span>
                   )}
 

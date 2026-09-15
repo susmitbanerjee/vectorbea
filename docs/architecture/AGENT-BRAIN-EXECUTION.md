@@ -281,9 +281,37 @@ the agent row does not override them:
 | `maxCostCents` | 50 |
 | `timeoutMs` | 120 000 |
 
-`taskInstruction` falls back through node config → `taskInstruction` → `task` →
-`prompt` → `input` in resolved inputs, so an agent fed by input mapping still gets
-its task.
+`taskInstruction` falls back through node config (`taskInstruction`, then the
+builder's older `taskOverride`) → `taskInstruction` → `task` → `prompt` → `input`
+in resolved inputs, so an agent fed by input mapping still gets its task.
+
+### 6a. What a workflow step passes an agent, and gets back
+
+Built on the canvas, a step's data lives in its own `config`:
+
+| Key | Written by | Read by |
+|---|---|---|
+| `inputMapping` | Inputs tab. `{ name: value }`; a value is typed text or `{{ steps.<nodeId>.output.<field> }}` | `WorkflowGraph.convertNode` → `MappingResolver` |
+| `taskInstruction` | Configure tab (was `taskOverride`, which nothing read — both are accepted) | `nodeTaskInstruction` |
+| `outputFields` | Output tab. `[{ name, type, description }]` | `stepOutputFields` |
+
+- **Both paths see the task AND the data.** The single model call used to send
+  `taskInstruction ?: inputs-as-JSON`, so a step with an instruction and mapped
+  inputs sent the instruction alone. It now sends the instruction, then
+  `INPUT DATA:` and the inputs (`singleCallUserContent`), which is what the
+  tool-using loop's `AgentPromptBuilder` always did.
+- **Output fields are asked for, then read.** The single call appends "Reply with
+  only a JSON object with these fields" to the USER message (not the system
+  prompt — the skills position there is not reopened), strips a Markdown fence,
+  and merges the parsed fields into the output. The loop receives them as
+  `outputSchemaJson`, which `AgentBrainConfig` carried and nothing set.
+- **`content` always exists.** "Full reply" is offered for every agent step, so
+  the loop's final output gains `content` when it has none (`withFullReply`).
+- The builder's field lists come from these keys and the tool registry
+  (`components/app/builder/step-io.ts`), not from fixtures. An agent's registered
+  `outputSchema` is not offered, because no step execution path sends it.
+
+Tests: `AgentStepInputsTest` (worker), `__tests__/step-io.test.ts` (web).
 
 ---
 

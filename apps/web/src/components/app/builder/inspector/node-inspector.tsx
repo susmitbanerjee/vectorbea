@@ -8,10 +8,9 @@ import { NODE_MARKS } from "~/components/icons/nodes";
 import { InputsTab } from "./inputs-tab";
 import { ConfigureTab } from "./configure-tab";
 import { AdvancedTab, type AdvancedConfig } from "./advanced-tab";
-import { OutputTab, TestTab } from "./output-test-tabs";
-import { type Binding, type NullPolicy } from "~/mocks/io-schema";
-import { nodeInputs } from "./node-inputs";
+import { OutputTab } from "./output-test-tabs";
 import { useBuilderRegistry } from "../use-builder-registry";
+import { stepInputs, readInputMapping } from "../step-io";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 
@@ -29,22 +28,22 @@ import type { VersionNode } from "~/mocks/workflow-nodes";
    clicking a different node rather than by closing anything.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-export type InspectorTabId = "configure" | "inputs" | "output" | "advanced" | "test";
+export type InspectorTabId = "configure" | "inputs" | "output" | "advanced";
 
+/* No Test tab. It simulated a call with a timer, showed invented numbers and
+   JSON, and said it ran "against real connections". Run the workflow instead. */
 const TABS: { id: InspectorTabId; label: string }[] = [
   { id: "configure", label: "Configure" },
   { id: "inputs", label: "Inputs" },
   { id: "output", label: "Output" },
   { id: "advanced", label: "Advanced" },
-  { id: "test", label: "Test" },
 ];
 
+/* Inputs are part of `config` (`config.inputMapping`), so they save, reload and
+   reach the worker with everything else on the step. */
 export interface NodeEdits {
   name?: string;
   config?: Record<string, unknown>;
-  bindings: Binding[];
-  nullPolicies: Record<string, NullPolicy>;
-  defaults: Record<string, unknown>;
   advanced: AdvancedConfig;
 }
 
@@ -117,12 +116,11 @@ function defaultAdvanced(node: VersionNode): AdvancedConfig {
 }
 
 export function NodeInspector({
-  node, nodes, edges, bindingsByNode, onCommit, onClose, workflowBudgetMs,
+  node, nodes, edges, onCommit, onClose, workflowBudgetMs,
 }: {
   node: VersionNode;
   nodes: BuilderNode[];
   edges: BuilderEdge[];
-  bindingsByNode: Record<string, Binding[]>;
   onCommit: (nodeId: string, edits: NodeEdits) => void;
   onClose: () => void;
   workflowBudgetMs: number;
@@ -142,9 +140,6 @@ export function NodeInspector({
   const seed = React.useMemo<NodeEdits>(() => ({
     name: node.name,
     config: node.config,
-    bindings: bindingsByNode[node.id] ?? [],
-    nullPolicies: {},
-    defaults: {},
     advanced: defaultAdvanced(node),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [node.id]);
@@ -264,12 +259,10 @@ export function NodeInspector({
   const registry = useBuilderRegistry();
   const entry = NODE_MARKS.find((m) => m.type === node.kind);
   const Icon = entry?.Icon;
-  const declarations = nodeInputs(node, registry);
-  const unbound = declarations.filter(
-    (d) => d.required && !edits.bindings.some((b) => b.inputId === d.id),
-  ).length;
-
   const workingNode: VersionNode = { ...node, name: edits.name ?? node.name, config: edits.config ?? node.config };
+  const workingMapping = readInputMapping(workingNode.config);
+  const unbound = stepInputs(workingNode, registry)
+    .filter((d) => d.required && !workingMapping[d.id]?.trim()).length;
 
   return (
     <aside
@@ -387,18 +380,16 @@ export function NodeInspector({
             node={workingNode}
             nodes={nodes}
             edges={edges}
-            bindings={edits.bindings}
-            onChange={(bindings) => update({ bindings })}
-            nullPolicies={edits.nullPolicies}
-            onNullPolicyChange={(inputId, policy) => update({ nullPolicies: { ...edits.nullPolicies, [inputId]: policy } })}
-            defaults={edits.defaults}
-            onDefaultChange={(inputId, value) => update({ defaults: { ...edits.defaults, [inputId]: value } })}
-            expanded={expanded || width > 620}
+            onChange={(inputMapping) => update({ config: { ...workingNode.config, inputMapping } })}
           />
         ) : null}
 
         {tab === "output" ? (
-          <OutputTab node={workingNode} nodes={nodes} edges={edges} bindingsByNode={bindingsByNode} />
+          <OutputTab
+            node={workingNode}
+            nodes={nodes}
+            onFieldsChange={(outputFields) => update({ config: { ...workingNode.config, outputFields } })}
+          />
         ) : null}
 
         {tab === "advanced" ? (
@@ -411,7 +402,6 @@ export function NodeInspector({
           />
         ) : null}
 
-        {tab === "test" ? <TestTab node={workingNode} bindings={edits.bindings} /> : null}
       </div>
 
       <footer className="border-subtle flex items-center justify-between gap-2 border-t px-3 py-1.5">

@@ -1,6 +1,7 @@
 import {
   resolveTool, resolveConnection, type BuilderRegistry,
 } from "./use-builder-registry";
+import { readInputMapping, stepInputs } from "./step-io";
 import { downstreamOf } from "./store";
 import { validateTeams } from "./team-validation";
 import type { Entitlements } from "~/lib/entitlements/use-entitlements";
@@ -191,6 +192,21 @@ export function validateGraph(
         detail: "The step is a tool call with nothing to call.",
         fix: "Pick a tool on the node's Configure tab.",
       });
+    }
+    /* A tool input the tool requires and nothing fills: the call fails on every
+       run. Checked against the tool's own schema, so it is skipped while the
+       registry is loading rather than reported for every tool at once. */
+    if (kind === "tool" && registry && !registry.loading) {
+      const mapping = readInputMapping(config);
+      const missing = stepInputs(n.node, registry).filter((input) => input.required && !mapping[input.id]?.trim());
+      if (missing.length > 0) {
+        issues.push({
+          id: `unfilled-inputs-${id}`, category: "binding", severity: "error", nodeId: id,
+          title: `‘${name}’ is missing ${missing.map((m) => m.label.toLowerCase()).join(", ")}`,
+          detail: "The tool needs this on every call.",
+          fix: "Open the step's Inputs tab and type a value or pick one from an earlier step.",
+        });
+      }
     }
     if (kind === "branch" && !config.condition) {
       issues.push({

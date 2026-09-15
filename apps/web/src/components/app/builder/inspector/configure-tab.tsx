@@ -3,7 +3,7 @@
 import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
-import { Input } from "~/components/ui/input";
+import { Input, Textarea } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Switch } from "~/components/ui/choice";
 import { Button } from "~/components/ui/button";
@@ -312,7 +312,7 @@ function AgentConfig({ node, set, setMany }: {
   const registry = useBuilderRegistry();
   const config = node.config as Record<string, unknown>;
   const agent = resolveAgent(config, registry);
-  const override = String(config.taskOverride ?? "");
+  const override = String(config.taskInstruction ?? config.taskOverride ?? "");
 
   /* Named an agent that is not here. Same reasoning as the tool picker: this is
      the only place the operator can learn why the step will fail. */
@@ -378,25 +378,22 @@ function AgentConfig({ node, set, setMany }: {
 
       <Section
         title="Task instruction"
-        help="Leave empty to use the agent's registered task. Anything written here applies to THIS STEP ONLY and does not change the agent."
+        help="What this step should do. Leave empty to use the agent's own instructions."
       >
-        <Input
+        {/* Written as `taskInstruction`, the key the worker reads. It used to be
+            `taskOverride`, which nothing read — so the instruction typed here was
+            ignored. Both are read back, and the old key is cleared on edit. */}
+        <Textarea
           value={override}
-          onChange={(e) => set("taskOverride", e.target.value)}
-          placeholder="Uses the agent's default task"
-          className="h-7 text-body-sm"
+          onChange={(e) => setMany({ taskInstruction: e.target.value, taskOverride: null })}
+          placeholder="e.g. Review these changes and list the risky ones."
+          minRows={2}
+          maxRows={6}
+          className="text-body-sm"
         />
-        {override ? (
-          <div className="border-status-waiting-border bg-status-waiting-subtle mt-1.5 rounded-sm border px-2 py-1">
-            <Text variant="caption" tone="inherit" className="text-status-waiting">
-              Overriding the agent&apos;s default task
-            </Text>
-            <Text variant="caption" tone="secondary" className="mt-0.5 block leading-snug">
-              Other workflows using {agent?.name ?? "this agent"} are unaffected. The override lives
-              on this node and travels with the version.
-            </Text>
-          </div>
-        ) : null}
+        <Text variant="caption" tone="muted" className="mt-1 block">
+          Data from earlier steps is passed with it — add that on the Inputs tab.
+        </Text>
       </Section>
 
       <Section title="Generation" help="How the model is sampled for this step.">

@@ -248,7 +248,7 @@ class AgentNodeExecutor(
             skillsBlock.takeIf { it.isNotBlank() },
         ).joinToString("\n\n").takeIf { it.isNotBlank() }
         // Node-level taskInstruction overrides; fall back to resolved input keys
-        val taskInstruction: String? = node.config["taskInstruction"] as? String
+        val taskInstruction: String? = nodeTaskInstruction(node.config)
             ?: resolvedInputs["taskInstruction"] as? String
             ?: resolvedInputs["task"] as? String
             ?: resolvedInputs["prompt"] as? String
@@ -258,11 +258,25 @@ class AgentNodeExecutor(
         if (!systemPrompt.isNullOrBlank()) {
             messages += mapOf("role" to "system", "content" to systemPrompt)
         }
-        // If there are resolved inputs but no explicit task instruction, pass them as JSON
-        val userContent: String = taskInstruction
-            ?: if (resolvedInputs.isNotEmpty()) {
-                try { mapper.writeValueAsString(resolvedInputs) } catch (_: Exception) { "" }
-            } else ""
+        /*
+         * ── THE TASK AND THE DATA, NOT THE TASK OR THE DATA ──────────────────
+         *
+         * This was `taskInstruction ?: inputs-as-JSON`: a step with an instruction
+         * ("Review these changes.") AND mapped inputs (`changes` from the step
+         * before) sent the model the instruction alone, so it was asked to review
+         * changes it was never shown. The tool-using path has always sent both —
+         * `AgentPromptBuilder` appends INPUT DATA — so a step's inputs reached the
+         * model or not depending on whether its agent happened to have tools.
+         * Both paths now send both. Keys that were themselves the instruction are
+         * not repeated underneath it.
+         */
+        /* The step's output fields go in the USER message, after the task and the
+           data: the system prompt's order (agent instructions, then skills) is a
+           precedence decision this does not reopen. */
+        val userContent: String = listOfNotNull(
+            singleCallUserContent(taskInstruction, resolvedInputs, nodeTaskInstruction(node.config) != null).takeIf { it.isNotBlank() },
+            stepOutputFields(node.config)?.let { replyFormatInstruction(it) },
+        ).joinToString("\n\n")
 
         if (userContent.isNotBlank()) {
             messages += mapOf("role" to "user", "content" to userContent)
@@ -323,7 +337,7 @@ class AgentNodeExecutor(
                 @Suppress("UNCHECKED_CAST")
                 val parsed: Map<String, Any>? = try {
                     val json = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
-                        .readValue(content.trim(), Map::class.java) as? Map<String, Any>
+                        .readValue(stripJsonFence(content), Map::class.java) as? Map<String, Any>
                     // Only merge if it's a JSON object (not an array or primitive)
                     json
                 } catch (_: Exception) { null }
@@ -616,7 +630,7 @@ class AgentNodeExecutor(
                an agent here that supplied its task through input mapping rather than
                a node-level field would drop the task entirely and prompt the model
                with "Complete the task based on the provided inputs." */
-            taskInstruction = node.config["taskInstruction"] as? String
+            taskInstruction = nodeTaskInstruction(node.config)
                 ?: resolvedInputs["taskInstruction"] as? String
                 ?: resolvedInputs["task"] as? String
                 ?: resolvedInputs["prompt"] as? String
@@ -628,6 +642,11 @@ class AgentNodeExecutor(
                 try { UUID.fromString(it) } catch (_: Exception) { null }
             }.toSet(),
             resolvedInput   = resolvedInputs,
+            /* Fields declared on the step. `AgentBrainConfig` has always carried
+               this and the prompt has always honoured it; nothing set it, so a
+               tool-using agent's final output had no agreed shape to read from. */
+            outputSchemaJson = stepOutputFields(node.config)
+                ?.let { mapper.writeValueAsString(outputFieldsSchema(it)) } ?: "{}",
         )
 
         /*
@@ -690,7 +709,7 @@ class AgentNodeExecutor(
             if (result.stopReason == AgentLoopState.StopReason.FINAL_OUTPUT) {
                 NodeResult.Completed(
                     // result.finalOutput is Map<String,Any?> — filter nulls to satisfy Map<String,Any>
-                    output = result.finalOutput.filterValues { it != null }.mapValues { it.value!! } + mapOf(
+                    output = withFullReply(result.finalOutput.filterValues { it != null }.mapValues { it.value!! }) + mapOf(
                         "_brainIterations"  to result.iterationsUsed,
                         "_brainTokens"      to result.tokensUsed,
                         "_brainStopReason"  to result.stopReason.name,
@@ -842,4 +861,104 @@ class AgentNodeExecutor(
             summary       = summary,
         ))
     } catch (_: Exception) {}
+}
+
+/** Input keys the single-call path reads AS the instruction when the node has none. */
+internal val INSTRUCTION_INPUT_KEYS = setOf("taskInstruction", "task", "prompt", "input")
+
+/**
+ * The step's own task instruction.
+ *
+ * `taskOverride` is what the workflow builder and every template wrote; the
+ * worker only ever read `taskInstruction`, so the instruction typed on a step
+ * was silently replaced by whatever the agent's defaults produced. Both spellings
+ * are read, the canonical one first.
+ */
+internal fun nodeTaskInstruction(config: Map<String, Any?>): String? =
+    (config["taskInstruction"] as? String)?.takeIf { it.isNotBlank() }
+        ?: (config["taskOverride"] as? String)?.takeIf { it.isNotBlank() }
+
+/**
+ * What the single model call is asked: the instruction, then the step's input
+ * data. With no instruction, the data alone. Keys the instruction was read FROM
+ * (when the node had none of its own) are not repeated underneath it.
+ */
+internal fun singleCallUserContent(
+    taskInstruction: String?,
+    resolvedInputs: Map<String, Any>,
+    nodeHasInstruction: Boolean,
+): String {
+    val data = if (nodeHasInstruction) resolvedInputs else resolvedInputs.filterKeys { it !in INSTRUCTION_INPUT_KEYS }
+    val json = if (data.isEmpty()) "" else try {
+        com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(data)
+    } catch (_: Exception) { "" }
+    return when {
+        taskInstruction != null && json.isNotBlank() -> taskInstruction + "\n\nINPUT DATA:\n" + json
+        taskInstruction != null -> taskInstruction
+        else -> json
+    }
+}
+
+/* ── Output fields declared on the step ─────────────────────────────────────
+   The builder's Output tab writes `config.outputFields` as a list of
+   `{ name, type, description }` — the values a later step picks by name. Without
+   them a later step can only read the agent's whole reply. */
+
+internal data class OutputField(val name: String, val type: String, val description: String?)
+
+private val FIELD_NAME = Regex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+private val FIELD_TYPES = setOf("string", "number", "boolean", "array", "object")
+
+internal fun stepOutputFields(config: Map<String, Any?>): List<OutputField>? {
+    val raw = config["outputFields"] as? List<*> ?: return null
+    val fields = raw.mapNotNull { entry ->
+        val map = entry as? Map<*, *> ?: return@mapNotNull null
+        val name = (map["name"] as? String)?.trim()?.takeIf { FIELD_NAME.matches(it) } ?: return@mapNotNull null
+        val type = (map["type"] as? String)?.takeIf { it in FIELD_TYPES } ?: "string"
+        OutputField(name, type, (map["description"] as? String)?.trim()?.takeIf { it.isNotEmpty() }?.take(300))
+    }.distinctBy { it.name }.take(30)
+    return fields.takeIf { it.isNotEmpty() }
+}
+
+internal fun outputFieldsSchema(fields: List<OutputField>): Map<String, Any> = mapOf(
+    "type" to "object",
+    "properties" to fields.associate { f ->
+        f.name to buildMap<String, Any> {
+            put("type", f.type)
+            f.description?.let { put("description", it) }
+        }
+    },
+    "required" to fields.map { it.name },
+)
+
+/** Asks a single model call for a JSON object with the step's fields. */
+internal fun replyFormatInstruction(fields: List<OutputField>): String {
+    val lines = fields.joinToString("\n") { f ->
+        val kind = when (f.type) { "array" -> "list"; "object" -> "object"; "boolean" -> "true or false"; else -> f.type }
+        "- ${f.name} ($kind)" + (f.description?.let { ": $it" } ?: "")
+    }
+    return "Reply with only a JSON object, no other text, with these fields:\n$lines"
+}
+
+/** Models often wrap JSON in a Markdown fence; the fields are inside it. */
+internal fun stripJsonFence(content: String): String {
+    val trimmed = content.trim()
+    if (!trimmed.startsWith("```")) return trimmed
+    return trimmed.removePrefix("```json").removePrefix("```JSON").removePrefix("```").removeSuffix("```").trim()
+}
+
+/**
+ * A tool-using agent's final output, with `content` guaranteed.
+ *
+ * A single model call always returns `content`; the loop returns whatever its
+ * final output held. "Full reply" is offered for every agent step, so it has to
+ * exist for both: the final output as text when the agent did not write one.
+ */
+internal fun withFullReply(output: Map<String, Any>): Map<String, Any> {
+    if (output["content"] != null) return output
+    val text = (output["answer"] ?: output["summary"] ?: output["result"]) as? String
+        ?: try {
+            com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().writerWithDefaultPrettyPrinter().writeValueAsString(output)
+        } catch (_: Exception) { output.toString() }
+    return output + ("content" to text)
 }
