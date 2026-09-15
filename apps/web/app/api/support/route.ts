@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
 import { getUserById, getUserWorkspaces } from "@/lib/auth/neon-auth";
 import { sendEmail } from "@/lib/server/email";
+import { afterResponse } from "@/lib/server/after-response";
+import { forwardToSpiceworks, spiceworksStatus } from "@/lib/server/support-spiceworks";
 import {
   createTicket, listTicketsForUser, buildAdminNotificationEmail,
   getSupportAdminEmails, mapSeverityToPriority, supportLog,
@@ -98,21 +100,31 @@ export async function POST(request: NextRequest) {
     ticketNumber: ticket.ticket_number, userId: user.id, tenantId,
   });
 
-  // Notify support admins — persistence already succeeded, so email failures are
-  // logged and swallowed. The ticket remains visible in /support regardless.
-  const admins = getSupportAdminEmails();
-  if (admins.length > 0) {
-    const mail = buildAdminNotificationEmail(ticket, appBaseUrl());
-    void Promise.allSettled(
-      admins.map((to) => sendEmail({ to, subject: mail.subject, html: mail.html, text: mail.text })),
-    ).then((results) => {
-      const failed = results.filter((r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok));
-      if (failed.length > 0) {
-        supportLog("support.ticket.notify.failed", { ticketNumber: ticket!.ticket_number, error: `${failed.length}/${admins.length} recipients failed` });
-      }
-    });
+  /*
+   * After the response: forward to the help desk when one is configured,
+   * otherwise email the support admins. Not both — Spiceworks notifies its own
+   * technicians, and a second email for the same report is noise. Persistence
+   * already succeeded, so neither can fail the request.
+   */
+  const created = ticket;
+  if (spiceworksStatus().enabled) {
+    afterResponse(() => forwardToSpiceworks(created));
   } else {
-    supportLog("support.ticket.notify.skipped", { ticketNumber: ticket.ticket_number, error: "no support admins configured" });
+    const admins = getSupportAdminEmails();
+    if (admins.length > 0) {
+      const mail = buildAdminNotificationEmail(created, appBaseUrl());
+      afterResponse(async () => {
+        const results = await Promise.allSettled(
+          admins.map((to) => sendEmail({ to, subject: mail.subject, html: mail.html, text: mail.text })),
+        );
+        const failed = results.filter((r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok));
+        if (failed.length > 0) {
+          supportLog("support.ticket.notify.failed", { ticketNumber: created.ticket_number, error: `${failed.length}/${admins.length} recipients failed` });
+        }
+      });
+    } else {
+      supportLog("support.ticket.notify.skipped", { ticketNumber: created.ticket_number, error: "no support admins configured" });
+    }
   }
 
   return NextResponse.json(

@@ -254,6 +254,33 @@ addresses are not fixed, so allow SSL connections broadly or use a connection
 proxy). `support_tickets` is created by V077; the web app no longer needs
 CREATE on the schema for it.
 
+**Forwarding support reports to Spiceworks (optional).** The free Spiceworks
+Cloud Help Desk creates tickets from email, so the web app emails each new report
+to your help desk address after saving it (`lib/server/support-spiceworks.ts`).
+
+```
+SPICEWORKS_HELPDESK_EMAIL=help@<your-account>.on.spiceworks.com
+# plus a working email provider, which the portal already uses:
+RESEND_API_KEY=...            # or SENDGRID_API_KEY / SMTP_HOST ...
+FROM_EMAIL=support@<your verified domain>
+```
+
+1. In Spiceworks, find the help desk email address (Settings → Email) and make
+   sure tickets from `FROM_EMAIL` are accepted.
+2. Set the variables on the Vercel scope and redeploy.
+3. Open `/support` — the strip under the header says "Spiceworks connected".
+   Press **Send test ticket** and confirm it appears in Spiceworks.
+
+What to expect: the subject starts with the Vectorbea ticket number; the
+requester's name, email, workspace, priority and category are the first lines;
+Reply-To is the customer. Spiceworks lists `FROM_EMAIL` as the requester, because
+that is who sent the email — reply to the customer's address in the ticket.
+Status does not sync back (Spiceworks offers nothing to read it from), so resolve
+in `/support` when the customer should see it under My reports. A report that
+fails to send is marked on the ticket and can be sent again from `/support`.
+While forwarding is on, the support-admin notification email is not sent;
+Spiceworks notifies your technicians itself.
+
 The build command is already pinned in `apps/web/vercel.json`
 (`npm run prisma:generate && next build`). Set the Vercel project **Root
 Directory** to `apps/web`.

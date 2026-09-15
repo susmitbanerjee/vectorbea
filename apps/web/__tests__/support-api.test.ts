@@ -10,7 +10,10 @@ vi.mock("@/lib/auth/neon-auth", () => ({
   getUserById: vi.fn(async () => ({ id: "u1", email: "user@acme.com", full_name: "Ada Lovelace", avatar_url: null })),
   getUserWorkspaces: vi.fn(async () => [{ id: "ws1", name: "Acme", slug: "acme", role: "owner" }]),
 }));
-vi.mock("@/lib/server/email", () => ({ sendEmail: vi.fn(async () => ({ ok: true, provider: "test" })) }));
+vi.mock("@/lib/server/email", () => ({
+  sendEmail: vi.fn(async () => ({ ok: true, provider: "test" })),
+  emailConfigured: () => true,
+}));
 vi.mock("@/lib/server/support", async (orig) => {
   const actual = await orig<typeof import("@/lib/server/support")>();
   return {
@@ -21,6 +24,7 @@ vi.mock("@/lib/server/support", async (orig) => {
     resolveTicket: vi.fn(),
     reopenTicket: vi.fn(),
     listTicketsForUser: vi.fn(),
+    recordForward: vi.fn(async () => null),
   };
 });
 
@@ -87,6 +91,28 @@ describe("POST /api/support", () => {
     expect(mail.to).toBe("admin@vectorbea.com");
     expect(mail.text).toContain("/support?ticket=VB-A83K2P");
     expect(mail.text).not.toContain("support.vectorbea.com");
+  });
+
+  it("forwards to Spiceworks instead of emailing admins when a help desk is configured", async () => {
+    process.env.SPICEWORKS_HELPDESK_EMAIL = "help@acme.on.spiceworks.com";
+    try {
+      asUser(NON_ADMIN);
+      vi.mocked(support.createTicket).mockResolvedValue(sampleTicket() as never);
+
+      const res = await post({ subject: "Workflow execution stuck", message: "Run has been running for 20 minutes.", severity: "high" });
+      expect(res.status).toBe(201);
+      await vi.waitFor(() => expect(support.recordForward).toHaveBeenCalledTimes(1));
+
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      const mail = vi.mocked(sendEmail).mock.calls[0]![0];
+      expect(mail.to).toBe("help@acme.on.spiceworks.com");
+      expect(mail.replyTo).toBe("user@acme.com");
+      expect(mail.subject).toBe("[VB-A83K2P] Workflow execution stuck");
+      expect(mail.text).toContain("Requester: Ada Lovelace <user@acme.com>");
+      expect(vi.mocked(support.recordForward).mock.calls[0]![1]).toMatchObject({ status: "sent", error: null });
+    } finally {
+      delete process.env.SPICEWORKS_HELPDESK_EMAIL;
+    }
   });
 
   it("validates subject/message length", async () => {

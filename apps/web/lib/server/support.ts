@@ -35,6 +35,12 @@ export interface SupportTicket {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+  /** The help desk address it was sent to. Absent on a database without V077. */
+  forwarded_to?: string | null;
+  forward_status?: "sent" | "failed" | null;
+  forward_error?: string | null;
+  forward_attempts?: number;
+  forwarded_at?: string | null;
 }
 
 export const TICKET_STATUSES: TicketStatus[] = ["OPEN", "RESOLVED"];
@@ -179,7 +185,12 @@ async function ensureTable() {
       resolved_by   text,
       created_at    timestamptz NOT NULL DEFAULT now(),
       updated_at    timestamptz NOT NULL DEFAULT now(),
-      resolved_at   timestamptz
+      resolved_at   timestamptz,
+      forwarded_to      text,
+      forward_status    text,
+      forward_error     text,
+      forward_attempts  int NOT NULL DEFAULT 0,
+      forwarded_at      timestamptz
     )`;
   await sql`CREATE INDEX IF NOT EXISTS support_tickets_status_created_idx ON support_tickets (status, created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS support_tickets_user_email_idx ON support_tickets (lower(user_email))`;
@@ -328,6 +339,36 @@ export async function resolveTicket(
     WHERE ticket_number = ${ticketNumber}
     RETURNING *` as SupportTicket[];
   return rows[0] ?? null;
+}
+
+/**
+ * Record whether a ticket reached the external help desk.
+ *
+ * Null when the database predates V077's forward_* columns: the forward still
+ * happened, it just cannot be shown, and that must not fail anything.
+ */
+export async function recordForward(
+  ticketNumber: string,
+  outcome: { to: string; status: "sent" | "failed"; error: string | null },
+): Promise<SupportTicket | null> {
+  await ensureTable();
+  const sql = db();
+  try {
+    const rows = await sql`
+      UPDATE support_tickets
+      SET forwarded_to = ${outcome.to},
+          forward_status = ${outcome.status},
+          forward_error = ${outcome.error},
+          forward_attempts = forward_attempts + 1,
+          forwarded_at = CASE WHEN ${outcome.status} = 'sent' THEN now() ELSE forwarded_at END,
+          updated_at = now()
+      WHERE ticket_number = ${ticketNumber}
+      RETURNING *` as SupportTicket[];
+    return rows[0] ?? null;
+  } catch (err) {
+    if ((err as { code?: string })?.code === "42703") return null;
+    throw err;
+  }
 }
 
 /** Reopen a resolved ticket, clearing the resolution fields. */

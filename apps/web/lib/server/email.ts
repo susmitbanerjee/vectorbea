@@ -21,6 +21,8 @@ export interface EmailPayload {
   subject: string;
   html: string;
   text: string;
+  /** Where a reply goes. Used when forwarding a customer's report to a help desk. */
+  replyTo?: string;
 }
 
 export interface SendResult {
@@ -57,6 +59,7 @@ async function sendViaResend(payload: EmailPayload): Promise<SendResult> {
       subject: payload.subject,
       html: payload.html,
       text: payload.text,
+      ...(payload.replyTo ? { reply_to: payload.replyTo } : {}),
     }),
   });
 
@@ -79,6 +82,7 @@ async function sendViaSendGrid(payload: EmailPayload): Promise<SendResult> {
     body: JSON.stringify({
       personalizations: [{ to: [{ email: payload.to }] }],
       from: { email: fromAddress() ?? "noreply@vectorbea.app" },
+      ...(payload.replyTo ? { reply_to: { email: payload.replyTo } } : {}),
       subject: payload.subject,
       content: [
         { type: "text/plain", value: payload.text },
@@ -118,6 +122,7 @@ async function sendViaSMTP(payload: EmailPayload): Promise<SendResult> {
     await transporter.sendMail({
       from: fromAddress() ?? "noreply@vectorbea.app",
       to: payload.to,
+      ...(payload.replyTo ? { replyTo: payload.replyTo } : {}),
       subject: payload.subject,
       html: payload.html,
       text: payload.text,
