@@ -248,6 +248,17 @@ class WorkflowRuntime(
         private val mapper = com.fasterxml.jackson.databind.ObjectMapper()
 
         /**
+         * Store each step's resolved inputs and output on its `step` span.
+         *
+         * Without it the Debug tab can say an agent step ran and failed, but not what
+         * it was handed or what it returned — which for a pipeline of agents is the
+         * whole question. Written through [com.vectorbea.worker.events.PayloadStore],
+         * which redacts at the write boundary. Off by default (TRACE_STEP_IO_ENABLED).
+         */
+        internal val STEP_IO_CAPTURE_ENABLED: Boolean =
+            System.getenv("TRACE_STEP_IO_ENABLED")?.lowercase() == "true"
+
+        /**
          * Node types that reach outside Vectorbea and cannot be undone.
          *
          * Used only to word the gate warning. TOOL and AGENT are included because both
@@ -902,6 +913,8 @@ class WorkflowRuntime(
                 attributesJson = """{"nodeType":${jsonStr(node.type)}}""",
                 errorJson = (result as? NodeResult.Failed)
                     ?.let { """{"reason":${jsonStr(it.reason.take(300))}}""" },
+                inputRef = stepSpan?.let { captureStepPayload(ctx, resolvedInputs) },
+                outputRef = stepSpan?.let { captureStepPayload(ctx, (result as? NodeResult.Completed)?.output) },
             )
         }
 
@@ -2700,6 +2713,26 @@ class WorkflowRuntime(
                 }
             }
         }
+    }
+
+    /** Where step inputs and outputs go when [STEP_IO_CAPTURE_ENABLED]. */
+    private val stepPayloads: com.vectorbea.worker.events.PayloadStore? by lazy {
+        if (!STEP_IO_CAPTURE_ENABLED) null
+        else com.vectorbea.worker.events.PayloadStore(
+            dataSource, retentionDays = com.vectorbea.worker.events.RetentionLookup(dataSource)::daysFor)
+    }
+
+    /**
+     * A step's inputs or output as a payload ref, or null. Never throws: a payload
+     * that cannot be stored costs a debugging artefact, not the step.
+     */
+    private fun captureStepPayload(ctx: RuntimeContext, value: Map<String, Any?>?): String? {
+        if (value.isNullOrEmpty()) return null
+        val store = stepPayloads ?: return null
+        return runCatching {
+            store.capture(ctx.workspaceId, mapper.writeValueAsString(value),
+                com.vectorbea.worker.events.PayloadStore.JSON)?.ref
+        }.getOrNull()
     }
 
     /**

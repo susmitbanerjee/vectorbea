@@ -65,9 +65,9 @@ const STATUS_FILL: Record<string, string> = {
    * allowed near status, because the point is that there is no status.
    */
   handed_off: "fill-brand/10 stroke-brand",
-  cancelled: "fill-surface-raised stroke-border-subtle",
-  superseded: "fill-surface-raised stroke-border-subtle",
-  pending: "fill-surface-raised stroke-border-subtle",
+  cancelled: "fill-surface-raised stroke-fg-disabled",
+  superseded: "fill-surface-raised stroke-fg-disabled",
+  pending: "fill-surface-raised stroke-fg-disabled",
 };
 
 /** `handed_off` is neither success nor failure, and the legend says so. */
@@ -88,10 +88,10 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const KIND_STYLE: Record<string, string> = {
-  DELEGATE: "stroke-border-strong",
+  DELEGATE: "stroke-fg-muted",
   TRANSFER: "stroke-brand",
   BROADCAST: "stroke-status-live",
-  RETURN: "stroke-border-subtle",
+  RETURN: "stroke-fg-disabled",
   ESCALATE: "stroke-status-waiting",
 };
 
@@ -99,17 +99,34 @@ export function AgentsView({
   constellation,
   onSelectActivation,
   selectedActivationId,
+  renderNodeDetail,
   className,
 }: {
   constellation: Constellation;
   onSelectActivation?: (activationId: string) => void;
   selectedActivationId?: string | null;
+  /** What the selected agent received and returned. Without it, selecting only highlights. */
+  renderNodeDetail?: (node: PlacedNode) => React.ReactNode;
   className?: string;
 }) {
   const l = React.useMemo(() => layout(constellation), [constellation]);
   const groups = React.useMemo(() => joinGroups(constellation.edges), [constellation.edges]);
   const [hovered, setHovered] = React.useState<PlacedEdge | null>(null);
+  const [picked, setPicked] = React.useState<string | null>(null);
   const guard = constellation.loopGuard;
+
+  /* Opens on the agent most worth reading — the failure, else the first — so the
+     panel under the graph has an answer before anyone clicks. */
+  const selectedId = selectedActivationId ?? picked
+    ?? l.nodes.find((n) => n.isRootCause)?.id
+    ?? l.nodes.find((n) => n.status === "failed")?.id
+    ?? l.nodes[0]?.id
+    ?? null;
+  const selectedNode = l.nodes.find((n) => n.id === selectedId) ?? null;
+  const select = (id: string) => {
+    setPicked(id);
+    onSelectActivation?.(id);
+  };
 
   /*
    * ── THE PATH THAT ENDED IN THE FAILURE ──────────────────────────────────
@@ -153,16 +170,6 @@ export function AgentsView({
 
   const blocked = l.nodes.filter((n) => n.blocked);
 
-  /*
-   * Say what is NOT in the picture, and only when something is missing.
-   *
-   * A derived single-agent run is complete — one agent, no handoffs to draw,
-   * nothing to warn about, so nothing is said. With two or more derived nodes
-   * the edges between them genuinely were not recorded, and silence would let a
-   * reader conclude the agents never handed off to each other.
-   */
-  const missingEdges = constellation.derived === true && l.nodes.length > 1;
-
   return (
     <div className={cn("grid gap-3", className)}>
       {/*
@@ -172,20 +179,6 @@ export function AgentsView({
         common "why is nothing happening" question, and burying the answer inside
         a node somebody has to find first is how it stays unanswered. It leads.
       */}
-      {missingEdges ? (
-        <div className="rounded-lg border border-subtle bg-surface-raised p-3">
-          <Text variant="label" tone="secondary" className="block">
-            Handoffs are not shown for this run
-          </Text>
-          <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[70ch]">
-            Each agent below is drawn from its own step record, which is complete
-            — the timings and the cost are what the run actually spent. What was
-            not recorded is which agent handed to which, so the connections
-            between them are absent rather than empty.
-          </Text>
-        </div>
-      ) : null}
-
       {blocked.length > 0 ? (
         <div className="rounded-lg border border-subtle bg-surface-raised p-3">
           <Text variant="label" tone="secondary" className="block">
@@ -255,6 +248,10 @@ export function AgentsView({
         </div>
       ) : null}
 
+      {renderNodeDetail && l.nodes.length > 1 ? (
+        <Text variant="caption" tone="secondary">Select an agent to see what it received and returned.</Text>
+      ) : null}
+
       <div className="overflow-auto rounded-lg border border-subtle bg-surface-raised">
         <svg
           width={l.width}
@@ -291,6 +288,13 @@ export function AgentsView({
             );
           })}
 
+          {/* Run order between agent steps. Plain arrows with no label: these are
+              "ran next", not recorded handoffs, so they claim nothing more. */}
+          {l.sequence.map((q) => (
+            <line key={`seq-${q.from}-${q.to}`} x1={q.x1} y1={q.y1} x2={q.x2} y2={q.y2}
+                  markerEnd="url(#cst-arrow)" strokeWidth={1.5} className="stroke-fg-muted" />
+          ))}
+
           {l.edges.map((e) => (
             <g key={e.id}
                onMouseEnter={() => setHovered(e)}
@@ -300,7 +304,7 @@ export function AgentsView({
                 markerEnd="url(#cst-arrow)"
                 strokeWidth={e.cyclic ? 2.5 : pathEdge(e) ? 2.5 : 1.5}
                 strokeDasharray={e.cyclic ? "6 4" : undefined}
-                className={cn(KIND_STYLE[e.kind] ?? "stroke-border-strong",
+                className={cn(KIND_STYLE[e.kind] ?? "stroke-fg-muted",
                   e.cyclic && "stroke-status-waiting",
                   pathEdge(e) && "stroke-status-failed")}
               />
@@ -374,7 +378,7 @@ export function AgentsView({
           {l.nodes.map((n) => (
             <g key={n.id}
                className="cursor-pointer"
-               onClick={() => onSelectActivation?.(n.id)}
+               onClick={() => select(n.id)}
                tabIndex={0}
                role="button"
                aria-label={
@@ -386,7 +390,7 @@ export function AgentsView({
                onKeyDown={(ev) => {
                  if (ev.key === "Enter" || ev.key === " ") {
                    ev.preventDefault();
-                   onSelectActivation?.(n.id);
+                   select(n.id);
                  }
                }}>
               {/* THE ROOT-CAUSE RING, outside the node so it reads as a mark ON
@@ -397,10 +401,10 @@ export function AgentsView({
               ) : null}
               <circle
                 cx={n.x} cy={n.y} r={n.r}
-                strokeWidth={selectedActivationId === n.id ? 3 : 1.5}
+                strokeWidth={selectedId === n.id ? 3 : 1.5}
                 strokeDasharray={n.blocked ? "4 3" : undefined}
                 className={cn(
-                  STATUS_FILL[n.status] ?? "fill-surface-raised stroke-border-subtle",
+                  STATUS_FILL[n.status] ?? "fill-surface-raised stroke-fg-disabled",
                   n.blocked && "opacity-50",
                 )}
               />
@@ -434,11 +438,13 @@ export function AgentsView({
         child misunderstood or the request was wrong. Both arrive with the graph,
         so this is instant rather than a request per hover.
       */}
-      {hovered ? <EdgeDetail edge={hovered} /> : (
-        <Text variant="caption" tone="secondary">
-          Hover a handoff to see the contract sent and the output returned.
-        </Text>
-      )}
+      {hovered ? <EdgeDetail edge={hovered} />
+        : renderNodeDetail && selectedNode ? renderNodeDetail(selectedNode)
+          : l.edges.length > 0 ? (
+            <Text variant="caption" tone="secondary">
+              Hover a handoff to see the contract sent and the output returned.
+            </Text>
+          ) : null}
     </div>
   );
 }

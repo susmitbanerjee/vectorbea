@@ -801,14 +801,17 @@ function mockTrace(runId: string) {
   const llmCall = span("llm", "triage", "llm_call", "gpt-4o-mini", "ok", 12_000, 6_000, {
     stepId: "n-triage", tokensIn: 4_100, tokensOut: 320, costCents: 8.4,
   });
+  const research = span("research", "tick", "step", "research", "ok", 5_100, 850, {
+    stepId: "n-research", hasInput: true, hasOutput: true,
+  });
   const triage = span("triage", "tick", "step", "triage", "error", 6_000, 74_000, {
-    stepId: "n-triage", selfMs: 2_000,
+    stepId: "n-triage", selfMs: 2_000, hasInput: true,
     children: [llmCall, toolCall], childCount: 2,
   });
   const trigger = span("trigger", "tick", "step", "trigger", "ok", 5_000, 100, { stepId: "n-trigger" });
   const notify = span("notify", "tick", "step", "notify", "skipped", 80_000, 0, { stepId: "n-notify" });
   const tick = span("tick", "run", "tick", "tick", "error", 5_000, 76_000, {
-    selfMs: 1_900, children: [trigger, triage, notify], childCount: 3,
+    selfMs: 1_900, children: [trigger, research, triage, notify], childCount: 4,
   });
   const queueWait = span("wq", "run", "wait", "wait:queue", "ok", 0, 5_000);
   const approvalWait = span("wa", "run", "wait", "wait:approval", "ok", 81_000, 171_000);
@@ -816,7 +819,7 @@ function mockTrace(runId: string) {
     selfMs: null, children: [queueWait, tick, approvalWait], childCount: 3,
   });
   return {
-    runId, depth: 9, totalSpans: 9, returnedSpans: 9, truncated: false,
+    runId, depth: 9, totalSpans: 10, returnedSpans: 10, truncated: false,
     spans: [run], traceComplete: true,
   };
 }
@@ -852,7 +855,50 @@ function mockCriticalPath(runId: string) {
   };
 }
 
+/** Two agent steps of a workflow run, as the API derives them from iterations. */
+function mockConstellation(runId: string) {
+  const node = (id: string, name: string, status: string, startMs: number, durMs: number, tokens: number, extra: Record<string, unknown> = {}) => ({
+    id: `n-${id}`, stepId: `n-${id}`, parentId: null, depth: 0, status, role: null, agentName: name,
+    stopReason: null, tokens, costCents: tokens / 1000, iterations: 2, blockedReason: null,
+    startedAt: at(startMs), endedAt: at(startMs + durMs), ...extra,
+  });
+  return {
+    runId, derived: true, edges: [], cycles: [],
+    nodes: [
+      node("triage", "Triage agent", "failed", 6_000, 74_000, 4_420, { isRootCause: true, onRootCausePath: true }),
+      node("research", "Research agent", "succeeded", 5_100, 850, 18_300),
+    ],
+  };
+}
+
+/** What a step received and returned, when the worker records step I/O. */
+function mockStepSpanDetail(spanId: string) {
+  const research = spanId === uuidFrom("span_research");
+  const json = (value: unknown) => ({
+    ref: `sha256:${research ? "r" : "t"}`, sizeBytes: 420, contentType: "application/json",
+    storage: "inline" as const, truncated: false, redactions: null, value: JSON.stringify(value),
+  });
+  return {
+    ...span(research ? "research" : "triage", "tick", "step", research ? "research" : "triage",
+      research ? "ok" : "error", research ? 5_100 : 6_000, research ? 850 : 74_000,
+      { stepId: research ? "n-research" : "n-triage", hasInput: true, hasOutput: research }),
+    attributes: '{"nodeType":"agent"}',
+    errorJson: research ? null : '{"reason":"crm.search returned HTTP 403: token expired"}',
+    input: research
+      ? json({ repo: "acme/api", since: "2026-09-14T10:00:00Z" })
+      : json({ summary: "Three accounts raised billing tickets after the 14 September deploy.", accountId: "" }),
+    output: research
+      ? json({
+        summary: "Three accounts raised billing tickets after the 14 September deploy. All three are on the annual plan and were charged twice; the duplicate charge lines up with the retry added to the invoice job.",
+        commitSha: "9ed360d7c1a4b2e8f0d3a6b9c2e5f8a1b4c7d0e3",
+        files: ["billing/invoice-job.ts", "billing/retry.ts"],
+      })
+      : null,
+  };
+}
+
 function mockSpanDetail(spanId: string) {
+  if (spanId === uuidFrom("span_research") || spanId === uuidFrom("span_triage")) return mockStepSpanDetail(spanId);
   const isTool = spanId === uuidFrom("span_tool");
   return {
     ...span(isTool ? "tool" : "llm", "triage",
@@ -1068,6 +1114,7 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/runs/:id/trace/root-cause", (params) => mockRootCause(params.id)],
   ["GET", "/api/runs/:id/trace/critical-path", (params) => mockCriticalPath(params.id)],
   ["GET", "/api/runs/:id/trace/spans/:spanId", (params) => mockSpanDetail(params.spanId)],
+  ["GET", "/api/runs/:id/constellation", (params) => mockConstellation(params.id)],
 
   /* The run's event log. A run this fixture minted has exactly one event —
      it was queued — because nothing here executes it. */

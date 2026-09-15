@@ -160,6 +160,7 @@ WORKER_MAX_RUN_DURATION_MS=600000
 WORKER_MAX_BRANCH_THREADS=16
 AGENT_SKILLS_ENABLED=true       # skills apply to agent runs; off = granted skills are ignored at run time
 MESSAGING_WEBHOOKS_ENABLED=true # Teams / Google Chat / Discord tools post; off = those calls fail naming this variable
+TRACE_STEP_IO_ENABLED=true      # Debug → Agents shows each step's inputs and output (redacted); off = not recorded
 TELEMETRY_ENABLED=true
 TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
 TELEMETRY_INTERNAL_TOKEN=<shared internal token>

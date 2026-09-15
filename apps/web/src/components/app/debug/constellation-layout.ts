@@ -41,6 +41,8 @@
 
 export interface ConstellationNode {
   id: string;
+  /** The workflow step this activation ran in. Keys the step's recorded inputs and output. */
+  stepId?: string | null;
   parentId: string | null;
   depth: number;
   status: string;
@@ -194,17 +196,26 @@ export interface PlacedLoop extends ConstellationCycle {
   y2: number;
 }
 
+/** Run order between two derived steps: "this ran, then that". Not a recorded handoff. */
+export interface PlacedSequence {
+  from: string;
+  to: string;
+  x1: number; y1: number;
+  x2: number; y2: number;
+}
+
 export interface Layout {
   nodes: PlacedNode[];
   edges: PlacedEdge[];
+  sequence: PlacedSequence[];
   loops: PlacedLoop[];
   width: number;
   height: number;
 }
 
 /** Geometry constants. Named so the reasons are readable at the call site. */
-/** Vertical space per SIBLING. Two circles plus the name and token line. */
-const LANE_HEIGHT = 96;
+/** Vertical space per SIBLING: the largest circle plus the name and token line under it. */
+const LANE_HEIGHT = 128;
 /** Horizontal space per DEPTH LEVEL. Wide enough for an edge label. */
 const COL_WIDTH = 240;
 const PAD_X = 90;
@@ -255,7 +266,35 @@ export function isBlocked(n: ConstellationNode): boolean {
  */
 export function layout(c: Constellation): Layout {
   if (c.nodes.length === 0) {
-    return { nodes: [], edges: [], loops: [], width: 0, height: 0 };
+    return { nodes: [], edges: [], sequence: [], loops: [], width: 0, height: 0 };
+  }
+
+  /*
+   * ── STEPS OF A WORKFLOW RUN IN ORDER, LEFT TO RIGHT ─────────────────────
+   * Derived nodes are separate agent steps, all at depth 0, so the column layout
+   * stacked them into one column. They ran one after another; a row in run order
+   * says that, and leaves room for each name.
+   */
+  if (c.derived && c.nodes.length > 1 && c.nodes.every((n) => n.depth <= 0)) {
+    const ordered = [...c.nodes].sort((a, b) => startMs(a) - startMs(b));
+    const maxTokens = Math.max(0, ...ordered.map((n) => n.tokens ?? 0));
+    const y = PAD_Y + LANE_HEIGHT / 2;
+    const nodes: PlacedNode[] = ordered.map((n, i) => ({
+      ...n,
+      x: PAD_X + i * COL_WIDTH + COL_WIDTH / 2,
+      y,
+      r: radiusFor(n.tokens ?? 0, maxTokens),
+      blocked: isBlocked(n),
+    }));
+    const sequence: PlacedSequence[] = nodes.slice(1).map((to, i) => {
+      const from = nodes[i]!;
+      return { from: from.id, to: to.id, x1: from.x + from.r + 6, y1: y, x2: to.x - to.r - 8, y2: y };
+    });
+    return {
+      nodes, edges: [], sequence, loops: [],
+      width: PAD_X * 2 + nodes.length * COL_WIDTH,
+      height: PAD_Y * 2 + LANE_HEIGHT,
+    };
   }
 
   /* Columns by depth. `Map` preserves insertion order, and nodes arrive ordered
@@ -349,7 +388,13 @@ export function layout(c: Constellation): Layout {
     };
   });
 
-  return { nodes: [...placed.values()], edges, loops, width, height };
+  return { nodes: [...placed.values()], edges, sequence: [], loops, width, height };
+}
+
+/** Unstarted steps sort last, keeping their arrival order among themselves. */
+function startMs(n: ConstellationNode): number {
+  const t = n.startedAt ? Date.parse(n.startedAt) : NaN;
+  return Number.isNaN(t) ? Number.MAX_SAFE_INTEGER : t;
 }
 
 /**

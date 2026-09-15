@@ -12,6 +12,7 @@ import { useScope } from "~/lib/workspace/workspace-provider";
 import { toUiRun } from "~/components/app/runs/use-runs-data";
 import type { Run } from "~/lib/runs/model";
 import type { VectorbeaApiError } from "~/lib/api/errors";
+import { fromStoredGraph } from "~/lib/workflows/graph-codec";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE RUN THIS PAGE IS ACTUALLY ABOUT
@@ -170,10 +171,38 @@ export function useRunDetailData(runId: string): RunDetailData {
     [incidents.data, incidentId],
   );
 
-  const uiRun = React.useMemo(
-    () => (run.data ? toUiRun(run.data, incident ?? undefined) : null),
-    [run.data, incident],
-  );
+  /*
+   * ── STEP NAMES ───────────────────────────────────────────────────────────
+   * The run's ribbon records node IDS, so every step on this page read
+   * "n-new-agent-2" rather than "Review changes". The names are in the graph of
+   * the version this run executed; read it once and relabel.
+   */
+  const workflowId = run.data?.workflowId ?? null;
+  const versions = useApiQuery({
+    queryKey: queryKeys.workflows.versions(keyScope, workflowId ?? ""),
+    queryFn: () => api.workflows.versions(workflowId!, { ...scope, page: 1, pageSize: 50 }),
+    enabled: enabled && Boolean(workflowId),
+  });
+  const stepNames = React.useMemo(() => {
+    const version = versions.data?.items.find((v) => v.id === run.data?.workflowVersionId);
+    if (!version) return null;
+    return new Map(fromStoredGraph(version.graph).nodes.map((n) => [n.node.id, n.node] as const));
+  }, [versions.data, run.data?.workflowVersionId]);
+
+  const uiRun = React.useMemo(() => {
+    if (!run.data) return null;
+    const base = toUiRun(run.data, incident ?? undefined);
+    if (!stepNames) return base;
+    return {
+      ...base,
+      nodes: base.nodes.map((n) => {
+        const step = stepNames.get(n.id);
+        if (!step) return n;
+        const kind = step.kind === "agent_team" ? "agent" : step.kind;
+        return { ...n, name: step.name, kind };
+      }),
+    };
+  }, [run.data, incident, stepNames]);
 
   /* A run that is still moving is followed; a finished one is not. Watching a
      completed run forever is the kind of thing nobody notices until it is a

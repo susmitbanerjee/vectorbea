@@ -72,7 +72,9 @@ export function RecoveryCard({ diagnosis, onRetryStep, className }: RecoveryCard
             )}
           >
             <Text variant="body-sm" tone="primary" className="block">
-              <span className="font-code">{d.failedNode.node.id}</span> · {d.failedNode.node.name}
+              {d.failedNode.node.name === d.failedNode.node.id
+                ? <span className="font-code">{d.failedNode.node.id}</span>
+                : d.failedNode.node.name}
             </Text>
             {d.toolCall ? (
               <Text variant="caption" tone="muted" className="block">

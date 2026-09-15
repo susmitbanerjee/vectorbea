@@ -13,6 +13,7 @@ import { useBuilderRegistry } from "../use-builder-registry";
 import { stepInputs, readInputMapping } from "../step-io";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
+import { defaultStepTimeoutMs } from "~/lib/workflows/step-timeouts";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE NODE INSPECTOR
@@ -51,34 +52,8 @@ const WIDTH_KEY = "vectorbea-inspector-width";
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 900;
 
-/* ══════════════════════════════════════════════════════════════════════════════
-   THE 30-SECOND DEFAULT WAS THE COLD START.
-
-   `timeoutMs` defaulted to a flat 30000 for every node kind, and the commit path
-   writes the Advanced panel's values on every save — so opening the inspector on
-   an agent node once was enough to stamp 30s onto it permanently.
-
-   The worker has per-class defaults for exactly this reason
-   (`WorkflowRuntime.defaultTimeoutFor`): 120s for an agent, 90s for an LLM call,
-   30s for HTTP. A node config value OVERRIDES those, so the panel was quietly
-   cutting an agent's budget to a quarter. A first call pays DNS, the TLS
-   handshake, the JVM's TLS and JIT warm-up and a cold provider connection; a
-   tool-calling agent pays that plus several model round trips. Thirty seconds is
-   frequently not enough for the first one and comfortably enough for the second,
-   which is exactly the reported symptom: the first agent execution fails, the
-   retry succeeds.
-
-   These values MIRROR the worker's. If either side changes, change both — a
-   panel that draws a budget the runtime does not use is how this started.
-══════════════════════════════════════════════════════════════════════════════ */
-const DEFAULT_TIMEOUT_MS: Partial<Record<VersionNode["kind"], number>> = {
-  agent: 120_000,   // AGENT_NODE_TIMEOUT_MS
-  llm: 90_000,      // LLM_NODE_TIMEOUT_MS
-  tool: 30_000,     // HTTP_NODE_TIMEOUT_MS — a tool node is an outbound call
-};
-
-/** The worker's DEFAULT_NODE_TIMEOUT_MS, for every kind not listed above. */
-const FALLBACK_TIMEOUT_MS = 60_000;
+/* The per-kind starting limit lives in `lib/workflows/step-timeouts`, shared
+   with the canvas chip so the two cannot disagree about what "default" means. */
 
 /**
  * The Advanced panel's starting values, read back from what was saved.
@@ -100,7 +75,7 @@ function defaultAdvanced(node: VersionNode): AdvancedConfig {
       maxDelayMs: retry?.maxDelayMs ?? 8000,
       jitter: retry?.jitter ?? String(retry?.backoff ?? "").includes("jitter"),
     },
-    timeoutMs: Number(node.config.timeoutMs ?? DEFAULT_TIMEOUT_MS[node.kind] ?? FALLBACK_TIMEOUT_MS),
+    timeoutMs: Number(node.config.timeoutMs ?? defaultStepTimeoutMs(node.kind)),
     idempotencyKey: String(node.config.idempotencyKey ?? ""),
     errorPolicy: (node.config.errorPolicy as AdvancedConfig["errorPolicy"]) ?? "fail-run",
     fallbackNodeId: (node.config.fallbackNodeId as string | null) ?? null,

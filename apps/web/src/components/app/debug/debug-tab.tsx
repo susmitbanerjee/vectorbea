@@ -17,6 +17,7 @@ import {
   type ReplayAttempt, type ReplayOptions,
 } from "~/lib/api/constellation";
 import { AgentsView } from "./agents-view";
+import { StepIoPanel } from "./step-io-panel";
 import { FlowView } from "./flow-view";
 import { CompareView } from "./compare-view";
 import { ReplayView } from "./replay-view";
@@ -449,7 +450,18 @@ export function DebugTab({
           agentsError ? (
             <TraceUnavailable message={agentsError} onRetry={() => setAgentsError(null)} />
           ) : constellation ? (
-            <AgentsView constellation={constellation} />
+            <AgentsView
+              constellation={constellation}
+              renderNodeDetail={(node) => (
+                <StepIoPanel
+                  api={api}
+                  runId={runId}
+                  spans={tree.spans}
+                  stepId={node.stepId}
+                  title={node.agentName}
+                />
+              )}
+            />
           ) : (
             <div className="h-64 animate-pulse rounded-md bg-surface-sunken motion-reduce:animate-none"
                  aria-busy="true" aria-label="Loading the agent constellation" />
