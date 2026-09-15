@@ -255,8 +255,38 @@ class AuthMiddleware(
     }
 
     private fun extractBearerToken(req: Request): String? {
-        val header = req.header("authorization") ?: return null
-        if (!header.startsWith("Bearer ", ignoreCase = true)) return null
-        return header.substring(7).trim().takeIf { it.isNotEmpty() }
+        val header = req.header("authorization")
+        if (header != null && header.startsWith("Bearer ", ignoreCase = true)) {
+            return header.substring(7).trim().takeIf { it.isNotEmpty() }
+        }
+        return streamQueryToken(req)
+    }
+
+    companion object {
+        /**
+         * The live run streams, which a browser opens with `EventSource`.
+         *
+         * `EventSource` cannot send an Authorization header, so the web client
+         * (`run-stream.ts`, `trace.ts`) has always put the session token in
+         * `?access_token=` — and this middleware only ever read the header. Every
+         * stream was refused with 401 in 0 ms once JWT auth was on, and the run
+         * page sat on "reconnecting…" while the ordinary requests beside it
+         * succeeded.
+         */
+        private val STREAM_PATH = Regex("^/api/runs/[^/]+(/trace)?/stream$")
+
+        /**
+         * The query-string token, accepted on those two GET routes and nowhere
+         * else, and never for an API key: a `vb_` key is long-lived, and a URL is
+         * kept in browser history and proxy logs in a way a header is not. Our
+         * own request log records the path without the query string
+         * (`HttpServer` puts `requestURI.path` in the MDC), so the token is not
+         * written there.
+         */
+        internal fun streamQueryToken(req: Request): String? {
+            if (!req.method.equals("GET", ignoreCase = true) || !STREAM_PATH.matches(req.path)) return null
+            val token = req.query("access_token")?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+            return token.takeUnless { it.startsWith("vb_") }
+        }
     }
 }
