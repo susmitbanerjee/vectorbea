@@ -74,6 +74,10 @@ const STEPS: ModalStep[] = [
  * URL teaches people not to trust the rest.
  */
 const SUGGESTED: { name: string; url: string; provider: string }[] = [
+  /* The read-only endpoint on purpose: it exposes no tool that can write to a
+     repository, which is the right default for a server an agent reads code
+     through. GitHub needs a personal access token — see the probe. */
+  { name: "GitHub", url: "https://api.githubcopilot.com/mcp/readonly", provider: "github" },
   { name: "Linear", url: "https://mcp.linear.app/mcp", provider: "linear" },
   { name: "Notion", url: "https://mcp.notion.com/mcp", provider: "notion" },
   { name: "Sentry", url: "https://mcp.sentry.dev/mcp", provider: "sentry" },
@@ -155,7 +159,19 @@ export function ConnectMcpDialog({
   // ── Save ──────────────────────────────────────────────────────────────────
 
   async function ensureSaved(auth: "none" | "oauth2" | "bearer", secret?: string): Promise<contracts.Connection> {
-    if (saved) return saved;
+    /* Already saved — usually by a sign-in attempt that did not work out. Update
+       it to the method now being used, or a token typed afterwards would never be
+       stored and the server would be connected with no credential at all. */
+    if (saved) {
+      if (saved.authType === auth && !secret) return saved;
+      const updated = await api.connections.update(saved.id, {
+        authType: auth,
+        ...(secret ? { plaintextSecret: secret } : {}),
+      }, readScope);
+      setSaved(updated);
+      invalidate();
+      return updated;
+    }
     const connection = await api.connections.create({
       name: name.trim() || defaultName(trimmedUrl),
       type: "mcp",
@@ -168,6 +184,25 @@ export function ConnectMcpDialog({
     setSaved(connection);
     invalidate();
     return connection;
+  }
+
+  /** Switch to pasting a token, from wherever the person is — including a failure. */
+  function switchToToken(reason?: string) {
+    signInFlow.cancel();
+    setUseToken(true);
+    setPhase({
+      kind: "probed",
+      probe: {
+        status: "failed",
+        errorCode: "TOKEN_REQUIRED",
+        message: reason ?? "Paste an access token for this server.",
+        latencyMs: 0,
+        auth: "token",
+        serverName: null,
+        authorizationServer: probe?.authorizationServer ?? null,
+        toolCount: null,
+      },
+    });
   }
 
   async function connectDirect() {
@@ -200,7 +235,9 @@ export function ConnectMcpDialog({
       });
       if (!required && connectionId) await discoverAndList(connectionId);
     } catch (error) {
-      setPhase({ kind: "failed", message: messageOf(error, "The sign-in could not be started.") });
+      /* The only thing left to try is a token, so offer it with the reason rather
+         than a dead end that says "Check again". */
+      switchToToken(messageOf(error, "The sign-in could not be started."));
     } finally {
       setSaving(false);
     }
@@ -307,6 +344,7 @@ export function ConnectMcpDialog({
               onToken={setToken}
               onRetest={() => void runProbe(useToken ? token.trim() : undefined)}
               onSignIn={() => void signIn()}
+              onTokenInstead={() => switchToToken()}
             />
           ) : null}
 
@@ -440,7 +478,7 @@ function ServerStep({
 }
 
 function ConnectStep({
-  host, phase, saving, useToken, onUseToken, token, onToken, onRetest, onSignIn,
+  host, phase, saving, useToken, onUseToken, token, onToken, onRetest, onSignIn, onTokenInstead,
 }: {
   host: string;
   phase: Phase;
@@ -451,6 +489,7 @@ function ConnectStep({
   onToken: (next: string) => void;
   onRetest: () => void;
   onSignIn: () => void;
+  onTokenInstead: () => void;
 }) {
   if (phase.kind === "probing") {
     return (
@@ -471,13 +510,19 @@ function ConnectStep({
             ? "Open the sign-in page yourself. This screen continues on its own when you're done."
             : "This screen continues on its own once you've approved access. If you closed the window, open it again."}
         </ModalNote>
-        {phase.url ? (
-          <div>
+        <div className="flex flex-wrap gap-2">
+          {phase.url ? (
             <Button asChild size="sm" variant="secondary" iconLeft={<Icon icon={ArrowSquareOut} size="sm" decorative />}>
               <a href={phase.url} target="_blank" rel="noopener noreferrer">Open the sign-in page</a>
             </Button>
-          </div>
-        ) : null}
+          ) : null}
+          {/* A sign-in can fail on the other side — an organisation that blocks
+              third-party apps, an account without access — and nothing reports
+              that back here. Waiting forever is not an answer. */}
+          <Button size="sm" variant="ghost" onClick={onTokenInstead} iconLeft={<Icon icon={Key} size="sm" decorative />}>
+            Use an access token instead
+          </Button>
+        </div>
       </div>
     );
   }
@@ -488,6 +533,11 @@ function ConnectStep({
         <ModalNote tone="danger" title="Not connected">{phase.message}</ModalNote>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={onRetest}>Check again</Button>
+          {/* Every failure can still be answered with a token — a sign-in that
+              broke, a server that is picky about sign-in, a probe that timed out. */}
+          <Button size="sm" variant="ghost" onClick={onTokenInstead} iconLeft={<Icon icon={Key} size="sm" decorative />}>
+            Use an access token instead
+          </Button>
         </div>
       </div>
     );
@@ -540,7 +590,12 @@ function ConnectStep({
   return (
     <div className="grid grid-cols-1 gap-4">
       {probe.status !== "connected" ? (
-        <ModalNote tone={probe.auth === "token" ? "neutral" : "danger"} title={probe.auth === "token" ? "This server needs an access token" : "Not connected"}>
+        <ModalNote
+          tone={probe.errorCode === "AUTH_FAILED" || probe.auth !== "token" ? "danger" : "neutral"}
+          title={probe.errorCode === "AUTH_FAILED"
+            ? "That token was rejected"
+            : probe.auth === "token" ? "This server needs an access token" : "Not connected"}
+        >
           {probe.message}
         </ModalNote>
       ) : null}
@@ -826,7 +881,11 @@ function defaultName(value: string): string {
   const known = SUGGESTED.find((entry) => entry.url === value);
   if (known) return known.name;
   try {
-    const host = new URL(value).hostname.replace(/^(mcp|api|www)\./, "");
+    const hostname = new URL(value).hostname;
+    /* A host that names the product badly: `api.githubcopilot.com` is GitHub's
+       MCP server, and "Githubcopilot" prefixed on every tool reads as a typo. */
+    if (hostname === "api.githubcopilot.com") return "GitHub";
+    const host = hostname.replace(/^(mcp|api|www)\./, "");
     const label = host.split(".")[0] ?? host;
     return label ? label.charAt(0).toUpperCase() + label.slice(1) : "MCP server";
   } catch {

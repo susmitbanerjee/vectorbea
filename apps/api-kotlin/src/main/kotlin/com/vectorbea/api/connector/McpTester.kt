@@ -142,8 +142,26 @@ object McpTester {
             /* No credential was sent, so this is the server describing how to
                authenticate. Find out whether it publishes a sign-in. */
             val discovery = runCatching { McpOAuth(ApiMcpTransport).discover(serverUrl, e.challenge) }.getOrNull()
-            if (discovery != null) {
-                val host = runCatching { URI.create(discovery.authorizationServer.issuer).host }.getOrNull()
+            /*
+             * A published sign-in Vectorbea cannot USE is a token server.
+             *
+             * Signing in needs dynamic client registration (RFC 7591): without a
+             * `registration_endpoint` there is no way to obtain a client id short
+             * of somebody registering an OAuth app by hand. GitHub's remote MCP
+             * server is the common case — it publishes complete OAuth metadata
+             * with no registration endpoint. Offering "Sign in" there sent people
+             * to a button that could only fail, on a screen with no way back to
+             * a token. Say "token" up front instead, and say why.
+             */
+            val host = discovery?.let { runCatching { URI.create(it.authorizationServer.issuer).host }.getOrNull() }
+            if (discovery != null && discovery.authorizationServer.registrationEndpoint == null) {
+                ProbeResult(
+                    ConnectionTestResult.failed(latency, "TOKEN_REQUIRED",
+                        "Its sign-in${host?.let { " at $it" } ?: ""} only works with an app registered by hand, " +
+                        "so paste a personal access token from ${host ?: "the server's own settings"} instead."),
+                    AuthMode.TOKEN, authorizationServer = host,
+                )
+            } else if (discovery != null) {
                 ProbeResult(
                     ConnectionTestResult.failed(latency, "OAUTH_REQUIRED",
                         "This server uses sign-in. Sign in${host?.let { " with $it" } ?: ""} to connect it — " +

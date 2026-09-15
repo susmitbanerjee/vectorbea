@@ -77,6 +77,12 @@ private data class UpdateConnectionBody(
      */
     val protocol: String? = null,
     /**
+     * How the credential is presented. Changes when a connection saved for one
+     * method is finished with another — an MCP server saved while a sign-in was
+     * attempted, then connected with a pasted token.
+     */
+    val authType: String? = null,
+    /**
      * Plaintext secret accepted on patch (rotate in place).
      * Immediately encrypted — NEVER stored, logged, or returned.
      */
@@ -321,6 +327,7 @@ class ConnectionRoutes(
                 }
             }
         }
+        if (body.authType != null) requireOneOf(body.authType, "authType", AUTH_TYPES)
         if (body.protocol != null && body.protocol !in PROTOCOLS) {
             throw ApiError.ValidationError(
                 "`protocol` must be one of ${PROTOCOLS.joinToString(", ")}. It is the wire " +
@@ -350,6 +357,7 @@ class ConnectionRoutes(
             egressPolicy = body.egressPolicy,
             egressPolicySetBy = req.principal?.appUserId,
             protocol = body.protocol,
+            authType = body.authType,
         ) ?: throw ApiError.NotFound("Connection")
 
         audit?.recordUserAction(

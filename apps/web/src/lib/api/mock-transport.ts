@@ -1333,6 +1333,46 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       };
     },
   ],
+  /* A connection updated in place — the MCP dialog does this when a server saved
+     for sign-in is finished with a token instead. Without it the catch-all
+     `{ ok: true }` came back with no id, and every call after it addressed
+     `/api/connections/undefined`. */
+  [
+    "PATCH",
+    "/api/connections/:id",
+    (params, init) => {
+      const body = (init.body ?? {}) as { name?: string; authType?: string; plaintextSecret?: string };
+      const now = new Date().toISOString();
+      /* A fixture connection keeps its own identity; anything else is the MCP
+         server the dialog just created. */
+      const existing = CONNECTIONS.find((c) => uuidFrom(c.id) === String(params.id));
+      return {
+        id: String(params.id),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name: body.name ?? existing?.name ?? MCP_SERVER_NAME,
+        slug: existing?.id ?? String(params.id),
+        type: existing ? connectionTypeFor(existing.provider) : "mcp",
+        provider: existing?.provider ?? "mcp",
+        status: "connected",
+        networkStatus: "reachable",
+        authType: body.authType ?? "none",
+        secretConfigured: Boolean(body.plaintextSecret),
+        config: {},
+        allowedHosts: [],
+        allowedPaths: [],
+        allowedSchemas: [],
+        allowedTables: [],
+        lastTestedAt: now,
+        lastTestStatus: "ok",
+        lastTestLatencyMs: 200,
+        lastTestErrorCode: null,
+        lastTestErrorMessageSanitized: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+  ],
 
   /* ── Workflow writes ──────────────────────────────────────────────────────
      Without these, `POST /api/workflows` fell through to the catch-all echo at
@@ -1476,15 +1516,21 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       const url = (body.serverUrl ?? "").toLowerCase();
       const host = (() => { try { return new URL(body.serverUrl ?? "").host; } catch { return null; } })();
       const oauth = /higgsfield|notion|linear|sentry|oauth|atlassian|asana/.test(url);
-      const wantsToken = url.includes("token");
+      /* GitHub's remote server publishes OAuth metadata with no registration
+         endpoint, so the real probe answers "token" for it — mirrored here. */
+      const wantsToken = url.includes("token") || url.includes("githubcopilot");
       if (wantsToken && !body.token) {
         return {
           status: "failed", errorCode: "AUTH_REQUIRED", latencyMs: 180,
-          message: "This server needs a credential and does not publish a sign-in. Paste an access token from the server's own settings.",
+          message: url.includes("githubcopilot")
+            ? "Its sign-in at github.com only works with an app registered by hand, so paste a personal access token from github.com instead."
+            : "This server needs a credential and does not publish a sign-in. Paste an access token from the server's own settings.",
           auth: "token", serverName: null, authorizationServer: null, toolCount: null,
         };
       }
-      if (oauth) {
+      /* A token is tested as a token, as the real probe does — never answered
+         with "sign in", which would loop the dialog back to the token field. */
+      if (oauth && !body.token) {
         return {
           status: "failed", errorCode: "OAUTH_REQUIRED", latencyMs: 240,
           message: `This server uses sign-in. Sign in with ${host ?? "its provider"} to connect it — there is no token to paste.`,
