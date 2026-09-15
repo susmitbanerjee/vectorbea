@@ -306,16 +306,24 @@ SAFETY RULES:
         }
 
     /**
-     * The task, and today's date.
+     * The task, and the current time.
      *
      * A model does not know what day it is. Asked for "changes in the last 24h" it
      * guessed a year from its training data, queried commits since 2024, and then
-     * called a real commit "dated in the future". The DATE, not the time, so the
-     * prompt text is stable across a run's iterations and a day's resumes.
+     * called a real commit "dated in the future".
+     *
+     * The TIME, to the minute — not just the date. Given only "2026-09-15" the model
+     * read "the last 24 hours" as yesterday 00:00 to today 00:00, set `until` to
+     * midnight, and missed every commit pushed today, which is the commit anybody
+     * testing the workflow has just made.
      */
-    private fun objectiveText(config: AgentBrainConfig): String =
-        (config.taskInstruction ?: "Complete the task based on the provided inputs.") +
-            "\n\nToday's date (UTC): ${java.time.LocalDate.now(java.time.ZoneOffset.UTC)}"
+    private fun objectiveText(config: AgentBrainConfig): String {
+        val now = java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC)
+            .truncatedTo(java.time.temporal.ChronoUnit.MINUTES)
+        return (config.taskInstruction ?: "Complete the task based on the provided inputs.") +
+            "\n\nCurrent time (UTC): $now. For a period ending now (\"the last 24 hours\"), " +
+            "measure back from this time and do not cut it off at midnight."
+    }
 
     private fun budgetFooter(state: AgentLoopState): String {
         val warning = if (state.budget.iterationsUsed >= state.budget.maxIterations - 1)

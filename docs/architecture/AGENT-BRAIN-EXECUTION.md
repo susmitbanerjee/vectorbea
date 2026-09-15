@@ -311,10 +311,13 @@ Built on the canvas, a step's data lives in its own `config`:
   loop's prompt also asks for the answer in `finalOutput.content` when no output
   fields are declared, and a FINAL with an empty `finalOutput` keeps its
   reasoning summary as `content` rather than handing the next step `{}`.
-- **The loop is told today's date** (`objectiveText`, UTC date only, so the text
-  is stable across a run's iterations). Without it "the last 24h" was computed
-  from the model's training year.
-- **Commit SHAs are not redacted.** `AgentSafetyGuard` masks any 40+ character
+- **The loop is told the current time** (`objectiveText`, UTC, to the minute).
+  Without it "the last 24h" was computed from the model's training year; with the
+  date alone it was cut off at midnight and missed today's commits.
+- **A required tool input that resolved to nothing fails by name, before the
+  call** (`missingRequiredInputs`, from `tools.input_schema_json`, honouring
+  `boundParameters`). The message names the input and the `{{ steps… }}`
+  reference that was empty, instead of the provider's `no_text`.- **Commit SHAs are not redacted.** `AgentSafetyGuard` masks any 40+ character
   base64-alphabet run in tool results; exactly 40- or 64-character hex (git SHAs,
   SHA-256 digests) is now exempt, because a masked SHA was passed back to
   `get_commit` as the literal `[REDACTED]`.

@@ -40,3 +40,24 @@ class LlmProviderErrorTest {
         assertFalse(isOpenAiReasoningModel("groq", "https://api.groq.com/openai", "o3"))
     }
 }
+
+/** A required tool input that resolved to nothing fails by name, before the call. */
+class MissingToolInputTest {
+    private val schema = """{"type":"object","properties":{"text":{"type":"string"},"thread_ts":{"type":"string"}},"required":["text"]}"""
+
+    @Test
+    fun `an empty or absent required input is reported with the reference it came from`() {
+        assertEquals(listOf("text"), missingRequiredInputs(schema, mapOf("thread_ts" to "1"), emptyMap()))
+        assertEquals(listOf("text"), missingRequiredInputs(schema, mapOf("text" to "  "), emptyMap()))
+        val message = missingInputsMessage("Post a message (Slack)", listOf("text"),
+            mapOf("text" to "{{ steps.n-agent-3.output.message }}"))
+        assertTrue(message.contains("text comes from {{ steps.n-agent-3.output.message }}, which was empty"))
+    }
+
+    @Test
+    fun `a value fixed on the tool or supplied at call time satisfies it`() {
+        assertTrue(missingRequiredInputs(schema, mapOf("text" to "hi"), emptyMap()).isEmpty())
+        assertTrue(missingRequiredInputs(schema, emptyMap(), mapOf("boundParameters" to mapOf("text" to "fixed"))).isEmpty())
+        assertTrue(missingRequiredInputs(null, emptyMap(), emptyMap()).isEmpty())
+    }
+}

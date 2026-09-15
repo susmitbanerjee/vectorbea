@@ -179,6 +179,20 @@ class ToolNodeExecutor(
          *
          * Before TOOL_CALL_STARTED deliberately: a call held at a gate has not started.
          */
+        /*
+         * ── A REQUIRED INPUT THAT RESOLVED TO NOTHING ─────────────────────────
+         *
+         * A mapping that points at a field the earlier step never produced resolves
+         * to null, and the resolver drops the key. The call then went out anyway,
+         * and the failure came back in the provider's words — Slack's `no_text` —
+         * which names neither the input nor the reference that was empty. Checked
+         * before the approval gate, because asking a person to approve a call that
+         * cannot succeed wastes their decision.
+         */
+        missingRequiredInputs(tool.inputSchemaJson, resolvedInputs, tool.configJson)
+            .takeIf { it.isNotEmpty() }
+            ?.let { missing -> return NodeResult.Failed(missingInputsMessage(tool.name, missing, node.inputMapping)) }
+
         if (tool.requiresApproval) {
             approvalGate(node, tool, resolvedInputs, ctx)?.let { return it }
         }
@@ -750,6 +764,8 @@ class ToolNodeExecutor(
         val mcpToolName: String? = null,
         /** Locally-authored result contract. Overrides a server's annotations. */
         val resultContractJson: String? = null,
+        /** The tool's declared parameters, for the required-input check before a call. */
+        val inputSchemaJson: String? = null,
         /**
          * The declarative HTTP call (V064). Present means this tool executes on
          * [com.vectorbea.worker.tools.http.HttpToolResolver]; absent means it
@@ -765,7 +781,7 @@ class ToolNodeExecutor(
                    risk_level, requires_approval, timeout_ms,
                    named_queries_json, allow_freeform_sql,
                    mcp_server_connection_id, mcp_tool_name, result_contract_json,
-                   http_spec_json
+                   http_spec_json, input_schema_json
                    FROM tools
                    WHERE id = ? AND workspace_id = ? AND status = 'active'"""
             ).use { stmt ->
@@ -796,6 +812,7 @@ class ToolNodeExecutor(
                         mcpToolName = rs.getString("mcp_tool_name"),
                         resultContractJson = rs.getString("result_contract_json"),
                         httpSpecJson = rs.getString("http_spec_json"),
+                        inputSchemaJson = rs.getString("input_schema_json"),
                     )
                 }
             }
@@ -1644,4 +1661,34 @@ internal fun withBoundParameters(config: Map<String, Any?>, inputs: Map<String, 
     val bound = (config["boundParameters"] as? Map<String, Any?>)
         ?.filterValues { it != null }?.mapValues { it.value!! } ?: emptyMap()
     return if (bound.isEmpty()) inputs else inputs + bound
+}
+
+/**
+ * Required parameters of [inputSchemaJson] with no usable value: absent, null or
+ * blank in [inputs], and not fixed on the tool (`boundParameters`).
+ */
+internal fun missingRequiredInputs(
+    inputSchemaJson: String?,
+    inputs: Map<String, Any?>,
+    toolConfig: Map<String, Any?>,
+): List<String> {
+    if (inputSchemaJson.isNullOrBlank()) return emptyList()
+    val required = runCatching {
+        (com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+            .readValue(inputSchemaJson, Map::class.java)["required"] as? List<*>)
+            ?.filterIsInstance<String>()
+    }.getOrNull() ?: return emptyList()
+    @Suppress("UNCHECKED_CAST")
+    val bound = toolConfig["boundParameters"] as? Map<String, Any?> ?: emptyMap()
+    fun usable(v: Any?) = v != null && !(v is String && v.isBlank())
+    return required.filter { !usable(inputs[it]) && !usable(bound[it]) }
+}
+
+internal fun missingInputsMessage(toolName: String, missing: List<String>, mapping: Map<String, String>): String {
+    val parts = missing.joinToString("; ") { key ->
+        val ref = mapping[key]
+        if (ref.isNullOrBlank()) "$key is not set on the step's Inputs tab"
+        else "$key comes from $ref, which was empty — check that step returns that field"
+    }
+    return "'$toolName' needs ${missing.joinToString(", ")} and got nothing: $parts."
 }
