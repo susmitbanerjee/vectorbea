@@ -183,8 +183,18 @@ class AgentBrainRunner(
          * thousand tokens at worst, against a token budget the guard already enforces.
          * Large enough for the row sets and API responses these tools actually return;
          * small enough that one enormous response cannot eat the whole budget.
+         *
+         * Two thousand characters is a few rows, and it is not a commit diff: a
+         * code-review agent was shown the first 2,000 characters of a patch, asked
+         * for the same patch again, was handed the same cut copy by the step guard,
+         * and failed saying it could not see the diff. AGENT_TOOL_RESULT_MAX_CHARS
+         * raises it (default unchanged). Only the NEWEST result is shown at this
+         * size — the prompt builder shortens older ones to
+         * [AgentPromptBuilder.OLDER_RESULT_CHARS], so ten observations cannot
+         * add up to ten times the cap.
          */
-        internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
+        internal val MAX_TOOL_PAYLOAD_CHARS: Int =
+            System.getenv("AGENT_TOOL_RESULT_MAX_CHARS")?.toIntOrNull()?.coerceIn(500, 64_000) ?: 2_000
 
         /** The signal name free-text guidance arrives under. */
         internal const val GUIDANCE_SIGNAL = "guidance"
@@ -813,10 +823,12 @@ class AgentBrainRunner(
            LlmNodeExecutor's own default (the shared, bounded OutboundHttp client)
            applies and this construction is byte-for-byte what it always was. */
         if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity,
-            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource),
+            callPayloads = com.vectorbea.worker.events.StepIoCapture.storeFor(dataSource))
         else LlmNodeExecutor(connectionResolver, eventStore, httpClient = llmHttpClient,
             capacity = capacity,
-            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource),
+            callPayloads = com.vectorbea.worker.events.StepIoCapture.storeFor(dataSource))
     }
 
     data class RunResult(
@@ -3228,8 +3240,16 @@ class AgentBrainRunner(
             /* No projected form here on purpose: this is the stored raw result
                being replayed, and re-projecting it would mean loading the contract
                on a path whose whole point is not to do work again. The shape
-               summary is what the first execution's row already recorded. */
-            buildToolObservationSummary(toolId, cached), true,
+               summary is what the first execution's row already recorded.
+
+               The lead sentence is for the MODEL. Told only the shape again, an
+               agent that asked twice for a result it found incomplete asks a third
+               time and gets the same stored copy — the loop that ended a code
+               review in FAIL. It has to hear that repeating cannot help. */
+            "You already made this exact call in this run; this is the same stored result, " +
+                "and repeating it will not return anything new. Change the arguments " +
+                "(another page, fewer items) or answer with what you have. " +
+                buildToolObservationSummary(toolId, cached), true,
             payload = renderToolPayload(cached)))
     }
 

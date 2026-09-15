@@ -248,17 +248,6 @@ class WorkflowRuntime(
         private val mapper = com.fasterxml.jackson.databind.ObjectMapper()
 
         /**
-         * Store each step's resolved inputs and output on its `step` span.
-         *
-         * Without it the Debug tab can say an agent step ran and failed, but not what
-         * it was handed or what it returned — which for a pipeline of agents is the
-         * whole question. Written through [com.vectorbea.worker.events.PayloadStore],
-         * which redacts at the write boundary. Off by default (TRACE_STEP_IO_ENABLED).
-         */
-        internal val STEP_IO_CAPTURE_ENABLED: Boolean =
-            System.getenv("TRACE_STEP_IO_ENABLED")?.lowercase() == "true"
-
-        /**
          * Node types that reach outside Vectorbea and cannot be undone.
          *
          * Used only to word the gate warning. TOOL and AGENT are included because both
@@ -1598,7 +1587,7 @@ class WorkflowRuntime(
                     null // follow failure edge, continue
                 }
                 else -> {
-                    ExecutionResult.Failed("Node ${node.id} (${node.type}) failed: ${result.reason}")
+                    ExecutionResult.Failed("Step '${nodeLabel(node)}' failed: ${result.reason}")
                 }
             }
         }
@@ -1786,7 +1775,7 @@ class WorkflowRuntime(
         if (!escalationEnabled) {
             log.warn("[runtime] node {} asked to escalate but escalation is off — failing " +
                 "the run instead [runId={}]", node.id, ctx.runId)
-            return ExecutionResult.Failed("Node ${node.id} (${node.type}) failed: $reason")
+            return ExecutionResult.Failed("Step '${nodeLabel(node)}' failed: $reason")
         }
 
         val attempt = escalationCount(ctx.runId, node.id)
@@ -2715,11 +2704,12 @@ class WorkflowRuntime(
         }
     }
 
-    /** Where step inputs and outputs go when [STEP_IO_CAPTURE_ENABLED]. */
+    /**
+     * Where each step's resolved inputs and output go, on its `step` span. Null
+     * unless TRACE_STEP_IO_ENABLED — see [com.vectorbea.worker.events.StepIoCapture].
+     */
     private val stepPayloads: com.vectorbea.worker.events.PayloadStore? by lazy {
-        if (!STEP_IO_CAPTURE_ENABLED) null
-        else com.vectorbea.worker.events.PayloadStore(
-            dataSource, retentionDays = com.vectorbea.worker.events.RetentionLookup(dataSource)::daysFor)
+        com.vectorbea.worker.events.StepIoCapture.storeFor(dataSource)
     }
 
     /**

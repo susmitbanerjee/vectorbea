@@ -57,6 +57,16 @@ object AgentPromptBuilder {
     val CONTEXT_CHAR_BUDGET: Int =
         System.getenv("AGENT_CONTEXT_CHAR_BUDGET")?.toIntOrNull()?.coerceAtLeast(1_000) ?: 48_000
 
+    /**
+     * How much of an OLDER tool result stays in the prompt.
+     *
+     * The newest result is shown at the full tool-result cap, because it is what the
+     * agent is deciding from. Earlier ones were already read in full on the
+     * iteration they arrived; keeping each at full size would multiply the prompt by
+     * the ten observations it keeps. At the default cap this changes nothing.
+     */
+    const val OLDER_RESULT_CHARS = 2_000
+
     fun buildSystemPrompt(
         config: AgentBrainConfig,
         availableTools: List<ToolDescriptor>,
@@ -280,11 +290,18 @@ SAFETY RULES:
         return BuiltPrompt(text, assembled)
     }
 
-    private fun renderObservations(state: AgentLoopState): String =
-        state.observations.takeLast(10).joinToString("\n") { o ->
+    private fun renderObservations(state: AgentLoopState): String {
+        val recent = state.observations.takeLast(10)
+        return recent.withIndex().joinToString("\n") { (i, o) ->
             val head = "- Iter ${o.iterationNumber} [${o.actionType}${if (o.toolId != null) " tool=${o.toolId}" else ""}]: ${o.sanitizedSummary}"
-            if (o.payload != null) "$head\n  RESULT: ${o.payload}" else head
+            val payload = o.payload?.let { if (i == recent.lastIndex) it else shortenOlderResult(it) }
+            if (payload != null) "$head\n  RESULT: $payload" else head
         }
+    }
+
+    private fun shortenOlderResult(payload: String): String =
+        if (payload.length <= OLDER_RESULT_CHARS) payload
+        else payload.take(OLDER_RESULT_CHARS) + "… [shortened here; it was shown in full on the iteration it arrived]"
 
     /**
      * Guidance, marked as coming from a person and as being data.
@@ -340,14 +357,16 @@ SAFETY RULES:
         else ""
 
         val observationsSection = if (state.observations.isNotEmpty()) {
-            val obs = state.observations.takeLast(10).joinToString("\n") { o ->
+            val recent = state.observations.takeLast(10)
+            val obs = recent.withIndex().joinToString("\n") { (i, o) ->
                 val head = "- Iter ${o.iterationNumber} [${o.actionType}${if (o.toolId != null) " tool=${o.toolId}" else ""}]: ${o.sanitizedSummary}"
                 /* The result itself, not just the fact that there was one. Without this
                    line the model is told a tool call succeeded and told the NAMES of the
                    fields it returned, and is then expected to answer from data it has
                    never been shown. It cannot, and it says so — after spending its whole
                    iteration budget discovering it. */
-                if (o.payload != null) "$head\n  RESULT: ${o.payload}" else head
+                val payload = o.payload?.let { if (i == recent.lastIndex) it else shortenOlderResult(it) }
+                if (payload != null) "$head\n  RESULT: $payload" else head
             }
             "\n\nPREVIOUS OBSERVATIONS:\n$obs"
         } else ""

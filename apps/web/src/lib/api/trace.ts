@@ -418,6 +418,11 @@ export function createTraceApi(transport: Transport, workspaceId: string | null)
     iterations: (runId: string, signal?: AbortSignal) =>
       transport.request<{ runId: string; activations: ActivationDetail[] }>(
         `/api/runs/${runId}/trace/iterations`, req(signal)),
+
+    /** What one iteration's tool call returned in full, and the copy the agent was shown. */
+    iterationToolResult: (runId: string, iterationId: string, signal?: AbortSignal) =>
+      transport.request<{ result: PayloadRef | null; shown: PayloadRef | null }>(
+        `/api/runs/${runId}/trace/iterations/${iterationId}/tool-result`, req(signal)),
   };
 }
 

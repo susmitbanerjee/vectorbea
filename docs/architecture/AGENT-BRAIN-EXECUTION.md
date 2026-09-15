@@ -329,10 +329,25 @@ Built on the canvas, a step's data lives in its own `config`:
 - **A required tool input that resolved to nothing fails by name, before the
   call** (`missingRequiredInputs`, from `tools.input_schema_json`, honouring
   `boundParameters`). The message names the input and the `{{ steps… }}`
-  reference that was empty, instead of the provider's `no_text`.- **Commit SHAs are not redacted.** `AgentSafetyGuard` masks any 40+ character
+  reference that was empty, instead of the provider's `no_text`.
+- **Commit SHAs are not redacted.** `AgentSafetyGuard` masks any 40+ character
   base64-alphabet run in tool results; exactly 40- or 64-character hex (git SHAs,
   SHA-256 digests) is now exempt, because a masked SHA was passed back to
   `get_commit` as the literal `[REDACTED]`.
+- **Source paths are not redacted either** (`isFilePath`). Letters and slashes
+  are base64 alphabet, so every long Java/Kotlin path became `[REDACTED].java` and
+  a code-review agent could name no file. A match is kept when it reads like a
+  path: 2+ slash-separated segments, no `+`/`=`, digits under 20%, capitals under a
+  third of letters, and a vowel share of words (1 in 4, or 1 in 5 with a file
+  extension right after it). Random base64 is half capitals with about one vowel
+  in five letters, so real tokens still fail.
+- **A repeated identical tool call is named as one.** The step guard replays the
+  stored result; the observation now opens with "You already made this exact
+  call… repeating it will not return anything new", because an agent told only
+  the result's shape asked a third time and failed.
+- **Budget errors say where to raise the limit** ("Raise Total tokens under Step
+  limits on this step"), since the agent's max reply length is a different
+  setting and the two were confused.
 - **Provider errors say what they are.** A non-2xx LLM response keeps the
   provider's `error.message` (credential patterns masked, capped at 300 chars)
   instead of "HTTP 400". OpenAI reasoning models (`o*`, `gpt-5*`) are sent
@@ -396,7 +411,13 @@ action schema, the output schema if declared, and the safety rules.
 The observation payload matters: without it the model is told a tool call
 succeeded and told the *names* of the fields it returned, then asked to answer from
 data it has never seen. Payloads are sanitized and capped at
-`MAX_TOOL_PAYLOAD_CHARS` (2 000) per observation.
+`MAX_TOOL_PAYLOAD_CHARS` per observation: 2 000 by default, raised with
+`AGENT_TOOL_RESULT_MAX_CHARS` (500–64 000). Two thousand characters is a few rows
+and not a commit diff — a reviewer shown the first 2 000 characters of a patch
+asked for it again, got the same cut copy from the step guard, and failed. Only
+the NEWEST observation is shown at the cap; older ones are shortened to
+`OLDER_RESULT_CHARS` (2 000) in the prompt, so ten observations do not add up to
+ten times the cap. At the default cap nothing changes.
 
 ### The five actions
 

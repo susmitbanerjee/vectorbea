@@ -114,6 +114,13 @@ class LlmNodeExecutor(
      */
     private val pricing: com.vectorbea.worker.pricing.ModelPricing =
         com.vectorbea.worker.pricing.ModelPricing(null),
+    /**
+     * Where the prompt and the response of each call are recorded for the Debug tab.
+     * Null records nothing; production passes
+     * [com.vectorbea.worker.events.StepIoCapture.storeFor], which is null unless
+     * TRACE_STEP_IO_ENABLED.
+     */
+    private val callPayloads: com.vectorbea.worker.events.PayloadStore? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -749,6 +756,10 @@ class LlmNodeExecutor(
                     append("}")
                 },
                 tokensIn = result.tokensIn, tokensOut = result.tokensOut,
+                /* What the model was asked and what it answered, when step I/O
+                   capture is on. Only for a span that exists: no tracer, no record. */
+                inputRef = llmSpan?.let { captureCallText(context, renderPromptText(messages)) },
+                outputRef = llmSpan?.let { captureCallText(context, result.content) },
             )
         }
 
@@ -1414,6 +1425,29 @@ class LlmNodeExecutor(
             throw LlmCallException("Failed to parse Gemini response: ${e.javaClass.simpleName}")
         }
     }
+
+    // ── Call capture ──────────────────────────────────────────────────────────
+
+    /** A payload ref for [text], or null. Never throws: a lost record must not fail the call. */
+    private fun captureCallText(context: RuntimeContext, text: String?): String? {
+        val store = callPayloads ?: return null
+        if (text.isNullOrBlank()) return null
+        return runCatching {
+            store.capture(context.workspaceId, text, com.vectorbea.worker.events.PayloadStore.TEXT)?.ref
+        }.getOrNull()
+    }
+
+    /** The messages as a person reads them: each role as a heading over its text. */
+    private fun renderPromptText(messages: List<Map<String, Any>>): String =
+        messages.joinToString("\n\n") { m ->
+            val role = (m["role"] as? String ?: "message").uppercase()
+            val content = when (val c = m["content"]) {
+                is String -> c
+                null -> ""
+                else -> runCatching { mapper.writeValueAsString(c) }.getOrDefault(c.toString())
+            }
+            "$role:\n$content"
+        }
 
     // ── Message construction ──────────────────────────────────────────────────
 

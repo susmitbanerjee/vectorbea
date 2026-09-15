@@ -169,6 +169,7 @@ class TraceRoutes(
         router.get("/api/runs/:id/trace/critical-path",  ::criticalPath)
         router.get("/api/runs/:id/trace/graph",          ::graph)
         router.get("/api/runs/:id/trace/iterations",     ::iterations)
+        router.get("/api/runs/:id/trace/iterations/:iterationId/tool-result", ::iterationToolResult)
         router.sseGet("/api/runs/:id/trace/stream",      ::stream)
     }
 
@@ -481,6 +482,48 @@ class TraceRoutes(
         ))
     }
 
+    // ── GET /api/runs/{runId}/trace/iterations/{iterationId}/tool-result ─────
+
+    /**
+     * What a tool call returned, and what of it the model was shown.
+     *
+     * Two payloads, because they differ exactly when it matters: the full result is
+     * stored whole, and the model reads a projected, capped copy. "It said it could
+     * not see the diff" is answered by putting the two side by side. Keyed by
+     * iteration rather than by ref, so a caller can only reach refs this run's own
+     * iterations point at.
+     */
+    private fun iterationToolResult(req: Request): Response {
+        val (runId, wsId) = authorizedRun(req)
+        val iterationId = req.pathUUID("iterationId")
+        val refs = ds.connection.use { c ->
+            c.prepareStatement(
+                """SELECT tool_result_ref, observation_payload_ref
+                     FROM agent_iterations
+                    WHERE id = ? AND run_id = ? AND workspace_id = ?"""
+            ).use { st ->
+                st.setObject(1, iterationId); st.setObject(2, runId); st.setObject(3, wsId)
+                st.executeQuery().use { rs ->
+                    if (rs.next()) rs.getString(1) to rs.getString(2) else null
+                }
+            }
+        } ?: throw ApiError.NotFound("Iteration")
+        return Response.ok(mapOf(
+            "result" to resolvePayload(refs.first, wsId),
+            "shown" to resolvePayload(refs.second, wsId),
+        ))
+    }
+
+    /**
+     * Inline payloads are stored as a JSON value, so text comes back quoted and
+     * escaped — the panels rendered the quotes and escape sequences. A JSON
+     * string is unwrapped to its text; anything else is returned as stored.
+     */
+    private fun inlineText(raw: String?): String? {
+        if (raw == null || !raw.startsWith("\"")) return raw
+        return runCatching { com.vectorbea.api.http.mapper.readValue(raw, String::class.java) }.getOrDefault(raw)
+    }
+
     /**
      * A payload reference, resolved to content or to a fetch URL.
      *
@@ -517,7 +560,7 @@ class TraceRoutes(
                                collapsed panel can say how big a prompt is and
                                what was redacted from it without moving it. */
                             if (!withContent) put("contentWithheld", true)
-                            else if (storage == "inline") put("value", rs.getString("inline_value"))
+                            else if (storage == "inline") put("value", inlineText(rs.getString("inline_value")))
                             else put("url", signedUrl(ref, wsId))
                         }
                     }
@@ -621,20 +664,41 @@ class TraceRoutes(
             step != null       -> sb.append("step **${step.name}** ")
             else               -> sb.append("the run ")
         }
-        sb.append("could not complete **${span.name}**.")
 
-        // Where, precisely enough to find it.
-        val where = buildList {
-            step?.let { add("step `${it.name}`") }
-            activation?.let { add("activation `${it.name}` (depth ${chain.indexOf(it)})") }
-            span.iterationIndex?.let { add("iteration $it") }
-            add("${span.kind.replace('_', ' ')} `${span.name}`")
+        /*
+         * ── AN AGENT THAT GAVE UP IS NOT A CALL THAT BROKE ──────────────────
+         * When the span that failed is the agent's own loop — an iteration, the
+         * activation or the step — there is no callable to name, and the old
+         * sentence produced "could not complete **iteration 4** … → iteration 4 →
+         * iteration `iteration 4`" while the one useful fact, the agent's stated
+         * reason, sat on the step span unread. Say that reason instead.
+         */
+        val ownLoop = span.kind in setOf("iteration", "activation", "step")
+        val reason = (span.errorText() ?: step?.errorText())?.take(300)
+        if (ownLoop) {
+            if (reason != null) sb.append("stopped: **").append(reason).append("**.")
+            else sb.append("stopped.")
+            val at = span.iterationIndex
+            when {
+                at != null && step != null -> sb.append(" At iteration $at of step `${step.name}`.")
+                at != null -> sb.append(" At iteration $at.")
+                step != null -> sb.append(" Step `${step.name}`.")
+            }
+        } else {
+            sb.append("could not complete **${span.name}**.")
+
+            // Where, precisely enough to find it.
+            val where = buildList {
+                step?.let { add("step `${it.name}`") }
+                span.iterationIndex?.let { add("iteration $it") }
+                add("${span.kind.replace('_', ' ')} `${span.name}`")
+            }
+            sb.append(" ").append(where.joinToString(" → "))
+
+            // The actual error, not a category.
+            reason?.let { sb.append(" returned **").append(it.take(200)).append("**.") }
+                ?: sb.append(".")
         }
-        sb.append(" ").append(where.joinToString(" → "))
-
-        // The actual error, not a category.
-        span.errorText()?.let { sb.append(" returned **").append(it.take(200)).append("**.") }
-            ?: sb.append(".")
 
         // The class and the owner.
         if (verdict != null) {

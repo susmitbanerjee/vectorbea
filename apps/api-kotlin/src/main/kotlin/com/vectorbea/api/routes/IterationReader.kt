@@ -38,6 +38,9 @@ class IterationReader(private val ds: DataSource) {
 
         /** Below this there is no typical, only a previous value. */
         const val MIN_BASELINE_SAMPLE = 3
+
+        /** Budget rows in the order a reader scans them. */
+        private val DIMENSION_ORDER = listOf("tokens", "toolCalls", "iterations", "costCents", "timeoutMs")
     }
 
 
@@ -205,7 +208,14 @@ class IterationReader(private val ds: DataSource) {
                     agentName = b?.agentName ?: spans.agentNameFor(stepId),
                     status = b?.status,
                     stopReason = b?.stopReason,
-                    budgets = b?.budgets.orEmpty(),
+                    /* Tool calls are not in every worker's consumption record, and a
+                       meter reading 0 / 5 after three calls is worse than none. The
+                       iterations say how many there were. */
+                    budgets = b?.budgets.orEmpty().map { budget ->
+                        if (budget.dimension == "toolCalls" && "toolCalls" !in b!!.usedKeys)
+                            budget.copy(used = iters.count { it.actionType == "CALL_TOOL" }.toDouble())
+                        else budget
+                    },
                     replayedFrom = note?.replay,
                     baseline = agentId?.let { baselines[it] },
                     iterations = iters.map { r ->
@@ -493,6 +503,8 @@ class IterationReader(private val ds: DataSource) {
         val status: String?,
         val stopReason: String?,
         val budgets: List<Budget>,
+        /** Dimensions the worker actually recorded as spent, so a missing one can be counted. */
+        val usedKeys: Set<String> = emptySet(),
     )
 
     /**
@@ -527,9 +539,8 @@ class IterationReader(private val ds: DataSource) {
                                     agentName = rs.getString("agent_name"),
                                     status = rs.getString("status"),
                                     stopReason = rs.getString("stop_reason"),
-                                    budgets = (used.keys + alloc.keys).sorted().map { k ->
-                                        Budget(k, used[k] ?: 0.0, alloc[k])
-                                    },
+                                    budgets = pairBudgets(alloc, used),
+                                    usedKeys = used.keys,
                                 ))
                             }
                         }
@@ -616,6 +627,27 @@ class IterationReader(private val ds: DataSource) {
     }
 
     /** `{"tokens": 24000, "iterations": 5}` → a flat map of numbers. */
+    /**
+     * One row per dimension: what was spent beside its ceiling.
+     *
+     * The allocation is written as `maxIterations`, `maxToolCalls`, `maxTotalTokens`,
+     * `maxCostCents` and the consumption as `iterations`, `toolCalls`, `tokens`,
+     * `costCents`. Pairing on the raw key never matched, so the panel drew
+     * "Iterations 4, no ceiling" above "Max iterations 0 / 10" — every limit twice,
+     * each half empty.
+     */
+    internal fun pairBudgets(alloc: Map<String, Double>, used: Map<String, Double>): List<Budget> {
+        val limits = alloc.mapKeys { (k, _) -> dimensionOf(k) }
+        return (used.keys + limits.keys).distinct().sortedBy { DIMENSION_ORDER.indexOf(it).let { i -> if (i < 0) 99 else i } }
+            .map { k -> Budget(k, used[k] ?: 0.0, limits[k]) }
+    }
+
+    private fun dimensionOf(allocKey: String): String = when (allocKey) {
+        "maxTotalTokens", "maxTokens" -> "tokens"
+        else -> if (allocKey.startsWith("max") && allocKey.length > 3)
+            allocKey.substring(3).replaceFirstChar { it.lowercaseChar() } else allocKey
+    }
+
     private fun flatNumbers(json: String?): Map<String, Double> {
         val j = json ?: return emptyMap()
         return Regex("\"([a-zA-Z_]{1,40})\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)")

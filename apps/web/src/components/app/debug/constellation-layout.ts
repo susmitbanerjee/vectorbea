@@ -275,7 +275,10 @@ export function layout(c: Constellation): Layout {
    * stacked them into one column. They ran one after another; a row in run order
    * says that, and leaves room for each name.
    */
-  if (c.derived && c.nodes.length > 1 && c.nodes.every((n) => n.depth <= 0)) {
+  /* Recorded activations with no handoffs between them are the same picture:
+     separate steps of one workflow, not a team. */
+  const levels = new Set(c.nodes.map((n) => Math.max(0, n.depth)));
+  if (c.nodes.length > 1 && c.edges.length === 0 && levels.size === 1) {
     const ordered = [...c.nodes].sort((a, b) => startMs(a) - startMs(b));
     const maxTokens = Math.max(0, ...ordered.map((n) => n.tokens ?? 0));
     const y = PAD_Y + LANE_HEIGHT / 2;

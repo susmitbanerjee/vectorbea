@@ -141,7 +141,8 @@ class AgentNodeExecutor(
                a single-call agent too. Null in production. */
             httpClient = llmHttpClient ?: com.vectorbea.worker.net.OutboundHttp.client,
             capacity = capacity,
-            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource))
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource),
+            callPayloads = com.vectorbea.worker.events.StepIoCapture.storeFor(dataSource))
     }
 
     override suspend fun execute(

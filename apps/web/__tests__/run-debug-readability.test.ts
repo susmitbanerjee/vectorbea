@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { customStepTimeoutMs, defaultStepTimeoutMs } from "~/lib/workflows/step-timeouts";
 import { layout, type Constellation, type ConstellationNode } from "~/components/app/debug/constellation-layout";
 import { toFields } from "~/components/app/debug/step-io-panel";
+import { pairBudgets, readablePayload } from "~/components/app/debug/iterations-view";
 
 describe("canvas timeout chip", () => {
   it("stays silent for defaults and for steps that do no work", () => {
@@ -60,5 +61,56 @@ describe("step payload fields", () => {
 
   it("keeps text that is not JSON", () => {
     expect(toFields("plain words")).toEqual([{ key: "Content", kind: "text", text: "plain words" }]);
+  });
+
+  it("unwraps a payload stored as a JSON string", () => {
+    const stored = JSON.stringify(JSON.stringify({ title: "latest commit", files: [] }));
+    expect(toFields(stored)).toEqual([
+      { key: "title", kind: "value", text: "latest commit" },
+      { key: "files", kind: "empty", text: "" },
+    ]);
+  });
+});
+
+describe("recorded agent steps with no handoffs", () => {
+  it("are drawn in a row too, not a column", () => {
+    const c: Constellation = {
+      runId: "r", edges: [], cycles: [],
+      nodes: [
+        { ...agentNode("scout", "2026-09-15T10:00:00Z", 9_600), depth: 1 },
+        { ...agentNode("reviewer", "2026-09-15T10:01:00Z", 21_000), depth: 1 },
+      ],
+    };
+    const l = layout(c);
+    expect(l.nodes[0]!.y).toBe(l.nodes[1]!.y);
+    expect(l.sequence).toHaveLength(1);
+  });
+});
+
+describe("budget meter", () => {
+  it("pairs each limit with what was spent, and counts tool calls when unrecorded", () => {
+    const rows = pairBudgets([
+      { dimension: "costCents", used: 3, limit: null },
+      { dimension: "iterations", used: 4, limit: null },
+      { dimension: "maxCostCents", used: 0, limit: 50 },
+      { dimension: "maxIterations", used: 0, limit: 10 },
+      { dimension: "maxToolCalls", used: 0, limit: 5 },
+      { dimension: "maxTotalTokens", used: 0, limit: 16_384 },
+      { dimension: "tokens", used: 18_700, limit: null },
+    ], 3);
+    expect(rows).toEqual([
+      { dimension: "tokens", used: 18_700, limit: 16_384 },
+      { dimension: "toolCalls", used: 3, limit: 5 },
+      { dimension: "iterations", used: 4, limit: 10 },
+      { dimension: "costCents", used: 3, limit: 50 },
+    ]);
+  });
+});
+
+describe("stored payload text", () => {
+  it("is unwrapped and indented", () => {
+    expect(readablePayload(JSON.stringify("USER:\nReview this"))).toBe("USER:\nReview this");
+    expect(readablePayload('{"a":1}')).toBe('{\n  "a": 1\n}');
+    expect(readablePayload("… cut {")).toBe("… cut {");
   });
 });

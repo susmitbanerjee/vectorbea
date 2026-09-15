@@ -198,7 +198,11 @@ export function ActivityView({
               }}
             />
 
-            <BudgetGauges budgets={activation.budgets} stopReason={activation.stopReason} />
+            <BudgetGauges
+              budgets={activation.budgets}
+              stopReason={activation.stopReason}
+              toolCalls={activation.iterations.filter((i) => i.actionType === "CALL_TOOL").length}
+            />
           </div>
 
           <div className="min-w-0 flex-1">

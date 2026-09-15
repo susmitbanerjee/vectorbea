@@ -32,4 +32,21 @@ class ToolOutputRedactionTest {
         // 41 hex characters is not a digest length, so it is not exempt.
         assertFalse(guard.sanitizeToolOutput("a".repeat(41), 10_000).contains("a".repeat(41)))
     }
+
+    @Test
+    fun `source file paths reach the agent intact, slash-bearing keys do not`() {
+        val java = "src/main/java/com/susmitbanerjee/qrx/service/UserServiceImpl"
+        val dir = "packages/graph-kotlin/src/main/kotlin/com/vectorbea/graph"
+        val out = guard.sanitizeToolOutput(
+            """{"files":["$java.java (modified)"],"patch":"diff --git a/$java.java b/$java.java --- a/$dir/WorkflowGraph.kt"}""",
+            10_000)
+        assertTrue(out.contains("$java.java") && out.contains("$dir/WorkflowGraph.kt"), out)
+        assertFalse(out.contains("[REDACTED]"), out)
+
+        val randomKey = "Zq8JfYk2PxW7hRtB3nLc/V9dGm4TsK1QwXyHjNb/Rp6aE"
+        val capitals = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY/abc/def.txt"
+        val redacted = guard.sanitizeToolOutput("""{"a":"$randomKey","b":"$capitals"}""", 10_000)
+        assertFalse(redacted.contains(randomKey), redacted)
+        assertFalse(redacted.contains("wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY"), redacted)
+    }
 }

@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import type { PayloadRef, SpanDetail, TraceApi, TraceSpan } from "~/lib/api/trace";
+import { parseRedactions } from "./iterations-view";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WHAT ONE STEP RECEIVED AND RETURNED.
@@ -93,6 +94,8 @@ const STATUS: Record<string, string> = {
 
 function PayloadFields({ title, present, payload }: { title: string; present: boolean; payload: PayloadRef | null }) {
   const fields = React.useMemo(() => (payload?.value ? toFields(payload.value) : null), [payload?.value]);
+  /* The column holds "[]" when nothing was masked, which is not a redaction. */
+  const masked = parseRedactions(payload?.redactions);
 
   return (
     <div className="min-w-0">
@@ -112,7 +115,7 @@ function PayloadFields({ title, present, payload }: { title: string; present: bo
           fields.map((f) => <FieldBlock key={f.key} field={f} />)
         )}
         {payload?.truncated ? <Text variant="caption" tone="muted">Shortened before it was stored.</Text> : null}
-        {payload?.redactions ? <Text variant="caption" tone="muted">Some values were masked.</Text> : null}
+        {masked.length > 0 ? <Text variant="caption" tone="muted">Masked: {masked.join(", ")}</Text> : null}
       </div>
     </div>
   );
@@ -150,6 +153,16 @@ export function toFields(raw: string): Field[] | null {
     parsed = JSON.parse(raw);
   } catch {
     return raw.trim() ? [{ key: "Content", kind: "text", text: raw }] : null;
+  }
+  /* Stored text comes back JSON-encoded from an older API: a string whose content
+     is itself the JSON object. Unwrap once so its fields are labelled. */
+  if (typeof parsed === "string") {
+    const text = parsed;
+    const inner = text.trim();
+    if (!inner) return null;
+    if (inner.startsWith("{") || inner.startsWith("[")) {
+      try { parsed = JSON.parse(inner); } catch { return [{ key: "Content", kind: "text", text }]; }
+    }
   }
   if (parsed === null || parsed === undefined) return null;
   if (typeof parsed !== "object" || Array.isArray(parsed)) return [fieldOf("Content", parsed)];

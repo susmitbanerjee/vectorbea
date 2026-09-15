@@ -140,7 +140,13 @@ export function IterationsView({
           ))}
         </ol>
 
-        {activation && <BudgetGauges budgets={activation.budgets} stopReason={activation.stopReason} />}
+        {activation && (
+          <BudgetGauges
+            budgets={activation.budgets}
+            stopReason={activation.stopReason}
+            toolCalls={activation.iterations.filter((i) => i.actionType === "CALL_TOOL").length}
+          />
+        )}
 
         {/* The prompt diff — usually the fastest route to "the model never got
             the data it needed". */}
@@ -311,11 +317,14 @@ export function ReplayBanner({ note }: { note: { reason: string; detail: string 
  * absent one.
  */
 export function BudgetGauges({
-  budgets, stopReason,
+  budgets: raw, stopReason, toolCalls,
 }: {
   budgets: IterationBudget[];
   stopReason: string | null;
+  /** Tool calls counted from the iterations, for a worker that did not record them. */
+  toolCalls?: number;
 }) {
+  const budgets = pairBudgets(raw, toolCalls);
   if (budgets.length === 0) {
     return (
       <div className="border-t border-subtle pt-3">
@@ -339,6 +348,41 @@ export function BudgetGauges({
       )}
     </div>
   );
+}
+
+/**
+ * One row per dimension, spent beside its ceiling.
+ *
+ * Ceilings arrive as `maxIterations` / `maxTotalTokens` and spend as `iterations`
+ * / `tokens`. Drawn as they came, every limit appeared twice — "Tokens 18.7k, no
+ * ceiling" above "Max total tokens – / 16.4k" — and neither row said the agent had
+ * run out. Newer APIs pair them already; this keeps older ones readable.
+ */
+export function pairBudgets(budgets: IterationBudget[], toolCalls?: number): IterationBudget[] {
+  const byDimension = new Map<string, IterationBudget>();
+  for (const b of budgets) {
+    const isCeiling = /^max[A-Z]/.test(b.dimension);
+    const key = isCeiling ? dimensionOfCeiling(b.dimension) : b.dimension;
+    const row = byDimension.get(key) ?? { dimension: key, used: 0, limit: null };
+    if (isCeiling) row.limit = b.limit;
+    else { row.used = b.used; if (b.limit != null) row.limit = b.limit; }
+    byDimension.set(key, row);
+  }
+  const calls = byDimension.get("toolCalls");
+  if (calls && calls.used === 0 && toolCalls) calls.used = toolCalls;
+  const order = ["tokens", "toolCalls", "iterations", "costCents"];
+  return [...byDimension.values()].sort((a, b) => rank(order, a.dimension) - rank(order, b.dimension));
+}
+
+function dimensionOfCeiling(key: string): string {
+  if (key === "maxTotalTokens" || key === "maxTokens") return "tokens";
+  const rest = key.slice(3);
+  return rest.charAt(0).toLowerCase() + rest.slice(1);
+}
+
+function rank(order: string[], key: string): number {
+  const i = order.indexOf(key);
+  return i < 0 ? order.length : i;
 }
 
 /**
@@ -393,7 +437,7 @@ function Gauge({ budget: b }: { budget: IterationBudget }) {
         </div>
       ) : (
         /* No ceiling: say so once, rather than drawing a bar against nothing. */
-        <span className="text-[10px] text-fg-muted">no ceiling granted</span>
+        <span className="text-[10px] text-fg-muted">no limit</span>
       )}
     </div>
   );
@@ -480,7 +524,7 @@ export function IterationDetail({
         beside={<ParsedAction iteration={it} />}
       />
 
-      {(it.toolCall || it.actionType === "CALL_TOOL") && <ToolCall iteration={it} />}
+      {(it.toolCall || it.actionType === "CALL_TOOL") && <ToolCall api={api} runId={runId} iteration={it} />}
 
       <Observation iteration={it} />
 
@@ -544,7 +588,7 @@ function ParsedAction({ iteration: it }: { iteration: Iteration }) {
  * previous result, so a reader shown it without a marker believes the tool ran
  * now — and concludes the external system is serving stale data.
  */
-function ToolCall({ iteration: it }: { iteration: Iteration }) {
+function ToolCall({ api, runId, iteration: it }: { api: TraceApi; runId: string; iteration: Iteration }) {
   const call = it.toolCall;
   const cached = it.toolResultCached === true;
   const args = extractField(it.actionJson, "toolInput");
@@ -579,15 +623,14 @@ function ToolCall({ iteration: it }: { iteration: Iteration }) {
       {cached && (
         <div className="mb-2 rounded-sm border border-status-waiting-border bg-status-waiting-subtle px-2 py-1.5">
           <Text variant="caption" className="text-status-waiting">
-            The step guard found an identical earlier call and replayed its result.
-            The tool was not contacted on this attempt, so what the model read
-            below is the OLDER result — the external system may since have changed.
+            Same call as an earlier iteration, so its stored result was reused. The
+            tool was not called again.
           </Text>
         </div>
       )}
 
       <Field label="Tool">
-        {call?.name ?? it.selectedToolId ?? "—"}
+        {it.toolName ?? call?.name ?? "A tool that no longer exists"}
       </Field>
       <Field label="Arguments">
         {args ? (
@@ -596,22 +639,81 @@ function ToolCall({ iteration: it }: { iteration: Iteration }) {
           </pre>
         ) : "—"}
       </Field>
-      <Field label="Result">
-        {it.observation ?? "—"}
-        {it.observationSuccess === false && (
-          <span className="ml-2 text-status-failed">failed</span>
-        )}
-      </Field>
-
-      {/* The tool result is a payload, not a string. Named so the reader knows
-          the full thing exists rather than assuming the summary is all of it. */}
-      {it.toolCall?.hasOutput && (
-        <Text variant="caption" className="mt-1 block text-fg-muted">
-          The full result is stored separately — open it from the waterfall row
-          for this call.
-        </Text>
-      )}
+      {it.observationSuccess === false ? (
+        <Field label="Result">
+          <span className="text-status-failed">{it.observation ?? "Failed"}</span>
+        </Field>
+      ) : null}
+      <ToolResult api={api} runId={runId} iterationId={it.id} />
     </Section>
+  );
+}
+
+/**
+ * What the tool returned, and what of it the agent was shown.
+ *
+ * The pair answers the question behind most failed tool-using runs: did the tool
+ * not have the data, or did the agent never see it? The agent reads a capped copy,
+ * so when the two differ that is said in one line above the full result.
+ */
+function ToolResult({ api, runId, iterationId }: { api: TraceApi; runId: string; iterationId: string }) {
+  const [open, setOpen] = React.useState(false);
+  const [data, setData] = React.useState<{ result: PayloadRef | null; shown: PayloadRef | null } | null>(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  const toggle = () => {
+    setOpen((v) => !v);
+    if (data || loading) return;
+    setLoading(true);
+    api.iterationToolResult(runId, iterationId)
+      .then(setData)
+      .catch((e: unknown) => { if (!isAborted(e)) setError(messageOf(e)); })
+      .finally(() => setLoading(false));
+  };
+
+  const shownLength = data?.shown?.value?.length ?? null;
+  const fullLength = data?.result?.value?.length ?? data?.result?.sizeBytes ?? null;
+  const cut = data?.shown?.value?.includes("[truncated") === true
+    || (shownLength != null && fullLength != null && shownLength < fullLength * 0.9);
+
+  return (
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        className={cn(
+          "rounded-xs px-1 text-xs text-fg-link",
+          "transition-opacity hover:opacity-80 motion-reduce:transition-none",
+          "focus-visible:focus-ring",
+        )}
+      >
+        {open ? "Hide result" : "Show result"}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {loading ? (
+            <div className="h-16 animate-pulse rounded-sm bg-surface-sunken motion-reduce:animate-none" />
+          ) : error ? (
+            <Text variant="caption" className="text-status-failed">{error}</Text>
+          ) : !data?.result && !data?.shown ? (
+            <Text variant="caption" className="block text-fg-muted">No result was stored for this call.</Text>
+          ) : (
+            <>
+              {cut && (
+                <div className="rounded-sm border border-status-waiting-border bg-status-waiting-subtle px-2 py-1.5">
+                  <Text variant="caption" className="text-status-waiting">
+                    The agent saw only the first {shownLength?.toLocaleString()} characters of this result.
+                  </Text>
+                </div>
+              )}
+              <PayloadBody payload={data?.result ?? data?.shown ?? null} />
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -800,8 +902,8 @@ function PayloadBody({ payload }: { payload: PayloadRef | null }) {
         </Text>
       )}
       {payload.value ? (
-        <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-sm bg-surface-sunken p-2 font-mono text-[11px] text-fg-primary">
-          {payload.value}
+        <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-surface-sunken p-2 font-mono text-[11px] text-fg-primary">
+          {readablePayload(payload.value)}
         </pre>
       ) : payload.url ? (
         <Text variant="caption" className="block text-fg-muted">
@@ -1041,6 +1143,30 @@ function statusOf(it: Iteration): string {
   }
 }
 
+/**
+ * Stored text as a person reads it.
+ *
+ * An older API returns inline text still JSON-encoded — quoted, with `\n` escapes —
+ * and a tool result arrives as one long JSON line. Unwrap the string, then indent
+ * JSON; anything else is shown as it is.
+ */
+export function readablePayload(value: string): string {
+  let text = value;
+  if (text.startsWith("\"")) {
+    try {
+      const inner: unknown = JSON.parse(text);
+      if (typeof inner === "string") text = inner;
+    } catch { /* not a JSON string — show as stored */ }
+  }
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch { /* cut or not JSON — show as stored */ }
+  }
+  return text;
+}
+
 function isAborted(e: unknown): boolean {
   if (e instanceof Error && e.name === "AbortError") return true;
   return typeof e === "object" && e !== null && (e as { kind?: string }).kind === "aborted";
@@ -1050,7 +1176,7 @@ function messageOf(e: unknown): string {
   return e instanceof Error ? e.message : "Could not load the iterations.";
 }
 
-function parseRedactions(raw: string | null | undefined): string[] {
+export function parseRedactions(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as Array<{ label: string; count: number }>;
