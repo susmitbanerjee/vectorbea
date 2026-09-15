@@ -304,6 +304,62 @@ function ToolConfig({ node, set, setMany }: {
 
 /* ── Agent ────────────────────────────────────────────────────────────────── */
 
+/**
+ * The step's own budget, written to `config.budget` — the only place the worker
+ * reads a total-token ceiling from (`AgentNodeExecutor.stepBudget`). Empty fields
+ * keep the defaults: 16,384 tokens, and the agent's own tool-call and cost limits.
+ */
+function StepLimits({ config, setMany }: {
+  config: Record<string, unknown>;
+  setMany: (patch: Record<string, unknown>) => void;
+}) {
+  const budget = (config.budget ?? {}) as Record<string, unknown>;
+  const setBudget = (key: string, raw: string) => {
+    const value = raw.trim() === "" ? undefined : Math.max(1, Math.round(Number(raw)));
+    const next = { ...budget, [key]: Number.isFinite(value) ? value : undefined };
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    setMany({ budget: Object.keys(next).length > 0 ? next : null });
+  };
+  const cost = typeof budget.maxCostCents === "number" ? String(budget.maxCostCents / 100) : "";
+
+  return (
+    <Section
+      title="Limits for this step"
+      help="The step stops when it reaches any of these. An agent that reads code or long results needs a larger token budget."
+    >
+      <div className="grid grid-cols-3 gap-2">
+        <Field label="Total tokens" help="Across every reply and tool result. Default 16,384.">
+          <Input
+            type="number" min={1000} step={1000}
+            value={typeof budget.maxTotalTokens === "number" ? String(budget.maxTotalTokens) : ""}
+            onChange={(e) => setBudget("maxTotalTokens", e.target.value)}
+            placeholder="16384"
+            className="h-7 text-body-sm"
+          />
+        </Field>
+        <Field label="Tool calls" help="Default: the agent's limit.">
+          <Input
+            type="number" min={1}
+            value={typeof budget.maxToolCalls === "number" ? String(budget.maxToolCalls) : ""}
+            onChange={(e) => setBudget("maxToolCalls", e.target.value)}
+            placeholder="5"
+            className="h-7 text-body-sm"
+          />
+        </Field>
+        <Field label="Cost ($)" help="Default: the agent's limit.">
+          <Input
+            type="number" min={0.01} step={0.05}
+            value={cost}
+            onChange={(e) => setBudget("maxCostCents", e.target.value === "" ? "" : String(Number(e.target.value) * 100))}
+            placeholder="0.50"
+            className="h-7 text-body-sm"
+          />
+        </Field>
+      </div>
+    </Section>
+  );
+}
+
 function AgentConfig({ node, set, setMany }: {
   node: VersionNode;
   set: (k: string, v: unknown) => void;
@@ -395,6 +451,8 @@ function AgentConfig({ node, set, setMany }: {
           Data from earlier steps is passed with it — add that on the Inputs tab.
         </Text>
       </Section>
+
+      <StepLimits config={config} setMany={setMany} />
 
       <Section title="Generation" help="How the model is sampled for this step.">
         <div className="grid grid-cols-2 gap-2">

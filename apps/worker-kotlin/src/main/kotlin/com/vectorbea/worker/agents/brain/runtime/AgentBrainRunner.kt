@@ -2811,7 +2811,7 @@ class AgentBrainRunner(
         val cleaned = rawContent.trim()
             .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         return try {
-            mapper.readValue(cleaned, AgentAction::class.java)
+            ActionParsing.parse(cleaned)
         } catch (e: Exception) {
             log.warn("[brain] failed to parse action iter={}: {}", state.iteration, e.message)
             /* A THINK as repair, so the loop can continue or fail gracefully —

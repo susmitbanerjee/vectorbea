@@ -282,6 +282,18 @@ the agent row does not override them:
 | `maxCostCents` | 50 |
 | `timeoutMs` | 120 000 |
 
+`maxTotalTokens`, `maxToolCalls` and `maxCostCents` come from the STEP's
+`config.budget` when set (the builder's "Limits for this step", and the workflow
+templates), otherwise 16,384 tokens (`AGENT_MAX_TOTAL_TOKENS_DEFAULT` overrides it
+fleet-wide) and the agent row's tool-call and cost limits. `maxTotalTokens` had no
+source before and was always 16,384, whatever the step or agent said. The agent
+editor's "Max tokens" is the per-reply `max_tokens`, a different number.
+
+Actions are parsed by `ActionParsing`: an explicit `null` for a defaulted field is
+the default, a missing `type` is inferred from `toolId` / `finalOutput` /
+`failReason`, a one-level `{"action": {...}}` wrapper is unwrapped, and enum case is
+ignored. Each of those used to cost a repair THINK iteration.
+
 `taskInstruction` falls back through node config (`taskInstruction`, then the
 builder's older `taskOverride`) → `taskInstruction` → `task` → `prompt` → `input`
 in resolved inputs, so an agent fed by input mapping still gets its task.

@@ -601,7 +601,8 @@ export function AgentEditor({
         </Field>
         <div className="grid gap-4 md:grid-cols-2">
           <Field
-            label="Max tokens"
+            label="Max reply length"
+            description="Tokens in one model reply, not the whole run. Keep it within the model's limit (gpt-4o: 16,000) or the call is refused. The run's total is set per step in the workflow."
             error={!(Number.isInteger(maxTokensValue) && maxTokensValue > 0) ? "Must be a whole number above zero." : undefined}
           >
             <Input mono type="number" min={1} value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />

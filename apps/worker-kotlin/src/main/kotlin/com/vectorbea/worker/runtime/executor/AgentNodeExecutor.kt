@@ -610,6 +610,7 @@ class AgentNodeExecutor(
                 com.vectorbea.worker.agents.skills.ActivationSkillRecorder(dataSource),
         )
 
+        val budget = stepBudget(node.config)
         val config = AgentBrainConfig(
             agentId         = UUID.fromString(agent.id),
             workspaceId     = ctx.workspaceId,
@@ -624,8 +625,14 @@ class AgentNodeExecutor(
             temperature     = agent.temperature ?: 0.2,
             maxTokens       = agent.maxTokens ?: 2048,
             maxIterations   = agent.maxIterations,
-            maxToolCalls    = agent.maxToolCalls,
-            maxCostCents    = agent.maxCostCents,
+            /* The step's own budget wins over the agent's defaults. `maxTotalTokens`
+               had no source at all — it was always AgentBrainConfig's 16,384, so a
+               tool-using agent reading commit diffs failed at iteration 5 whatever
+               anyone configured, and the `budget` the workflow templates write on
+               the step was never read. */
+            maxToolCalls    = budget.maxToolCalls ?: agent.maxToolCalls,
+            maxTotalTokens  = budget.maxTotalTokens ?: DEFAULT_MAX_TOTAL_TOKENS,
+            maxCostCents    = budget.maxCostCents ?: agent.maxCostCents,
             /* The same fallback chain the single-shot path uses. Without it, routing
                an agent here that supplied its task through input mapping rather than
                a node-level field would drop the task entirely and prompt the model
@@ -962,3 +969,32 @@ internal fun withFullReply(output: Map<String, Any>): Map<String, Any> {
         } catch (_: Exception) { output.toString() }
     return output + ("content" to text)
 }
+
+/* ── The step's own budget ──────────────────────────────────────────────────
+   `config.budget` on an agent step: `{ maxTotalTokens, maxToolCalls, maxCostCents }`.
+   Written by the builder's Configure tab and by the workflow templates. Values
+   outside a sane range are clamped rather than refused, because a typo here should
+   bound a run, not break it. */
+
+internal data class StepBudget(val maxTotalTokens: Int?, val maxToolCalls: Int?, val maxCostCents: Int?)
+
+internal fun stepBudget(config: Map<String, Any?>): StepBudget {
+    val raw = config["budget"] as? Map<*, *> ?: return StepBudget(null, null, null)
+    fun int(key: String, min: Int, max: Int) =
+        (raw[key] as? Number)?.toLong()?.takeIf { it > 0 }?.coerceIn(min.toLong(), max.toLong())?.toInt()
+    return StepBudget(
+        maxTotalTokens = int("maxTotalTokens", 1_000, 2_000_000),
+        maxToolCalls = int("maxToolCalls", 1, 200),
+        maxCostCents = int("maxCostCents", 1, 100_000),
+    )
+}
+
+/**
+ * The total-token ceiling for an agent step that sets none.
+ *
+ * Unchanged at 16,384 unless AGENT_MAX_TOTAL_TOKENS_DEFAULT says otherwise, so no
+ * existing step gets a larger budget on deploy. The step's own budget, or this
+ * variable, is how it is raised.
+ */
+internal val DEFAULT_MAX_TOTAL_TOKENS: Int =
+    System.getenv("AGENT_MAX_TOTAL_TOKENS_DEFAULT")?.toIntOrNull()?.takeIf { it >= 1_000 } ?: 16_384
