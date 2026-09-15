@@ -161,7 +161,16 @@ class ToolRoutes(
 
         when (type) {
             "http" -> {
-                if (httpSpecJson == null) {
+                /* A catalogue operation (Slack "Post a message", Teams, GitHub…)
+                   stores the vendor's PATH — or nothing, for a channel webhook
+                   whose connection URL is the destination — and takes its host
+                   from the connection. Demanding an absolute URL here refused
+                   every one of them at Validate while Register accepted them. */
+                val catalogueOperation = config["operationId"] is String && body.connectionId != null
+                if (httpSpecJson == null && catalogueOperation) {
+                    val method = (config["method"] as? String)?.uppercase() ?: "GET"
+                    requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
+                } else if (httpSpecJson == null) {
                     val url = requireField(config["url"] as? String, "config.url")
                     val uri = runCatching { java.net.URI(url) }.getOrElse {
                         throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")

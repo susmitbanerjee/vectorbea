@@ -320,6 +320,72 @@ every re-import until people stop reading the queue.
 
 ---
 
+## 4a. Catalogue operations and messaging
+
+Most people never write a spec. They pick an app on the first step of **Register a
+tool** — Slack, Microsoft Teams, Google Chat, Discord, and any other catalogue app
+the workspace has connected — then what the tool does there. That produces a legacy
+`type: "http"` tool (no `http_spec_json`) whose config the worker reads directly:
+
+| `config` key | Meaning |
+|---|---|
+| `method`, `url` | The vendor's method and PATH. The host comes from the connection. |
+| `operationId` | Which catalogue operation (`slack.post`, `teams.post`…). Also what lets `POST /api/tools/test-unsaved` accept a path rather than an absolute URL. |
+| `boundParameters` | Values fixed at registration (a Slack channel, an email recipient). |
+| `body` | Optional body template (`{{param}}` placeholders) when the vendor's body is not the parameters by name — a Teams Adaptive Card. |
+
+**Fixed values win.** `ToolNodeExecutor.withBoundParameters` merges
+`boundParameters` OVER the caller's inputs. A channel fixed on the tool is the
+operator deciding where it may post; an agent that could pass its own `channel`
+would make that decision decorative. Before this, `boundParameters` was written
+and never read, so a Slack tool with its channel fixed posted without one.
+
+**Body templates are filled as values, once.** `resolveTemplateValue` walks the
+template at any depth: a string that is exactly `{{x}}` becomes the value itself, a
+template inside a longer string is interpolated, and a key whose whole-string
+template resolves to nothing is dropped (an optional parameter left out is absent,
+not empty). The map is then serialised once — the old top-level-only pass escaped
+quotes and newlines twice.
+
+**The auth header matches the connection test.** `authHeaderFor` in
+`HttpNodeExecutor.kt` follows `HttpTester.applyAuth`: a header named on the
+connection (`authHeaderName`) wins; Slack, Gmail, Sheets, GitHub, Notion,
+Airtable, HubSpot and Linear keys go as `Authorization: Bearer`; anything else keeps
+`x-api-key`. Notion calls also carry `Notion-Version`. Previously every `api_key`
+went as `x-api-key`, so a Slack bot token passed its test and then failed every call
+with `not_authed`.
+
+### 4a.1 Channel webhooks — the URL is the credential
+
+Teams, Google Chat and Discord connect with `auth_type = 'webhook_url'`: the
+channel's incoming webhook URL, stored encrypted as the connection's secret, never
+in `config_json`. One URL posts to one channel, so a workspace connects the app once
+per channel. Posting only — reading and replying need each vendor's bot API.
+
+* **The URL is the only destination.** The worker posts to the secret and ignores
+  `config.url` and any `url` input; an agent cannot redirect the channel's
+  messages. The operations have an empty path and no channel parameter.
+* **It is never written down.** Events, logs and failure messages show
+  `https://<host>/…` only — Discord's token is a path segment and Teams / Google
+  Chat sign the query string. Request failures report the exception class, not its
+  message, because an HTTP client's message can carry the URI.
+* **Testing does not post.** `WebhookUrlTester` checks https, the vendor's host and
+  webhook path, and the SSRF guard. Discord is genuinely verified with a GET, which
+  Discord answers without posting; Teams and Google Chat can only be proven by
+  posting into the channel, so their result says `verified: false` and the dialog
+  says the URL is well-formed rather than "connected".
+* **Flag.** Posting through a webhook connection is behind
+  `MESSAGING_WEBHOOKS_ENABLED` on the worker, default off. Off, the call fails with a
+  sentence naming the variable and sends nothing.
+
+Adapters the worker cannot run (`code`, `builtin`, `llm_generate`, `custom`) are
+shown disabled with the reason rather than registered and failed on first call. MCP
+tools come from connecting the server, not from this dialog.
+
+Tests: `MessagingDeliveryTest` (worker), `WebhookUrlTesterTest` (API).
+
+---
+
 ## 5. Schema
 
 `V064__http_tool_spec_and_openapi_import.sql`:

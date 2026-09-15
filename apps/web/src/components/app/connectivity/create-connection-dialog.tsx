@@ -16,7 +16,7 @@ import { Input } from "~/components/ui/input";
 import { Checkbox } from "~/components/ui/choice";
 import { Select } from "~/components/ui/select";
 import { OptionCards } from "~/components/ui/option-card";
-import { ProviderLogo, type ProviderId } from "~/components/ui/provider-logo";
+import { ProviderLogo, providerLabel, type ProviderId } from "~/components/ui/provider-logo";
 import {
   Modal, ModalBody, ModalDivider, ModalFooter, ModalHeader, ModalLayout,
   ModalNote, ModalRail, ModalSection, ModalStepBar, type ModalStep,
@@ -156,8 +156,58 @@ function apiAuthTypeFor(method: AuthMethod): string {
     case "api-key": return "api_key";
     case "connection-string": return "connection_string";
     case "oauth": return "oauth2";
+    case "webhook-url": return "webhook_url";
     default: return "none";
   }
+}
+
+/**
+ * Where each messaging provider hands out its channel webhook, and the shape of
+ * the URL. A HINT, mirroring `WebhookUrlTester.problem` in the API, which makes
+ * the real decision — this only means a Slack link pasted into the Teams field is
+ * caught while the field is still in view rather than after pressing Test.
+ */
+const WEBHOOK_URLS: Partial<Record<ProviderId, {
+  label: string; placeholder: string; whereToFind: string; matches: (url: URL) => boolean;
+}>> = {
+  teams: {
+    label: "Teams channel webhook URL",
+    placeholder: "https://…logic.azure.com/workflows/…",
+    whereToFind: "the channel's Workflows, \u201cPost to a channel when a webhook request is received\u201d",
+    matches: (url) =>
+      /(\.logic\.azure\.com|\.powerplatform\.com|\.webhook\.office\.com)$/.test(url.hostname)
+      && /\/(workflows|webhookb2|powerautomate)\//.test(url.pathname),
+  },
+  "google-chat": {
+    label: "Google Chat webhook URL",
+    placeholder: "https://chat.googleapis.com/v1/spaces/…/messages?key=…",
+    whereToFind: "the space's Apps & integrations, then Webhooks",
+    matches: (url) => url.hostname === "chat.googleapis.com" && url.pathname.startsWith("/v1/spaces/"),
+  },
+  discord: {
+    label: "Discord webhook URL",
+    placeholder: "https://discord.com/api/webhooks/…",
+    whereToFind: "Edit Channel, then Integrations, then Webhooks",
+    matches: (url) => /(^|\.)discord(app)?\.com$/.test(url.hostname) && url.pathname.startsWith("/api/webhooks/"),
+  },
+};
+
+/** Why a pasted webhook URL cannot be right, or null. */
+function webhookUrlProblem(providerId: ProviderId, raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return "That is not a URL. Paste the whole webhook URL, starting https://.";
+  }
+  if (url.protocol !== "https:") return "Webhook URLs must use https.";
+  const known = WEBHOOK_URLS[providerId];
+  if (known && !known.matches(url)) {
+    return `That doesn't look like a ${providerLabel(providerId)} webhook URL. Copy it from ${known.whereToFind}.`;
+  }
+  return null;
 }
 
 /**
@@ -230,6 +280,14 @@ function secretHint(
       help: hosting?.whereToFind
         ? `Find it under ${hosting.whereToFind}. It is encrypted at rest and never shown again.`
         : "Encrypted at rest and never shown again.",
+    };
+  }
+  if (method === "webhook-url") {
+    const known = WEBHOOK_URLS[integration.id];
+    return {
+      label: known?.label ?? "Webhook URL",
+      placeholder: known?.placeholder ?? "https://…",
+      help: `${known ? `Copy it from ${known.whereToFind}. ` : ""}Anyone with this URL can post to the channel, so it is encrypted at rest and never shown again.`,
     };
   }
   if (method === "oauth") {
@@ -446,7 +504,10 @@ function CreateConnectionDialogBody({
     !integration ? "Pick what you are connecting to." : null,
     !trimmedName ? "Give the connection a name — workflows bind to it by name."
       : isMcp && !endpoint.trim() ? "Enter the MCP server's endpoint — the URL it answers JSON-RPC on."
-        : needsSecret && !secret.trim() ? `Paste the ${secretHint(integration!, method, hosting).label.toLowerCase()}.`
+        : needsSecret && !secret.trim()
+          ? method === "webhook-url" ? "Paste the channel's webhook URL."
+            : `Paste the ${secretHint(integration!, method, hosting).label.toLowerCase()}.`
+          : method === "webhook-url" && integration ? webhookUrlProblem(integration.id, secret)
           : needsEndpoint && !endpoint.trim()
             ? tenantHost ? `Enter ${tenantHost.label.toLowerCase()} — an API token is only valid against the site that issued it.`
               : "Enter the base URL Vectorbea should call."
@@ -1176,7 +1237,12 @@ function CredentialStep({
         </ModalNote>
       ) : (
         <ModalSection title={hint.label} description={hint.help}>
-          <Field label={hint.label} labelHidden required>
+          <Field
+            label={hint.label}
+            labelHidden
+            required
+            error={method === "webhook-url" ? webhookUrlProblem(integration.id, secret) ?? undefined : undefined}
+          >
             <Input
               type="password"
               value={secret}
@@ -1235,6 +1301,16 @@ function CredentialStep({
  */
 function TestOutcome({ result, isMcp = false }: { result: ConnectionTestResult; isMcp?: boolean }) {
   if (result.status === "connected") {
+    /* A Teams or Google Chat webhook can only be proven by posting into the
+       channel, which a test must not do — so the API checks its shape and says
+       `verified: false`. Calling that "connected" would overstate it. */
+    if (result.details?.verified === false) {
+      return (
+        <ModalNote tone="success" title="The webhook URL is well-formed">
+          {result.message}
+        </ModalNote>
+      );
+    }
     return (
       <ModalNote tone="success" title={`Connected in ${result.latencyMs} ms`}>
         {result.message}

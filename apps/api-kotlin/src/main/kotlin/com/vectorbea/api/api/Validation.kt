@@ -86,7 +86,12 @@ val RISK_LEVELS = setOf("low", "medium", "high", "critical")
 val WORKFLOW_STATUSES = setOf("draft", "active", "archived")
 
 /** Connection auth types */
-val AUTH_TYPES = setOf("api_key", "oauth2", "basic", "bearer", "none", "mtls", "custom", "connection_string")
+/**
+ * `webhook_url`: the credential IS the destination — a Teams, Google Chat or
+ * Discord incoming webhook. Stored encrypted as the connection's secret like any
+ * other credential, because anyone holding that URL can post to the channel.
+ */
+val AUTH_TYPES = setOf("api_key", "oauth2", "basic", "bearer", "none", "mtls", "custom", "connection_string", "webhook_url")
 
 /**
  * Returns compatible connection types for each tool type.

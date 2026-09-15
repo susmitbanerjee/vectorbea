@@ -214,6 +214,10 @@ class ConnectionTester(private val secretService: SecretService) {
         secret: String?,
         config: Map<String, Any?>,
     ): ConnectionTestResult {
+        /* A channel webhook has no base URL and no health path: the URL is the
+           credential, and testing it must not post to the channel. */
+        if (authType.equals("webhook_url", ignoreCase = true)) return WebhookUrlTester.test(provider, secret)
+
         val known = SaasEndpoints.of(provider)
         val configuredBase = firstNonBlank(config, "baseUrl", "base_url", "url")
         val baseUrl = (

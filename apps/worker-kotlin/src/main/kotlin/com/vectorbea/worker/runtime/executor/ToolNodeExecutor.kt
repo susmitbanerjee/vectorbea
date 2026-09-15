@@ -415,6 +415,43 @@ class ToolNodeExecutor(
         }
     }
 
+    /** A string that is ONE template and nothing else: its value replaces it whole. */
+    private val WHOLE_TEMPLATE = Regex("""^\{\{\s*([^}]+?)\s*\}\}$""")
+    private val ANY_TEMPLATE = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
+
+    /**
+     * Resolve `{{ expr }}` templates inside a JSON-shaped value, at any depth.
+     *
+     * Returns plain values — never pre-escaped text — so the caller serialises
+     * exactly once. Null from a whole-string template drops the key.
+     */
+    internal fun resolveTemplateValue(
+        value: Any?,
+        inputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): Any? = when (value) {
+        is String -> {
+            val whole = WHOLE_TEMPLATE.matchEntire(value.trim())
+            when {
+                whole != null -> resolveBodyExpr(whole.groupValues[1].trim(), inputs, ctx)
+                !value.contains("{{") -> value
+                else -> ANY_TEMPLATE.replace(value) { match ->
+                    when (val v = resolveBodyExpr(match.groupValues[1].trim(), inputs, ctx)) {
+                        null -> ""
+                        is String -> v
+                        is Number, is Boolean -> v.toString()
+                        else -> runCatching { mapper.writeValueAsString(v) }.getOrDefault(v.toString())
+                    }
+                }
+            }
+        }
+        is Map<*, *> -> value.entries
+            .associate { (k, v) -> k.toString() to resolveTemplateValue(v, inputs, ctx) }
+            .filterValues { it != null }
+        is List<*> -> value.map { resolveTemplateValue(it, inputs, ctx) }
+        else -> value
+    }
+
     // ── Template expression resolver ─────────────────────────────────────────
 
     /**
@@ -834,6 +871,24 @@ class ToolNodeExecutor(
         (tool.configJson["urlTemplate"] as? String)?.let { result["url"] = it }
         (tool.configJson["url"] as? String)?.let { result["url"] = it }
 
+        /*
+         * ── VALUES FIXED WHEN THE TOOL WAS REGISTERED ────────────────────────
+         *
+         * A catalogue tool (Slack "Post a message", Gmail "Send") lets its author
+         * fix a parameter — the channel, the recipient — and removes it from the
+         * tool's input schema, so neither an agent nor a workflow step can supply
+         * it. The registration dialog wrote those to `boundParameters` and NOTHING
+         * read them: a Slack tool with its channel fixed posted `{"text": …}` with
+         * no channel, and Slack refused every call.
+         *
+         * They are merged here, over the caller's inputs, and the order is the
+         * point: a fixed value beats a supplied one. Binding the channel is the
+         * operator deciding where this tool may post; an agent that could pass
+         * its own `channel` would make that decision decorative.
+         */
+        val inputs: Map<String, Any> = withBoundParameters(tool.configJson, resolvedInputs)
+        result.remove("boundParameters")
+
         // Resolve {{ expr }} placeholders in the body template using resolvedInputs.
         // Without this, Slack/HTTP tools receive literal "{{message}}" text in the body
         // instead of the actual workflow values — the call returns 200 but nothing is posted.
@@ -846,7 +901,7 @@ class ToolNodeExecutor(
 
         // Case A: body stored as a plain String in config_json
         if (rawBody != null) {
-            val resolvedBody = resolveBodyString(rawBody, resolvedInputs, ctx)
+            val resolvedBody = resolveBodyString(rawBody, inputs, ctx)
             log.info("[tool] resolved body (string) [toolName={}, type={}]: {}",
                 tool.name, tool.type, resolvedBody.take(300))
             result["body"] = resolvedBody
@@ -857,25 +912,33 @@ class ToolNodeExecutor(
         @Suppress("UNCHECKED_CAST")
         val bodyFromConfig = tool.configJson["body"] as? Map<String, Any?>
         if (bodyFromConfig != null) {
-            // Walk the Map and resolve {{expr}} in every String value
-            val resolved = bodyFromConfig.mapValues { (_, v) ->
-                when (v) {
-                    is String -> resolveBodyString(v, resolvedInputs, ctx)
-                    else -> v
-                }
-            }
+            /*
+             * Resolved as VALUES, at any depth, and serialised once.
+             *
+             * This used to run `resolveBodyString` on top-level strings only —
+             * which escapes for splicing into JSON text — and then serialise the
+             * map, escaping everything a second time. A message with a quote or a
+             * newline arrived as `\"` and `\n` in the channel, and a template
+             * nested inside a card (Teams' `attachments[0].content.body[0].text`)
+             * was never resolved at all. A whole-string `{{text}}` now becomes the
+             * value itself; a template inside a longer string is interpolated;
+             * a key whose whole-string template resolves to nothing is dropped, so
+             * an optional parameter the caller left out is absent, not empty.
+             */
+            val resolved = resolveTemplateValue(bodyFromConfig, inputs, ctx)
             val resolvedJson = try { mapper.writeValueAsString(resolved) } catch (_: Exception) { null }
             if (resolvedJson != null) {
                 log.info("[tool] resolved body (map) [toolName={}, type={}]: {}",
                     tool.name, tool.type, resolvedJson.take(300))
                 result["body"] = resolvedJson
             }
-        } else if (resolvedInputs.isNotEmpty()) {
-            // No explicit body — pass resolved inputs (from node input mapping) as JSON body.
+        } else if (inputs.isNotEmpty()) {
+            // No explicit body — pass resolved inputs (from node input mapping), with
+            // any registration-fixed values over them, as the JSON body.
             // Applies to http, slack, email, and any SaaS tool type.
             log.info("[tool] using resolvedInputs as body [toolName={}, type={}, uiType={}, keys={}]",
-                tool.name, tool.type, uiType, resolvedInputs.keys)
-            result["body"] = resolvedInputs
+                tool.name, tool.type, uiType, inputs.keys)
+            result["body"] = inputs
         }
 
         // Diagnostic: log the full config_json keys for HTTP tools when no body was set.
@@ -1570,4 +1633,15 @@ class ToolNodeExecutor(
             log.warn("[builtin-email] quota refund failed: {}", e.message)
         }
     }
+}
+
+/**
+ * The caller's inputs with a tool's registration-fixed parameters laid over them.
+ * Fixed values win — see the note where this is used.
+ */
+internal fun withBoundParameters(config: Map<String, Any?>, inputs: Map<String, Any>): Map<String, Any> {
+    @Suppress("UNCHECKED_CAST")
+    val bound = (config["boundParameters"] as? Map<String, Any?>)
+        ?.filterValues { it != null }?.mapValues { it.value!! } ?: emptyMap()
+    return if (bound.isEmpty()) inputs else inputs + bound
 }

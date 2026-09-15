@@ -158,6 +158,7 @@ WORKER_DEFAULT_NODE_TIMEOUT_MS=120000
 WORKER_MAX_RUN_DURATION_MS=600000
 WORKER_MAX_BRANCH_THREADS=16
 AGENT_SKILLS_ENABLED=true       # skills apply to agent runs; off = granted skills are ignored at run time
+MESSAGING_WEBHOOKS_ENABLED=true # Teams / Google Chat / Discord tools post; off = those calls fail naming this variable
 TELEMETRY_ENABLED=true
 TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
 TELEMETRY_INTERNAL_TOKEN=<shared internal token>

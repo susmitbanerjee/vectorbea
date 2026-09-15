@@ -36,7 +36,8 @@ import { PROVIDER_BRAND_COLOUR, PROVIDER_DARK_COLOUR } from "./provider-brand-co
 
 export type ProviderId =
   | "openai" | "anthropic" | "gemini" | "mistral"
-  | "slack" | "gmail" | "google-sheets" | "notion" | "airtable"
+  | "slack" | "teams" | "google-chat" | "discord"
+  | "gmail" | "google-sheets" | "notion" | "airtable"
   | "postgres" | "mysql" | "hubspot" | "github" | "jira"
   | "webhook" | "http" | "mcp"
   /*
@@ -106,6 +107,37 @@ const PROVIDER_MARKS: Record<ProviderId, ProviderMark> = {
         <rect x="11.2" y="11.4" width="3.2" height="10" rx="1.6" />
         <rect x="2.8" y="9.4" width="10" height="3.2" rx="1.6" />
       </g>
+    ),
+  },
+  teams: {
+    label: "Microsoft Teams",
+    paths: (
+      <g fill="currentColor">
+        <circle cx="17.6" cy="5.6" r="2.1" />
+        <path d="M15.6 9h4.7c.6 0 1.1.5 1.1 1.1v4.6a3 3 0 0 1-3 3h-.4a4 4 0 0 1-2.4-.8Z" opacity="0.7" />
+        <path
+          d="M4 6.4h9.2a1.4 1.4 0 0 1 1.4 1.4v9.2a1.4 1.4 0 0 1-1.4 1.4H4a1.4 1.4 0 0 1-1.4-1.4V7.8A1.4 1.4 0 0 1 4 6.4ZM5.6 9.4V11h2v4.8h1.6V11h2V9.4Z"
+          fillRule="evenodd"
+        />
+      </g>
+    ),
+  },
+  "google-chat": {
+    label: "Google Chat",
+    paths: (
+      <path
+        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4 3.5V16h-.5A1.5 1.5 0 0 1 4 14.5ZM8.5 10h7"
+        fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round"
+      />
+    ),
+  },
+  discord: {
+    label: "Discord",
+    paths: (
+      <path
+        d="M6 6.5C8 5.5 10 5 12 5s4 .5 6 1.5c1.5 2.5 2.5 5.5 2.2 9.5-1.5 1.2-3 2-4.6 2.5l-1-1.6c.6-.2 1.1-.5 1.6-.8-2.8 1.3-5.6 1.3-8.4 0 .5.3 1 .6 1.6.8l-1 1.6C6.8 18 5.3 17.2 3.8 16 3.5 12 4.5 9 6 6.5ZM9 11a1.5 1.7 0 1 0 0 3.4A1.5 1.7 0 1 0 9 11Zm6 0a1.5 1.7 0 1 0 0 3.4A1.5 1.7 0 1 0 15 11Z"
+        fill="currentColor" fillRule="evenodd"
+      />
     ),
   },
   gmail: {
@@ -608,6 +640,8 @@ export function resolveProvider(raw: string | ProviderId | null | undefined): Pr
  */
 const PROVIDER_ALIASES: [string, ProviderId][] = ([
   ["google-sheets", "google-sheets"], ["googlesheets", "google-sheets"], ["sheets", "google-sheets"],
+  /* Before the bare "google" alias below, which would otherwise claim it. */
+  ["google-chat", "google-chat"], ["googlechat", "google-chat"], ["google_chat", "google-chat"],
   ["servicenow", "servicenow"], ["service-now", "servicenow"], ["snow", "servicenow"],
   ["salesforce", "salesforce"], ["sfdc", "salesforce"],
   ["kubernetes", "kubernetes"], ["k8s", "kubernetes"],
@@ -636,6 +670,9 @@ const PROVIDER_ALIASES: [string, ProviderId][] = ([
   ["gemini", "gemini"], ["google", "gemini"],
   ["mistral", "mistral"],
   ["slack", "slack"],
+  /* Not a bare "teams": a server called "platform-teams" is not Microsoft's. */
+  ["microsoft-teams", "teams"], ["msteams", "teams"], ["ms-teams", "teams"],
+  ["discord", "discord"],
   ["gmail", "gmail"],
   ["mysql", "mysql"], ["mariadb", "mysql"],
   ["jira", "jira"], ["atlassian", "jira"],

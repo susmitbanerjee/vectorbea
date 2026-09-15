@@ -63,12 +63,19 @@ export const INTEGRATION_CATEGORY_LABEL: Record<IntegrationCategory, string> = {
   generic: "Generic",
 };
 
-export type AuthMethod = "oauth" | "api-key" | "connection-string" | "none";
+/**
+ * `webhook-url` is a channel's incoming webhook — Microsoft Teams, Google Chat,
+ * Discord. The URL is the credential: anyone holding it can post to the channel,
+ * so it is stored encrypted as the connection's secret (`auth_type =
+ * 'webhook_url'`) and never in config. See `WebhookUrlTester.kt`.
+ */
+export type AuthMethod = "oauth" | "api-key" | "connection-string" | "webhook-url" | "none";
 
 export const AUTH_LABEL: Record<AuthMethod, string> = {
   oauth: "OAuth 2.0",
   "api-key": "API key",
   "connection-string": "Connection string",
+  "webhook-url": "Webhook URL",
   none: "No credentials",
 };
 
@@ -143,6 +150,54 @@ export const INTEGRATION_SEEDS: {
       "Give it chat:write, plus channels:history if an agent needs to READ messages and app_mentions:read if a mention should start a workflow.",
       "Install it and paste the Bot User OAuth token — it starts xoxb-.",
       "Invite the bot to each channel it works in. Slack grants per channel, not per workspace.",
+    ],
+  },
+  {
+    /*
+     * ── TEAMS, GOOGLE CHAT AND DISCORD CONNECT BY WEBHOOK URL ───────────────
+     *
+     * Each of them offers a bot API, and each bot API is an afternoon: an Azure
+     * app registration and Graph permissions an admin must consent to, a Google
+     * Cloud project with a Chat app, a Discord application with a gateway. What a
+     * workflow actually needs from them is "post this into that channel", and all
+     * three hand that out as one URL, per channel, from the channel's own
+     * settings — two minutes, no admin. Reading and replying is out of reach by
+     * this route, and the descriptions say so rather than letting somebody find
+     * out after connecting.
+     */
+    id: "teams", name: "Microsoft Teams", category: "messaging",
+    description: "Post messages into one Teams channel through the channel's Workflows webhook. Posting only.",
+    auth: ["webhook-url"],
+    scopes: [],
+    setup: [
+      "In Teams, open the channel, choose the three dots next to its name, then Workflows.",
+      "Pick \"Post to a channel when a webhook request is received\" and finish the template.",
+      "Copy the URL it gives you and paste it here. Anyone with that URL can post to the channel, so it is stored encrypted and never shown again.",
+      "One URL posts to one channel. Connect Teams again for each channel an agent should reach.",
+    ],
+  },
+  {
+    id: "google-chat", name: "Google Chat", category: "messaging",
+    description: "Post messages into one Google Chat space through the space's incoming webhook. Posting only.",
+    auth: ["webhook-url"],
+    scopes: [],
+    setup: [
+      "In Google Chat, open the space, choose its name at the top, then Apps & integrations.",
+      "Choose Add webhooks, give it a name such as Vectorbea, and save.",
+      "Copy the webhook URL and paste it here. It is stored encrypted and never shown again.",
+      "One URL posts to one space. Connect Google Chat again for each space an agent should reach.",
+    ],
+  },
+  {
+    id: "discord", name: "Discord", category: "messaging",
+    description: "Post messages into one Discord channel through the channel's webhook. Posting only.",
+    auth: ["webhook-url"],
+    scopes: [],
+    setup: [
+      "In Discord, open the channel's settings (Edit Channel), then Integrations, then Webhooks.",
+      "Choose New Webhook, name it, and choose Copy Webhook URL.",
+      "Paste it here. Vectorbea checks it with Discord without posting anything.",
+      "One URL posts to one channel. Connect Discord again for each channel an agent should reach.",
     ],
   },
   {
@@ -637,6 +692,15 @@ export interface ProviderOperation {
   params: OperationParam[];
   /** Concrete: what somebody actually builds with this. Shown after connecting. */
   useCase: string;
+  /**
+   * The request body, with `{{param}}` where each parameter goes.
+   *
+   * Only for operations whose body is not simply the parameters by name — a
+   * Teams message is an Adaptive Card with the text four levels down. Filled at
+   * any depth by the worker (`ToolNodeExecutor.resolveTemplateValue`); a key whose
+   * whole value is a template the caller left empty is dropped.
+   */
+  bodyTemplate?: Record<string, unknown>;
 }
 
 const RECIPIENT: OperationParam = {
@@ -710,6 +774,103 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
     ],
   },
 
+  /* ── Microsoft Teams, Google Chat, Discord ──────────────────────────────────
+     Posting through a channel webhook. The path is empty because the
+     connection's URL IS the destination, and the worker refuses to let a tool
+     or an agent send it anywhere else. There is no channel parameter for the
+     same reason: the URL was issued for one channel. */
+  {
+    id: "teams.post",
+    provider: "teams",
+    label: "Post a message",
+    description: "Posts a card with your message into the connected Teams channel.",
+    method: "POST",
+    path: "",
+    writes: true,
+    risk: "medium",
+    useCase: "Post a daily summary into the team's channel, or tell a channel a run needs someone to look at it.",
+    params: [
+      {
+        name: "text",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Markdown works: **bold**, _italic_, lists and [links](https://example.com).",
+      },
+    ],
+    bodyTemplate: {
+      type: "message",
+      attachments: [
+        {
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: {
+            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            type: "AdaptiveCard",
+            version: "1.4",
+            body: [
+              { type: "TextBlock", text: "{{text}}", wrap: true },
+            ],
+          },
+        },
+      ],
+    },
+  },
+  {
+    id: "google-chat.post",
+    provider: "google-chat",
+    label: "Post a message",
+    description: "Posts your message into the connected Google Chat space.",
+    method: "POST",
+    path: "",
+    writes: true,
+    risk: "medium",
+    useCase: "Drop a run's findings into the space the team already reads.",
+    params: [
+      {
+        name: "text",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Google Chat formatting works: *bold*, _italic_, ~strike~ and <https://example.com|links>.",
+      },
+    ],
+    bodyTemplate: { text: "{{text}}" },
+  },
+  {
+    id: "discord.post",
+    provider: "discord",
+    label: "Post a message",
+    description: "Posts your message into the connected Discord channel.",
+    method: "POST",
+    path: "",
+    writes: true,
+    risk: "medium",
+    useCase: "Announce a release or an incident update in the community's channel.",
+    params: [
+      {
+        name: "content",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Up to 2,000 characters. Markdown works: **bold**, *italic*, `code` and lists.",
+      },
+      {
+        name: "username",
+        label: "Post as",
+        type: "string",
+        required: false,
+        binding: "config",
+        bindable: true,
+        placeholder: "Vectorbea",
+        help: "The name shown on the message. Leave empty to use the webhook's own name.",
+      },
+    ],
+    bodyTemplate: { content: "{{content}}", username: "{{username}}" },
+  },
+
   /* ── Slack ──────────────────────────────────────────────────────────────── */
   {
     id: "slack.post",
@@ -729,10 +890,17 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
         required: true,
         binding: "config",
         bindable: true,
-        placeholder: "#ops-alerts",
-        help: "Fixed here, the agent can only post to this channel. Slack grants access per channel, so this should match what you authorised.",
+        placeholder: "C0123456789 or #ops-alerts",
+        help: "Fixed here, the agent can only post to this channel. Use the channel ID (channel details, at the bottom) or its #name, and invite the bot with /invite first — Slack refuses channels the bot is not in.",
       },
-      { name: "text", label: "Message", type: "text", required: true, binding: "input" },
+      {
+        name: "text",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Slack formatting works: *bold*, _italic_, <https://example.com|links> and <@U0123> mentions.",
+      },
       {
         name: "thread_ts",
         label: "Reply in thread",
