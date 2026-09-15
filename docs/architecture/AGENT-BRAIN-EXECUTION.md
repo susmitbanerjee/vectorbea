@@ -229,7 +229,8 @@ this look like a run going in circles.
 
 | Node type | Executor | Notes |
 |---|---|---|
-| `trigger`, `transform`, `branch`, `parallel`, `join`, `end` | control-flow | No external I/O |
+| `trigger`, `transform`, `branch`, `parallel`, `join` (canvas: `merge`), `end` | control-flow | No external I/O |
+| `checkpoint` (also `commit`, `savepoint`) | `CheckpointNodeExecutor` | Completes at once and passes its inputs through. Every completed node's output is already persisted, which is what a resume reuses; this step only marks the boundary. It used to resolve to `UNKNOWN` and fail the run. `wait` and `output` still do. |
 | `approval` | `ApprovalNodeExecutor` | Explicit human gate |
 | `llm` | `LlmNodeExecutor` | Provider dialects, throttle, circuit breaker, replay recording |
 | `http` | `HttpNodeExecutor` | Side-effect guard |

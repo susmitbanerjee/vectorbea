@@ -638,6 +638,16 @@ function CreateConnectionDialogBody({
         setStep(3);
         return;
       }
+      /* Verify ran against the draft and nothing stored its result, so a
+         connection that passed was saved as "not tested". The saved-connection
+         test writes the status the Connections list and the worker read. */
+      void api.connections.test(connection.id, { workspaceId: scope.workspaceId, environmentId: null })
+        .catch(() => undefined)
+        .finally(() => {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.connections.all({ workspaceId: scope.workspaceId, environmentId: null }),
+          });
+        });
       onCreated?.(connection);
       onOpenChange(false);
     },
@@ -651,7 +661,16 @@ function CreateConnectionDialogBody({
    * is stale either way.
    */
   function finish() {
-    if (saved) onCreated?.(saved);
+    if (saved) {
+      void api.connections.test(saved.id, { workspaceId: scope.workspaceId, environmentId: null })
+        .catch(() => undefined)
+        .finally(() => {
+          void queryClient.invalidateQueries({
+            queryKey: queryKeys.connections.all({ workspaceId: scope.workspaceId, environmentId: null }),
+          });
+        });
+      onCreated?.(saved);
+    }
     onOpenChange(false);
   }
 

@@ -132,9 +132,17 @@ export function ConnectMcpDialog({
   }, [trimmedUrl, nameTouched]);
 
   const finish = React.useCallback(() => {
-    if (saved) onCreated?.(saved);
+    if (saved) {
+      /* The probe above is not stored, so the saved connection read "not tested"
+         everywhere — including the worker's log on every run. The saved-connection
+         test is the one that writes the status; run it once on the way out. */
+      void api.connections.test(saved.id, readScope)
+        .catch(() => undefined)
+        .finally(() => { void queryClient.invalidateQueries({ queryKey: queryKeys.connections.all(readScope) }); });
+      onCreated?.(saved);
+    }
     onOpenChange(false);
-  }, [saved, onCreated, onOpenChange]);
+  }, [saved, onCreated, onOpenChange, api, readScope, queryClient]);
 
   function invalidate() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.connections.all(readScope) });

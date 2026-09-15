@@ -691,6 +691,16 @@ enum class NodeType(val value: String) {
      * sharing a node type and branching inside it.
      */
     AGENT_TEAM("agent_team"),
+    /**
+     * A named save point the canvas offers ("Checkpoint").
+     *
+     * It was missing, so the type fell to [UNKNOWN] and every workflow built with
+     * a Checkpoint step failed there with "Unsupported node type". Every node's
+     * output is already persisted as it completes (`checkpointPolicy`), which is
+     * what makes a resume skip finished work; this node adds a visible boundary
+     * and passes its inputs through. It does not change what happens on resume.
+     */
+    CHECKPOINT("checkpoint"),
     UNKNOWN("unknown"),
     ;
 
@@ -707,14 +717,15 @@ enum class NodeType(val value: String) {
          *  - "webhook_wait"  → UNKNOWN
          *  - "timer"         → UNKNOWN
          *  - "artifact"      → UNKNOWN
-         *  - "checkpoint"    → UNKNOWN
+         *  - "checkpoint"    → CHECKPOINT (canvas: "commit", "savepoint")
+         *  - "merge"         → JOIN (the canvas calls a join "merge" and saves that)
          */
         fun fromString(s: String): NodeType = when (s.lowercase()) {
             "trigger"                    -> TRIGGER
             "transform"                  -> TRANSFORM
             "branch"                     -> BRANCH
             "parallel"                   -> PARALLEL
-            "join"                       -> JOIN
+            "join", "merge", "fan_in"    -> JOIN
             "approval"                   -> APPROVAL
             "end"                        -> END
             "llm"                        -> LLM
@@ -724,6 +735,7 @@ enum class NodeType(val value: String) {
             "tool"                       -> TOOL
             "agent"                      -> AGENT
             "agent_team", "team"         -> AGENT_TEAM
+            "checkpoint", "commit", "savepoint" -> CHECKPOINT
             else                         -> UNKNOWN
         }
     }

@@ -57,6 +57,7 @@ class NodeExecutorRegistry(
         NodeType.JOIN      to JoinNodeExecutor(),
         NodeType.APPROVAL  to ApprovalNodeExecutor(approvalStore),
         NodeType.END       to EndNodeExecutor(),
+        NodeType.CHECKPOINT to CheckpointNodeExecutor(),
         // Connector executors (real I/O)
         /* `pricing` is what makes a customer's negotiated rate reach the cost
            figure. Built from the DataSource this registry already holds; without

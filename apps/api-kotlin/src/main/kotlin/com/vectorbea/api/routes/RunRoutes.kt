@@ -723,7 +723,13 @@ class RunRoutes(
         }
 
         val channel = eventBus?.channelFor(runId.toString()) ?: "run-events:$runId"
-        val messageQueue = LinkedBlockingQueue<String?>() // null = poison pill (terminal / close)
+        /* The end-of-stream signal is the string POISON, not null. It used to be
+           `offer(null)`, and LinkedBlockingQueue refuses null with an NPE — thrown
+           inside Lettuce's callback ("Unexpected error occurred in
+           RedisPubSubListener callback"). The terminal event itself was queued
+           first, but the stop signal never was, so the stream stayed open on
+           heartbeats until the periodic status re-check noticed the run had ended. */
+        val messageQueue = LinkedBlockingQueue<String>()
 
         val pubSub = r.newPubSubConnection()
         pubSub.addListener(object : RedisPubSubAdapter<String, String>() {
@@ -735,7 +741,7 @@ class RunRoutes(
                     message.contains("\"RUN_CANCELLED\"") ||
                     message.contains("\"RUN_TIMED_OUT\"")
                 ) {
-                    messageQueue.offer(null) // signal end
+                    messageQueue.offer(POISON)
                 }
             }
         })
@@ -754,7 +760,7 @@ class RunRoutes(
                         heartbeatCounter++
                         if (!emitter.sendComment("heartbeat t=${Instant.now()}")) break
                     }
-                    msg == "__poison__" -> break
+                    msg == POISON -> break
                     else -> {
                         if (!emitter.sendEvent("run_event", msg)) break
                         // If the poison pill follows, we'll pick it up next iteration
@@ -783,6 +789,11 @@ class RunRoutes(
         if (finalRun?.status in TERMINAL_STATUSES) {
             emitter.sendEvent("run_complete", """{"status":"${finalRun?.status}","final":true}""")
         }
+    }
+
+    private companion object {
+        /** End-of-stream marker on the SSE relay queue, which cannot hold null. */
+        const val POISON = "__poison__"
     }
 
     // ── POST /api/runs/:id/cancel ─────────────────────────────────────────────
