@@ -46,6 +46,7 @@ class AgentMemoryStore(
     private val log = LoggerFactory.getLogger(AgentMemoryStore::class.java)
     private val mapper = jacksonObjectMapper()
     private val MAX_VALUE_BYTES = 4096
+    private val TRUNCATED = "… [truncated]"
 
     companion object {
         /** Default OFF. Memory that crosses runs changes behaviour on workflows
@@ -69,12 +70,35 @@ class AgentMemoryStore(
             System.getenv("AGENT_WORKFLOW_MEMORY_RECALL_LIMIT")?.toIntOrNull()?.coerceIn(1, 100) ?: 10
     }
 
+    /**
+     * The value as JSON no longer than [MAX_VALUE_BYTES] — and still JSON.
+     *
+     * This used to serialise and then `take(4096)`, which cuts the TEXT of the JSON:
+     * a long observation (a commit patch, full of escaped quotes and newlines) ended
+     * mid-string or on a dangling backslash, and Postgres refused the row with
+     * "invalid input syntax for type json". The memory entry was simply lost. Now
+     * the value is shortened BEFORE it is encoded, and re-checked, because escaping
+     * makes the encoded form longer than the text.
+     */
+    internal fun boundedJson(value: Any?): String {
+        val full = mapper.writeValueAsString(value ?: "")
+        if (full.length <= MAX_VALUE_BYTES) return full
+        val text = value as? String ?: full
+        var keep = MAX_VALUE_BYTES - TRUNCATED.length - 2
+        while (keep > 0) {
+            val json = mapper.writeValueAsString(text.take(keep) + TRUNCATED)
+            if (json.length <= MAX_VALUE_BYTES) return json
+            keep -= (json.length - MAX_VALUE_BYTES) + 8
+        }
+        return mapper.writeValueAsString(TRUNCATED)
+    }
+
     // ── Run-scoped: unchanged ────────────────────────────────────────────────
 
     fun persist(config: AgentBrainConfig, key: String, valueSanitized: Any?) {
         if (dataSource == null) return
         try {
-            val json = mapper.writeValueAsString(valueSanitized ?: "").take(MAX_VALUE_BYTES)
+            val json = boundedJson(valueSanitized)
             dataSource.connection.use { conn ->
                 conn.prepareStatement(
                     "INSERT INTO agent_memory_entries (workspace_id,environment_id,run_id,agent_id,step_id,memory_scope,key,value_json_sanitized) VALUES(?,?,?,?,?,?,?,?::jsonb) ON CONFLICT DO NOTHING"
@@ -145,7 +169,7 @@ class AgentMemoryStore(
         if (!workflowMemoryEnabled || dataSource == null || workflowId == null) return
         if (key.isBlank()) return
         try {
-            val json = mapper.writeValueAsString(valueSanitized ?: "").take(MAX_VALUE_BYTES)
+            val json = boundedJson(valueSanitized)
             dataSource.connection.use { conn ->
                 conn.prepareStatement(
                     """INSERT INTO agent_memory_entries

@@ -162,14 +162,20 @@ object OutboundHttp {
      * call ceiling of [totalCallMs] with a [maxResponseBytes] streaming cap.
      *
      * @param totalCallMs already clamped by [OutboundTimeouts.clampTotalCallMs].
+     * @param headersTimeoutMs how long to wait for the response headers. Defaults to
+     *   HTTP_HEADERS_TIMEOUT_MS. A model provider sends no headers until the whole
+     *   completion is generated, so for those calls the wait for headers IS the
+     *   call — LLM calls pass their total budget here, or a 30s headers limit cuts
+     *   off every answer that takes longer than 30s to write.
      */
     fun send(
         builder: HttpRequest.Builder,
         totalCallMs: Long,
         maxResponseBytes: Long,
         httpClient: HttpClient = client,
+        headersTimeoutMs: Long = timeouts.httpHeadersTimeoutMs,
     ): Result {
-        val headersBudget = minOf(timeouts.httpHeadersTimeoutMs, totalCallMs)
+        val headersBudget = minOf(headersTimeoutMs, totalCallMs)
         val request = builder.timeout(Duration.ofMillis(headersBudget)).build()
         return send(request, totalCallMs, maxResponseBytes, httpClient)
     }

@@ -292,7 +292,26 @@ editor's "Max tokens" is the per-reply `max_tokens`, a different number.
 Actions are parsed by `ActionParsing`: an explicit `null` for a defaulted field is
 the default, a missing `type` is inferred from `toolId` / `finalOutput` /
 `failReason`, a one-level `{"action": {...}}` wrapper is unwrapped, and enum case is
-ignored. Each of those used to cost a repair THINK iteration.
+ignored. Each of those used to cost a repair THINK iteration. It also accepts the
+type as text under `action` / `actionType` (`"tool_call"` → CALL_TOOL,
+`"done"` → FINAL), snake_case field names, a string `finalOutput` (becomes
+`{content}`), and a bare answer carrying the step's declared output fields with no
+envelope (read as FINAL). A reply that still does not parse is logged with its
+top-level field names only, and the repair THINK tells the model the format it
+must use instead of "trying next iteration".
+
+**Model calls wait for their whole budget.** `OutboundHttp.send` capped the wait
+for response headers at `HTTP_HEADERS_TIMEOUT_MS` (30s) on every call. A
+non-streaming provider sends headers only with the finished completion, so any
+answer that took more than 30s to write failed with `HttpTimeoutException` —
+under a 120s agent timeout — and the step retry re-ran the agent from iteration 1.
+`LlmNodeExecutor` now passes its total budget as `headersTimeoutMs`; other callers
+keep the 30s default.
+
+**Run memory rows stay valid JSON.** `AgentMemoryStore` serialised a value and then
+cut the JSON text at 4 096 characters, which on a long observation (a patch full of
+escapes) left an unterminated string and Postgres rejected the row. `boundedJson`
+shortens the value before encoding and re-checks the encoded length.
 
 `taskInstruction` falls back through node config (`taskInstruction`, then the
 builder's older `taskOverride`) → `taskInstruction` → `task` → `prompt` → `input`

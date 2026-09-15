@@ -2823,20 +2823,30 @@ class AgentBrainRunner(
         val cleaned = rawContent.trim()
             .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         return try {
-            ActionParsing.parse(cleaned)
+            ActionParsing.parse(cleaned, declaredOutputFields(config))
         } catch (e: Exception) {
-            log.warn("[brain] failed to parse action iter={}: {}", state.iteration, e.message)
+            /* The field NAMES, never the values: enough to tell "it returned the
+               answer without an envelope" from "it returned prose", which is what
+               the next change to ActionParsing needs to know. */
+            log.warn("[brain] failed to parse action iter={} fields={}: {}",
+                state.iteration, ActionParsing.fieldNamesOf(cleaned), e.message?.lineSequence()?.firstOrNull())
             /* A THINK as repair, so the loop can continue or fail gracefully —
                MARKED as a repair, because an unmarked one is indistinguishable
                from the model choosing to think and sends the reader to the
                prompt when the problem is the response format. */
             AgentAction(
                 type = AgentAction.ActionType.THINK,
-                reasoningSummary = "Failed to parse action response — trying next iteration",
+                reasoningSummary = "Your last reply was not a valid action. Reply with ONE JSON object " +
+                    "whose \"type\" is CALL_TOOL, FINAL or FAIL, with the answer inside finalOutput.",
                 repaired = true,
             )
         }
     }
+
+    /** The step's declared output field names, read from its output schema. */
+    private fun declaredOutputFields(config: AgentBrainConfig): Set<String> = runCatching {
+        mapper.readTree(config.outputSchemaJson).path("properties").fieldNames().asSequence().toSet()
+    }.getOrDefault(emptySet())
 
     // ── Tool execution ────────────────────────────────────────────────────────
 

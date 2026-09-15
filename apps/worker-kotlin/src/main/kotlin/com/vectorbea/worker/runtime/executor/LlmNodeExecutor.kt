@@ -1205,7 +1205,9 @@ class LlmNodeExecutor(
         val result = try {
             WorkerMetrics.timeBlocking {
                 OutboundHttp.send(reqBuilder, totalCallMs = timeoutMs,
-                    maxResponseBytes = maxResponseBytes, httpClient = httpClient)
+                    maxResponseBytes = maxResponseBytes, httpClient = httpClient,
+                    /* Non-streaming: the headers arrive with the finished answer. */
+                    headersTimeoutMs = timeoutMs)
             }
         } catch (e: OutboundHttp.TotalCallTimeoutException) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(timeoutMs, provider, "timeout")

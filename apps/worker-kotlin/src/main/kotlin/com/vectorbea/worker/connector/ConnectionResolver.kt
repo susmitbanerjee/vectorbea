@@ -25,6 +25,7 @@ open class ConnectionResolver(
     private val secretService: SecretService,
 ) {
     private val log    = logger()
+    private val untestedWarned = java.util.concurrent.ConcurrentHashMap.newKeySet<Any>()
     private val mapper = jacksonObjectMapper()
 
     /**
@@ -68,7 +69,9 @@ open class ConnectionResolver(
             // successful test; "active" is the legacy value; "not_tested" means
             // the user skipped the test step (proceed with a warning).
             "active", "connected", "ok" -> { /* OK */ }
-            "not_tested" -> log.warn(
+            /* Once per connection per process: it was logged on every model call,
+               so one agent run printed it a dozen times and buried real errors. */
+            "not_tested" -> if (untestedWarned.add(record.id)) log.warn(
                 "[conn] connection '{}' ({}) has not been tested — proceeding anyway",
                 record.name, record.id
             )

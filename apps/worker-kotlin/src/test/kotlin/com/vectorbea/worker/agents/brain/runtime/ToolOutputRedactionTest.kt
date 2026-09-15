@@ -43,6 +43,9 @@ class ToolOutputRedactionTest {
         assertTrue(out.contains("$java.java") && out.contains("$dir/WorkflowGraph.kt"), out)
         assertFalse(out.contains("[REDACTED]"), out)
 
+        val commitUrl = "https://github.com/susmitbanerjee/qrx-backend/commit/43ef280ecff84eb0556ed8f9936f82c7c711f8dd"
+        assertTrue(guard.sanitizeToolOutput("""{"html_url":"$commitUrl"}""", 10_000).contains(commitUrl))
+
         val randomKey = "Zq8JfYk2PxW7hRtB3nLc/V9dGm4TsK1QwXyHjNb/Rp6aE"
         val capitals = "wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLEKEY/abc/def.txt"
         val redacted = guard.sanitizeToolOutput("""{"a":"$randomKey","b":"$capitals"}""", 10_000)

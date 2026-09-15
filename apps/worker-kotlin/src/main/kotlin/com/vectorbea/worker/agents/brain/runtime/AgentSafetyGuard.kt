@@ -171,12 +171,16 @@ class AgentSafetyGuard {
             if ('/' !in value || '+' in value || value.endsWith('=')) return false
             val segments = value.split('/').filter { it.isNotEmpty() }
             if (segments.size < 2 || segments.any { it.length > 60 }) return false
-            val letters = value.count { it.isLetter() }
+            /* A commit SHA as one segment (`…/commit/43ef28…`) is exempt on its own
+               terms, so it is left out of the word statistics rather than failing
+               the digit test for the whole URL path. */
+            val words = segments.filterNot { isHexDigest(it) }.joinToString("")
+            val letters = words.count { it.isLetter() }
             if (letters == 0) return false
-            val vowels = value.count { it.lowercaseChar() in "aeiou" }
-            val digits = value.count { it.isDigit() }
-            val capitals = value.count { it.isUpperCase() }
-            if (digits * 5 > value.length || capitals * 3 > letters) return false
+            val vowels = words.count { it.lowercaseChar() in "aeiou" }
+            val digits = words.count { it.isDigit() }
+            val capitals = words.count { it.isUpperCase() }
+            if (digits * 5 > words.length || capitals * 3 > letters) return false
             return if (hasExtensionAt(text, end)) vowels * 5 >= letters
             else segments.size >= 3 && vowels * 4 >= letters
         }

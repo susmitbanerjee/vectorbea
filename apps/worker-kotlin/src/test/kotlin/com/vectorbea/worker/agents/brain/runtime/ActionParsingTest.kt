@@ -30,6 +30,44 @@ class ActionParsingTest {
         assertEquals(ActionType.FINAL, ActionParsing.parse("""{"action":{"type":"final","finalOutput":{"content":"x"}}}""").type)
         assertFailsWith<Exception> { ActionParsing.parse("""{"thoughts":"hmm"}""") }
     }
+
+    @Test
+    fun `the type under another name, snake_case fields and a string finalOutput all parse`() {
+        val call = ActionParsing.parse("""{"action":"tool_call","tool_id":"t1","tool_input":{"page":2}}""")
+        assertEquals(ActionType.CALL_TOOL, call.type)
+        assertEquals("t1", call.toolId)
+        assertEquals(2, call.toolInput["page"])
+
+        val final = ActionParsing.parse("""{"actionType":"FINAL","final_output":"LGTM"}""")
+        assertEquals(ActionType.FINAL, final.type)
+        assertEquals("LGTM", final.finalOutput["content"])
+    }
+
+    @Test
+    fun `a bare answer carrying the step's output fields is its final output`() {
+        val fields = setOf("summary", "verdict", "findings")
+        val a = ActionParsing.parse(
+            """{"summary":"Two issues.","verdict":"FAIL","findings":["a","b"],"reasoningSummary":"done"}""", fields)
+        assertEquals(ActionType.FINAL, a.type)
+        assertEquals("FAIL", a.finalOutput["verdict"])
+        assertTrue("reasoningSummary" !in a.finalOutput)
+        // Without declared fields the same object is still not guessed at.
+        assertFailsWith<Exception> { ActionParsing.parse("""{"summary":"Two issues."}""") }
+    }
+}
+
+/** Memory rows must stay valid JSON however long the observation. */
+class MemoryValueBoundTest {
+    @Test
+    fun `a long escaped observation is shortened before encoding, not cut mid-string`() {
+        val store = AgentMemoryStore(null)
+        val patch = "RESULT: " + """{"patch":"+    String c = opt(\"darkColor\\\", \"000000\");\n"}""".repeat(200)
+        val json = store.boundedJson(patch)
+        assertTrue(json.length <= 4096, "length ${json.length}")
+        val back = com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readValue(json, String::class.java)
+        assertTrue(back.endsWith("… [truncated]"), back.takeLast(40))
+        assertEquals("\"short\"", store.boundedJson("short"))
+    }
 }
 
 /** The budget on an agent step, which used to be ignored. */
