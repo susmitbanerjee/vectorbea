@@ -2,6 +2,8 @@ import "server-only";
 
 import { sendEmail, emailConfigured } from "@/lib/server/email";
 import { appBaseUrl, recordForward, supportLog, type SupportTicket } from "@/lib/server/support";
+import { LOOP_HEADER } from "@/lib/server/support-inbound";
+import { buildHelpdeskCommentEmail, supportInboundAddress } from "@/lib/server/support-mail";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    FORWARDING SUPPORT TICKETS TO SPICEWORKS
@@ -23,10 +25,13 @@ import { appBaseUrl, recordForward, supportLog, type SupportTicket } from "@/lib
      from a mail client reaches them.
    · The Vectorbea ticket number leads the subject ("[VB-A83K2P] …"), so either
      system's ticket can be found from the other.
-   · Status is not synced back: there is nothing in Spiceworks to read it from.
-     Resolve in Spiceworks, and in /support when the customer should see it.
+   · Updates come BACK by email too, when SUPPORT_INBOUND_ADDRESS is set: mail is
+     then sent from that mailbox, Spiceworks emails its comments and status changes
+     to it, and lib/server/support-inbound.ts applies them to the ticket. Without
+     it there is nothing in Spiceworks to read status from.
 
-   Configuration: SPICEWORKS_HELPDESK_EMAIL. Unset means forwarding is off.
+   Configuration: SPICEWORKS_HELPDESK_EMAIL (forwarding), plus SUPPORT_INBOUND_ADDRESS
+   and SUPPORT_INBOUND_TOKEN (two-way sync).
 ══════════════════════════════════════════════════════════════════════════════ */
 
 const ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,6 +49,8 @@ export interface SpiceworksStatus {
   emailReady: boolean;
   /** Why forwarding cannot work, in a sentence, or null when it can. */
   problem: string | null;
+  /** Two-way sync: updates made in Spiceworks come back to the ticket. */
+  sync: { enabled: boolean; mailbox: string | null; problem: string | null };
 }
 
 export function spiceworksStatus(): SpiceworksStatus {
@@ -57,7 +64,17 @@ export function spiceworksStatus(): SpiceworksStatus {
       : !emailReady
         ? "No email provider is configured, so tickets cannot be sent."
         : null;
-  return { enabled: Boolean(address) && emailReady, address, emailReady, problem };
+  const mailbox = supportInboundAddress();
+  const tokenSet = (process.env.SUPPORT_INBOUND_TOKEN?.trim().length ?? 0) >= 24;
+  const syncProblem = !mailbox
+    ? "Set SUPPORT_INBOUND_ADDRESS."
+    : !tokenSet
+      ? "Set SUPPORT_INBOUND_TOKEN (24+ characters)."
+      : null;
+  return {
+    enabled: Boolean(address) && emailReady, address, emailReady, problem,
+    sync: { enabled: !syncProblem && Boolean(address) && emailReady, mailbox, problem: syncProblem },
+  };
 }
 
 const PRIORITY_LABEL: Record<string, string> = { LOW: "Low", NORMAL: "Normal", HIGH: "High" };
@@ -127,7 +144,7 @@ export async function forwardToSpiceworks(ticket: SupportTicket): Promise<Forwar
   const mail = buildSpiceworksEmail(ticket);
   let error: string | null = null;
   try {
-    const result = await sendEmail({ to: status.address, ...mail }, 1);
+    const result = await sendEmail({ to: status.address, ...mail, ...senderFor(ticket.ticket_number) }, 1);
     if (!result.ok) error = friendlySendError(result.error);
   } catch (err) {
     error = friendlySendError(err instanceof Error ? err.message : String(err));
@@ -147,6 +164,33 @@ export async function forwardToSpiceworks(ticket: SupportTicket): Promise<Forwar
   return { status: outcome, error, ticket: updated };
 }
 
+/**
+ * Sent FROM the support mailbox when two-way sync is set up: Spiceworks makes the
+ * sender the requester and emails its updates there, which is how they come back.
+ */
+function senderFor(ticketNumber: string): { from?: string; headers: Record<string, string> } {
+  const mailbox = supportInboundAddress();
+  return {
+    ...(mailbox ? { from: `Vectorbea Support <${mailbox}>` } : {}),
+    headers: { [LOOP_HEADER]: ticketNumber },
+  };
+}
+
+/** Add a customer's comment to the Spiceworks ticket. Never throws. */
+export async function forwardCommentToSpiceworks(ticket: SupportTicket, body: string): Promise<boolean> {
+  const status = spiceworksStatus();
+  if (!status.enabled || !status.address) return false;
+  const mail = buildHelpdeskCommentEmail(ticket, body);
+  try {
+    const result = await sendEmail({ to: status.address, ...mail, replyTo: ticket.user_email, ...senderFor(ticket.ticket_number) }, 1);
+    if (!result.ok) supportLog("support.ticket.comment.forward.failed", { ticketNumber: ticket.ticket_number, error: result.error });
+    return result.ok;
+  } catch (err) {
+    supportLog("support.ticket.comment.forward.failed", { ticketNumber: ticket.ticket_number, error: err });
+    return false;
+  }
+}
+
 /** A test ticket, so an admin can confirm tickets arrive before a customer files one. */
 export async function sendSpiceworksTest(adminEmail: string): Promise<{ ok: boolean; error: string | null }> {
   const status = spiceworksStatus();
@@ -162,7 +206,7 @@ export async function sendSpiceworksTest(adminEmail: string): Promise<{ ok: bool
     tenant_name: null,
     created_at: new Date().toISOString(),
   });
-  const result = await sendEmail({ to: status.address, ...mail }, 0).catch((err: unknown) => ({
+  const result = await sendEmail({ to: status.address, ...mail, ...senderFor("VB-TEST00") }, 0).catch((err: unknown) => ({
     ok: false, provider: "unknown", error: err instanceof Error ? err.message : String(err),
   }));
   return { ok: result.ok, error: result.ok ? null : friendlySendError(result.error) };

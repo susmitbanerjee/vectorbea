@@ -14,17 +14,21 @@ import { Segmented } from "~/components/ui/option-card";
 import { Text } from "~/components/ui/text";
 import { LocalTime } from "~/components/ui/local-time";
 import { StatusChip } from "./support-widget";
+import { ReplyBox, SupportThread, type ThreadMessage } from "./support-thread";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    SUPPORT PORTAL (/support) — for support admins, across every workspace.
 
    Rebuilt on the token layer (it was hard-coded hex and light only). Same admin
-   API; two additions:
+   API; additions:
 
    · SPICEWORKS. When SPICEWORKS_HELPDESK_EMAIL is set, every new report is also
      sent to the Spiceworks help desk. The strip under the header says whether
-     that is working and can send a test ticket; each ticket shows whether it
-     reached Spiceworks and can be sent again.
+     that is working and whether updates made in Spiceworks come back (two-way
+     sync, SUPPORT_INBOUND_ADDRESS); each ticket shows whether it reached
+     Spiceworks and can be sent again.
+   · CONVERSATION. Customer comments, help desk updates and portal replies, in
+     order. A reply here is emailed to the customer.
    · Times are in the viewer's time zone.
 ══════════════════════════════════════════════════════════════════════════════ */
 
@@ -53,6 +57,7 @@ interface SpiceworksStatus {
   enabled: boolean;
   address: string | null;
   problem: string | null;
+  sync?: { enabled: boolean; mailbox: string | null; problem: string | null };
 }
 
 type Filter = "all" | "open" | "resolved";
@@ -78,6 +83,7 @@ export function SupportPortal({ adminEmail, initialTicket }: { adminEmail: strin
 
   const [selected, setSelected] = React.useState<string | null>(initialTicket ?? null);
   const [detail, setDetail] = React.useState<Ticket | null>(null);
+  const [messages, setMessages] = React.useState<ThreadMessage[] | null>(null);
   const [detailError, setDetailError] = React.useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = React.useState(false);
 
@@ -117,6 +123,7 @@ export function SupportPortal({ adminEmail, initialTicket }: { adminEmail: strin
   const openTicket = React.useCallback(async (ticketNumber: string, seed?: Ticket) => {
     setSelected(ticketNumber);
     setDetail(seed ?? null);
+    setMessages(null);
     setDetailError(null);
     setLoadingDetail(true);
     try {
@@ -127,9 +134,10 @@ export function SupportPortal({ adminEmail, initialTicket }: { adminEmail: strin
     try {
       const res = await fetch(`/api/support/admin/tickets/${encodeURIComponent(ticketNumber)}`, { cache: "no-store" });
       if (res.status === 404) { setDetail(null); setDetailError("This ticket no longer exists."); return; }
-      const data = await readJson<{ ticket: Ticket }>(res);
+      const data = await readJson<{ ticket: Ticket; messages?: ThreadMessage[] | null }>(res);
       if (!res.ok) throw new Error(data.error ?? "");
       setDetail(data.ticket);
+      setMessages(data.messages ?? []);
     } catch {
       if (!seed) setDetailError("This ticket could not be loaded.");
     } finally {
@@ -254,6 +262,8 @@ export function SupportPortal({ adminEmail, initialTicket }: { adminEmail: strin
             ) : (
               <TicketDetail
                 ticket={detail}
+                messages={messages}
+                onMessages={(add) => setMessages((prev) => [...(prev ?? []), ...add])}
                 refreshing={loadingDetail}
                 spiceworks={spiceworks}
                 onBack={() => setSelected(null)}
@@ -302,6 +312,13 @@ function SpiceworksStrip({ status }: { status: SpiceworksStatus | null }) {
             ? <>New reports are sent to <span className="font-code">{status.address}</span>.</>
             : status.problem}
         </Text>
+        {status.enabled && status.sync ? (
+          <Text variant="caption" tone="muted" className="block truncate">
+            {status.sync.enabled
+              ? <>Comments and status changes sync back through <span className="font-code">{status.sync.mailbox}</span>.</>
+              : <>Changes made in Spiceworks do not sync back. {status.sync.problem}</>}
+          </Text>
+        ) : null}
       </div>
       {status.enabled ? (
         <Button size="sm" variant="secondary" loading={testing} loadingLabel="Sending" onClick={() => void sendTest()}
@@ -316,9 +333,11 @@ function SpiceworksStrip({ status }: { status: SpiceworksStatus | null }) {
 /* ── Detail ───────────────────────────────────────────────────────────────── */
 
 function TicketDetail({
-  ticket, refreshing, spiceworks, onBack, onChanged,
+  ticket, messages, onMessages, refreshing, spiceworks, onBack, onChanged,
 }: {
   ticket: Ticket;
+  messages: ThreadMessage[] | null;
+  onMessages: (add: ThreadMessage[]) => void;
   refreshing: boolean;
   spiceworks: SpiceworksStatus | null;
   onBack: () => void;
@@ -342,13 +361,40 @@ function TicketDetail({
       });
       const data = await readJson<{ ticket?: Ticket }>(res);
       if (!res.ok || !data.ticket) { setError(data.error ?? "The ticket could not be updated."); return; }
-      onChanged(data.ticket, action === "resolve" ? -1 : 1);
+      const changed = data.ticket.status !== ticket.status;
+      onChanged(data.ticket, changed ? (action === "resolve" ? -1 : 1) : 0);
+      if (changed) {
+        // The server records these after responding; mirror them so the thread is current.
+        const at = new Date().toISOString();
+        const written = note.trim();
+        onMessages([
+          ...(written ? [{ id: `local-note-${at}`, author_type: "support" as const, author_name: "Vectorbea Support", body: written, created_at: at }] : []),
+          { id: `local-status-${at}`, author_type: "system", author_name: null, body: action === "resolve" ? "Marked resolved." : "Reopened.", created_at: at },
+        ]);
+      }
       setNote("");
       toast.success(action === "resolve" ? "Ticket resolved." : "Ticket reopened.");
     } catch {
       setError("You appear to be offline. Try again.");
     } finally {
       setActing(false);
+    }
+  };
+
+  const reply = async (body: string): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/support/admin/tickets/${encodeURIComponent(ticket.ticket_number)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = await readJson<{ message?: ThreadMessage | null }>(res);
+      if (!res.ok || !data.message) return data.error ?? "The reply could not be sent.";
+      onMessages([data.message]);
+      toast.success("Reply sent.");
+      return null;
+    } catch {
+      return "You appear to be offline. Try again.";
     }
   };
 
@@ -407,26 +453,30 @@ function TicketDetail({
       </div>
 
       <div className="grid gap-4 p-4 sm:p-5">
-        <div>
-          <Text variant="label" tone="secondary" className="mb-1.5 block">Message</Text>
-          <Text variant="body-sm" tone="primary" className="border-subtle bg-surface-sunken block whitespace-pre-wrap break-words rounded-md border px-3 py-2.5 leading-relaxed">
-            {ticket.message}
-          </Text>
-        </div>
-
         {spiceworks?.address || ticket.forward_status ? (
           <ForwardRow ticket={ticket} canSend={Boolean(spiceworks?.enabled)} sending={forwarding} onSend={() => void forward()} />
         ) : null}
 
-        {ticket.admin_note ? (
-          <div className="bg-surface-sunken rounded-md px-3 py-2.5">
-            <Text variant="caption" tone="muted" className="block">Note to the customer</Text>
-            <Text variant="body-sm" tone="primary" className="mt-0.5 block whitespace-pre-wrap">{ticket.admin_note}</Text>
-          </div>
-        ) : null}
+        <div className="grid gap-3">
+          <Text variant="label" tone="secondary" className="block">Conversation</Text>
+          <SupportThread
+            viewer="support"
+            messages={[
+              { id: "original", author_type: "customer", author_name: ticket.user_name ?? ticket.user_email, body: ticket.message, created_at: ticket.created_at },
+              ...(ticket.admin_note && !(messages ?? []).some((m) => m.body === ticket.admin_note)
+                ? [{ id: "note", author_type: "support" as const, author_name: "Vectorbea Support", body: ticket.admin_note, created_at: ticket.resolved_at ?? ticket.created_at }]
+                : []),
+              ...(messages ?? []),
+            ]}
+          />
+          {messages === null ? (
+            <div className="bg-surface-sunken h-10 animate-pulse rounded-md motion-reduce:animate-none" aria-busy="true" />
+          ) : null}
+          <ReplyBox label="Reply to the customer" placeholder="Reply to the customer" sendLabel="Send reply" onSend={reply} />
+        </div>
 
         <div className="border-subtle grid gap-3 border-t pt-4">
-          <Field label="Note to the customer" description="Shown under My reports in the app.">
+          <Field label={ticket.status === "OPEN" ? "Resolution note" : "Note"} description="Optional. Emailed to the customer with the status change.">
             <Textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}

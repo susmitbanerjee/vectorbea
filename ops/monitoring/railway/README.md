@@ -451,6 +451,28 @@ In order, because each step depends on the one before:
    quiet).
 10. **Fire a synthetic alert** — see `docs/telemetry/RUNBOOKS.md`.
 
+## 7a. Every dashboard is empty
+
+Open **Collection status** first. It reads only the series the agent generates for
+itself, so it shows something as soon as any link works, and names the one that does
+not.
+
+| What Collection status shows | The broken link | Fix |
+|---|---|---|
+| The Environment list is empty | No agent is pushing | Deploy `telemetry-agent` in that Railway environment (§5). In its logs: `401` = `TELEMETRY_INGEST_TOKEN` differs from the monitoring service's; `no such host` / `connection refused` = `TELEMETRY_INGEST_ENDPOINT` is not exactly `https://telemetry.vectorbea.com` |
+| Agent reporting, **API: Not reachable** | Agent → API | `API_METRICS_TARGET` = `<API service name>.railway.internal:<PORT>`. The name is the Railway service's name as shown in the project canvas (not necessarily `api`), and the port is the API's `PORT` variable |
+| Agent reporting, **Worker replicas: 0** | Agent → worker | `WORKER_DNS_NAME` = `<worker service name>.railway.internal`, and the worker's `METRICS_PORT` is unset or `9090` |
+| Everything reporting, dashboards still empty | Environment label | The agent's `VECTORBEA_ENV` (`dev` / `prod`) — pick that value in the dashboard's Environment selector |
+
+The agent logs a failed scrape as `Failed to scrape Prometheus endpoint` with the
+target and the reason, which settles the second and third rows without guessing.
+
+Before this page existed, every dashboard's Environment selector was populated from
+one worker metric (`job_last_success_timestamp_seconds`). When the worker scrape
+failed, the selector was empty and **every panel on every dashboard filtered to
+nothing** — even panels whose data was arriving. The selectors now read `up`, which
+the agent produces for every target it tries.
+
 ## 8. What this costs
 
 One container at roughly 2 GB, plus one small agent per environment. On Railway's

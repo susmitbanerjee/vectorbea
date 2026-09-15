@@ -23,6 +23,10 @@ export interface EmailPayload {
   text: string;
   /** Where a reply goes. Used when forwarding a customer's report to a help desk. */
   replyTo?: string;
+  /** Overrides FROM_EMAIL — support mail is sent from the mailbox replies come back to. */
+  from?: string;
+  /** Extra headers, e.g. the marker that stops support mail looping back in. */
+  headers?: Record<string, string>;
 }
 
 export interface SendResult {
@@ -42,7 +46,7 @@ async function sendViaResend(payload: EmailPayload): Promise<SendResult> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) return { ok: false, provider: "resend", error: "RESEND_API_KEY not set" };
 
-  const fromEmail = fromAddress();
+  const fromEmail = payload.from ?? fromAddress();
   if (!fromEmail) {
     console.error("[email/resend] FROM_EMAIL / EMAIL_FROM env var is not set. Set it to your Resend-verified sender address (e.g. noreply@yourdomain.com).");
     return { ok: false, provider: "resend", error: "Sender address env var (FROM_EMAIL or EMAIL_FROM) is not set." };
@@ -60,6 +64,7 @@ async function sendViaResend(payload: EmailPayload): Promise<SendResult> {
       html: payload.html,
       text: payload.text,
       ...(payload.replyTo ? { reply_to: payload.replyTo } : {}),
+      ...(payload.headers ? { headers: payload.headers } : {}),
     }),
   });
 
@@ -81,8 +86,9 @@ async function sendViaSendGrid(payload: EmailPayload): Promise<SendResult> {
     headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       personalizations: [{ to: [{ email: payload.to }] }],
-      from: { email: fromAddress() ?? "noreply@vectorbea.app" },
+      from: { email: payload.from ?? fromAddress() ?? "noreply@vectorbea.app" },
       ...(payload.replyTo ? { reply_to: { email: payload.replyTo } } : {}),
+      ...(payload.headers ? { headers: payload.headers } : {}),
       subject: payload.subject,
       content: [
         { type: "text/plain", value: payload.text },
@@ -120,9 +126,10 @@ async function sendViaSMTP(payload: EmailPayload): Promise<SendResult> {
     });
 
     await transporter.sendMail({
-      from: fromAddress() ?? "noreply@vectorbea.app",
+      from: payload.from ?? fromAddress() ?? "noreply@vectorbea.app",
       to: payload.to,
       ...(payload.replyTo ? { replyTo: payload.replyTo } : {}),
+      ...(payload.headers ? { headers: payload.headers } : {}),
       subject: payload.subject,
       html: payload.html,
       text: payload.text,

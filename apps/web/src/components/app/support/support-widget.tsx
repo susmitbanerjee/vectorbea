@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { usePathname } from "next/navigation";
-import { CheckCircle, Lifebuoy, PaperPlaneTilt, X } from "@phosphor-icons/react/dist/ssr";
+import { ArrowLeft, CheckCircle, Lifebuoy, PaperPlaneTilt, X } from "@phosphor-icons/react/dist/ssr";
 import { cn } from "~/lib/cn";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
@@ -12,6 +12,7 @@ import { Segmented } from "~/components/ui/option-card";
 import { Select } from "~/components/ui/select";
 import { Text } from "~/components/ui/text";
 import { LocalTime } from "~/components/ui/local-time";
+import { ReplyBox, SupportThread, type ThreadMessage } from "./support-thread";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    SUPPORT WIDGET — report an issue, and see what happened to earlier reports.
@@ -47,7 +48,14 @@ interface MyTicket {
   created_at: string;
 }
 
-type View = "form" | "mine" | "done";
+interface TicketDetail {
+  ticket: MyTicket & { message: string; resolved_at: string | null };
+  messages: ThreadMessage[];
+}
+
+type View = "form" | "mine" | "done" | "ticket";
+
+const TICKET_PARAM = "support";
 
 export function SupportWidget() {
   const pathname = usePathname();
@@ -62,6 +70,19 @@ export function SupportWidget() {
   const [filed, setFiled] = React.useState<string | null>(null);
   const [mine, setMine] = React.useState<MyTicket[] | null>(null);
   const [mineError, setMineError] = React.useState(false);
+  const [selected, setSelected] = React.useState<string | null>(null);
+
+  // A link from a support email: /control?support=VB-XXXXXX opens that report.
+  React.useEffect(() => {
+    const url = new URL(window.location.href);
+    const number = url.searchParams.get(TICKET_PARAM);
+    if (!number || !/^VB-[A-Z0-9]{4,12}$/i.test(number)) return;
+    setSelected(number.toUpperCase());
+    setView("ticket");
+    setOpen(true);
+    url.searchParams.delete(TICKET_PARAM);
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+  }, [pathname]);
 
   React.useEffect(() => {
     if (!open || view !== "mine" || mine !== null) return;
@@ -143,12 +164,12 @@ export function SupportWidget() {
             <div className="min-w-0">
               <Text variant="eyebrow" tone="muted" className="block">Support</Text>
               <Text variant="heading-sm" tone="max" className="block">
-                {view === "mine" ? "My reports" : "Report an issue"}
+                {view === "mine" || view === "ticket" ? "My reports" : "Report an issue"}
               </Text>
             </div>
             <Segmented
               label="Support view"
-              value={view === "done" ? "form" : view}
+              value={view === "done" ? "form" : view === "ticket" ? "mine" : view}
               onValueChange={(v) => { setView(v as View); setError(null); }}
               options={[{ value: "form", label: "New" }, { value: "mine", label: "My reports" }]}
               className="w-auto"
@@ -239,28 +260,147 @@ export function SupportWidget() {
               ) : (
                 <ul className="grid gap-2">
                   {mine.map((t) => (
-                    <li key={t.ticket_number} className="border-subtle bg-surface-raised rounded-md border p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <Text variant="body-sm" tone="max" className="min-w-0 font-medium">{t.subject}</Text>
-                        <StatusChip status={t.status} />
-                      </div>
-                      <Text variant="caption" tone="muted" className="mt-0.5 block">
-                        <span className="font-code">{t.ticket_number}</span> · <LocalTime at={t.created_at} format="short" />
-                      </Text>
-                      {t.admin_note ? (
-                        <Text variant="body-sm" tone="secondary" className="bg-surface-sunken mt-2 block rounded-sm px-2 py-1.5">
-                          <span className="text-fg-primary font-medium">Support: </span>{t.admin_note}
+                    <li key={t.ticket_number}>
+                      <button
+                        type="button"
+                        onClick={() => { setSelected(t.ticket_number); setView("ticket"); }}
+                        className={cn(
+                          "border-subtle bg-surface-raised w-full cursor-pointer rounded-md border p-3 text-left",
+                          "hover:bg-surface-hover active:bg-surface-active transition-colors duration-fast",
+                          "outline-none focus-visible:focus-ring",
+                        )}
+                      >
+                        <span className="flex items-start justify-between gap-2">
+                          <Text variant="body-sm" tone="max" className="min-w-0 font-medium">{t.subject}</Text>
+                          <StatusChip status={t.status} />
+                        </span>
+                        <Text variant="caption" tone="muted" className="mt-0.5 block">
+                          <span className="font-code">{t.ticket_number}</span> · <LocalTime at={t.created_at} format="short" />
                         </Text>
-                      ) : null}
+                      </button>
                     </li>
                   ))}
                 </ul>
               )
             ) : null}
+
+            {view === "ticket" && selected ? (
+              <TicketView
+                key={selected}
+                ticketNumber={selected}
+                onBack={() => { setView("mine"); setSelected(null); }}
+                onStatus={() => setMine(null)}
+              />
+            ) : null}
           </div>
         </div>
       ) : null}
     </>
+  );
+}
+
+function TicketView({
+  ticketNumber,
+  onBack,
+  onStatus,
+}: {
+  ticketNumber: string;
+  onBack: () => void;
+  onStatus: () => void;
+}) {
+  const [detail, setDetail] = React.useState<TicketDetail | null>(null);
+  const [failed, setFailed] = React.useState<"missing" | "error" | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/support/tickets/${encodeURIComponent(ticketNumber)}`, { cache: "no-store" })
+      .then(async (r) => {
+        if (r.status === 404) throw new Error("missing");
+        if (!r.ok) throw new Error("error");
+        return (await r.json()) as TicketDetail;
+      })
+      .then((d) => { if (!cancelled) setDetail(d); })
+      .catch((e: Error) => { if (!cancelled) setFailed(e.message === "missing" ? "missing" : "error"); });
+    return () => { cancelled = true; };
+  }, [ticketNumber]);
+
+  async function comment(body: string): Promise<string | null> {
+    try {
+      const res = await fetch(`/api/support/tickets/${encodeURIComponent(ticketNumber)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; status?: string; message?: ThreadMessage };
+      if (!res.ok || !data.message) return data.error ?? "Your comment could not be sent. Try again.";
+      const message = data.message;
+      setDetail((d) => d && {
+        ticket: { ...d.ticket, status: data.status ?? d.ticket.status },
+        messages: [...d.messages, message],
+      });
+      if (data.status && data.status !== detail?.ticket.status) onStatus();
+      return null;
+    } catch {
+      return "You appear to be offline. Try again.";
+    }
+  }
+
+  const back = (
+    <Button size="xs" variant="ghost" onClick={onBack} iconLeft={<Icon icon={ArrowLeft} size="sm" decorative />}>
+      All reports
+    </Button>
+  );
+
+  if (failed) {
+    return (
+      <div className="grid gap-3">
+        <div>{back}</div>
+        <Text variant="body-sm" tone="secondary" className="block py-6 text-center">
+          {failed === "missing" ? "This report was not found on your account." : "This report could not be loaded. Try again shortly."}
+        </Text>
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className="grid gap-2" aria-busy="true">
+        <div>{back}</div>
+        <div className="bg-surface-sunken h-6 w-2/3 animate-pulse rounded-sm motion-reduce:animate-none" />
+        <div className="bg-surface-sunken h-20 animate-pulse rounded-md motion-reduce:animate-none" />
+      </div>
+    );
+  }
+
+  const { ticket, messages } = detail;
+  return (
+    <div className="grid gap-3">
+      <div>{back}</div>
+      <div>
+        <div className="flex items-start justify-between gap-2">
+          <Text variant="body" tone="max" className="min-w-0 font-medium">{ticket.subject}</Text>
+          <StatusChip status={ticket.status} />
+        </div>
+        <Text variant="caption" tone="muted" className="mt-0.5 block">
+          <span className="font-code">{ticket.ticket_number}</span> · <LocalTime at={ticket.created_at} format="short" />
+        </Text>
+      </div>
+      <SupportThread
+        viewer="customer"
+        messages={[
+          { id: "original", author_type: "customer", author_name: null, body: ticket.message, created_at: ticket.created_at },
+          ...(ticket.admin_note && !messages.some((m) => m.body === ticket.admin_note)
+            ? [{ id: "note", author_type: "support" as const, author_name: "Support", body: ticket.admin_note, created_at: ticket.resolved_at ?? ticket.created_at }]
+            : []),
+          ...messages,
+        ]}
+      />
+      <ReplyBox
+        label="Add a comment"
+        placeholder={ticket.status === "RESOLVED" ? "Still happening? Comment to reopen." : "Add a comment"}
+        sendLabel={ticket.status === "RESOLVED" ? "Reopen and send" : "Send"}
+        onSend={comment}
+      />
+    </div>
   );
 }
 

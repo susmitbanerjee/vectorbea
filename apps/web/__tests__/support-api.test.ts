@@ -25,8 +25,14 @@ vi.mock("@/lib/server/support", async (orig) => {
     reopenTicket: vi.fn(),
     listTicketsForUser: vi.fn(),
     recordForward: vi.fn(async () => null),
+    listMessages: vi.fn(async () => []),
+    getTicketForUser: vi.fn(),
   };
 });
+vi.mock("@/lib/server/support-sync", () => ({
+  portalStatusChanged: vi.fn(async () => undefined),
+  customerComment: vi.fn(),
+}));
 
 import { NextRequest } from "next/server";
 import { getAuthenticatedUserFromCookies } from "@/lib/auth/server";
@@ -35,6 +41,9 @@ import * as support from "@/lib/server/support";
 import { POST as supportPOST } from "@/app/api/support/route";
 import { GET as adminListGET } from "@/app/api/support/admin/tickets/route";
 import { GET as adminDetailGET, PATCH as adminPATCH } from "@/app/api/support/admin/tickets/[ticketNumber]/route";
+import { GET as ownTicketGET } from "@/app/api/support/tickets/[ticketNumber]/route";
+import { POST as commentPOST } from "@/app/api/support/tickets/[ticketNumber]/messages/route";
+import { customerComment, portalStatusChanged } from "@/lib/server/support-sync";
 
 const ADMIN = { id: "admin-1", email: "admin@vectorbea.com" };
 const NON_ADMIN = { id: "u1", email: "user@acme.com" };
@@ -198,6 +207,7 @@ describe("PATCH /api/support/admin/tickets/{ticketNumber}", () => {
 
   it("resolves a ticket, recording the admin identity", async () => {
     asUser(ADMIN);
+    vi.mocked(support.getTicketByNumber).mockResolvedValue(sampleTicket({ status: "OPEN" }) as never);
     vi.mocked(support.resolveTicket).mockResolvedValue(
       sampleTicket({ status: "RESOLVED", resolved_by: "admin@vectorbea.com", resolved_at: "2026-08-10T01:00:00Z", admin_note: "Fixed the connection." }) as never,
     );
@@ -209,10 +219,14 @@ describe("PATCH /api/support/admin/tickets/{ticketNumber}", () => {
     expect(json.ticket.status).toBe("RESOLVED");
     expect(json.ticket.resolved_by).toBe("admin@vectorbea.com");
     expect(json.ticket.resolved_at).toBeTruthy();
+    await vi.waitFor(() => expect(portalStatusChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "RESOLVED" }), "RESOLVED", "Fixed the connection.",
+    ));
   });
 
   it("reopens a resolved ticket", async () => {
     asUser(ADMIN);
+    vi.mocked(support.getTicketByNumber).mockResolvedValue(sampleTicket({ status: "RESOLVED" }) as never);
     vi.mocked(support.reopenTicket).mockResolvedValue(sampleTicket({ status: "OPEN" }) as never);
     const res = await patch({ action: "reopen" });
     expect(res.status).toBe(200);
@@ -220,8 +234,65 @@ describe("PATCH /api/support/admin/tickets/{ticketNumber}", () => {
     expect((await res.json()).ticket.status).toBe("OPEN");
   });
 
+  it("does not email the customer when the status did not change", async () => {
+    asUser(ADMIN);
+    vi.mocked(portalStatusChanged).mockClear();
+    vi.mocked(support.getTicketByNumber).mockResolvedValue(sampleTicket({ status: "RESOLVED" }) as never);
+    vi.mocked(support.resolveTicket).mockResolvedValue(sampleTicket({ status: "RESOLVED" }) as never);
+    expect((await patch({ action: "resolve" })).status).toBe(200);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(portalStatusChanged).not.toHaveBeenCalled();
+  });
+
   it("rejects an invalid action with 400", async () => {
     asUser(ADMIN);
     expect((await patch({ action: "delete" })).status).toBe(400);
+  });
+});
+
+// ── Customer: own ticket and comments ─────────────────────────────────────────
+describe("customer ticket routes", () => {
+  const params = { params: Promise.resolve({ ticketNumber: "VB-A83K2P" }) };
+  const view = () => ownTicketGET(new NextRequest("http://localhost/api/support/tickets/VB-A83K2P"), params);
+  const comment = (body: unknown) =>
+    commentPOST(new NextRequest("http://localhost/api/support/tickets/VB-A83K2P/messages", { method: "POST", body: JSON.stringify(body) }), params);
+
+  it("only shows a report to the user who filed it", async () => {
+    asUser(NON_ADMIN);
+    vi.mocked(support.getTicketForUser).mockResolvedValue(null);
+    expect((await view()).status).toBe(404);
+    expect(vi.mocked(support.getTicketForUser).mock.calls.at(-1)).toEqual(["VB-A83K2P", NON_ADMIN.id]);
+  });
+
+  it("returns the report and its conversation without internal fields", async () => {
+    asUser(NON_ADMIN);
+    vi.mocked(support.getTicketForUser).mockResolvedValue(sampleTicket() as never);
+    vi.mocked(support.listMessages).mockResolvedValue([
+      { id: "m1", ticket_id: "t", author_type: "support", author_name: "Grace", author_email: "grace@it.com", body: "On it", source: "helpdesk", external_message_id: "<x>", created_at: "2026-08-10T01:00:00Z" },
+    ]);
+    const json = await (await view()).json();
+    expect(json.ticket.ticket_number).toBe("VB-A83K2P");
+    expect(json.ticket).not.toHaveProperty("forward_error");
+    expect(json.messages[0]).toEqual({ id: "m1", author_type: "support", author_name: "Grace", body: "On it", created_at: "2026-08-10T01:00:00Z" });
+  });
+
+  it("saves a comment and returns the new status", async () => {
+    asUser(NON_ADMIN);
+    vi.mocked(support.getTicketForUser).mockResolvedValue(sampleTicket({ status: "RESOLVED" }) as never);
+    const deliver = vi.fn(async () => undefined);
+    vi.mocked(customerComment).mockResolvedValue({
+      message: { id: "m2", author_type: "customer", author_name: "Ada", body: "Still broken", created_at: "now" },
+      ticket: sampleTicket({ status: "OPEN" }),
+      deliver,
+    } as never);
+    const res = await comment({ body: "Still broken" });
+    expect(res.status).toBe(201);
+    expect((await res.json()).status).toBe("OPEN");
+    await vi.waitFor(() => expect(deliver).toHaveBeenCalled());
+  });
+
+  it("rejects an empty comment", async () => {
+    asUser(NON_ADMIN);
+    expect((await comment({ body: " " })).status).toBe(400);
   });
 });

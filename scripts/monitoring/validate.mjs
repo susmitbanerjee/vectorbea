@@ -61,7 +61,8 @@ function metricNames() {
   }
   // Series Prometheus itself and the collector expose. Not ours, but legitimately
   // referenced by the pipeline-health alerts.
-  for (const n of ['up', 'otelcol_exporter_send_failed_metric_points',
+  for (const n of ['up', 'scrape_samples_scraped', 'scrape_duration_seconds',
+                   'otelcol_exporter_send_failed_metric_points',
                    'otelcol_exporter_send_failed_spans']) names.add(n);
   return names;
 }

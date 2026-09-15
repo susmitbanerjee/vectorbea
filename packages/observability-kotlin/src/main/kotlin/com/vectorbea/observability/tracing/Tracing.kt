@@ -81,7 +81,14 @@ object Tracing {
             enabled = true
             log.info("[tracing] enabled - service={} endpoint={}", serviceName, endpoint)
         } catch (e: Throwable) {
-            log.error("[tracing] could not initialise, continuing without traces: {}", e.message)
+            /* The SDK logs only "Error encountered during autoconfiguration" through
+               java.util.logging, which says nothing about WHICH setting is wrong. The
+               cause chain does — usually a malformed OTEL_* variable (an endpoint
+               without http://, or OTEL_EXPORTER_OTLP_HEADERS with an unencoded space). */
+            val causes = generateSequence(e) { it.cause }.take(4)
+                .joinToString(" <- ") { "${it.javaClass.simpleName}: ${it.message}" }
+            log.error("[tracing] could not initialise, continuing without traces. " +
+                "Check the OTEL_* variables on this service. Cause: {}", causes)
         }
     }
 

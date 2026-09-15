@@ -41,6 +41,9 @@ export interface SupportTicket {
   forward_error?: string | null;
   forward_attempts?: number;
   forwarded_at?: string | null;
+  /** The help desk's own ticket number, once its mail has named it (V078). */
+  helpdesk_ref?: string | null;
+  last_activity_at?: string | null;
 }
 
 export const TICKET_STATUSES: TicketStatus[] = ["OPEN", "RESOLVED"];
@@ -387,6 +390,160 @@ export async function reopenTicket(
         updated_at = now()
     WHERE ticket_number = ${ticketNumber}
     RETURNING *` as SupportTicket[];
+  return rows[0] ?? null;
+}
+
+// ─── Conversation ─────────────────────────────────────────────────────────────
+
+export type MessageAuthor = "customer" | "support" | "system";
+export type MessageSource = "app" | "email" | "helpdesk" | "portal";
+
+export interface SupportMessage {
+  id: string;
+  ticket_id: string;
+  author_type: MessageAuthor;
+  author_name: string | null;
+  author_email: string | null;
+  body: string;
+  source: MessageSource;
+  external_message_id: string | null;
+  created_at: string;
+}
+
+export const MESSAGE_MAX = 10_000;
+
+let messagesReady = false;
+async function ensureMessagesTable() {
+  if (messagesReady) return;
+  await ensureTable();
+  const sql = db();
+  const existing = await sql`SELECT to_regclass('support_ticket_messages') IS NOT NULL AS present` as { present: boolean }[];
+  if (!existing[0]?.present) {
+    await sql`
+      CREATE TABLE IF NOT EXISTS support_ticket_messages (
+        id                   uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+        ticket_id            uuid        NOT NULL REFERENCES support_tickets (id) ON DELETE CASCADE,
+        author_type          text        NOT NULL CHECK (author_type IN ('customer','support','system')),
+        author_name          text,
+        author_email         text,
+        body                 text        NOT NULL,
+        source               text        NOT NULL CHECK (source IN ('app','email','helpdesk','portal')),
+        external_message_id  text,
+        created_at           timestamptz NOT NULL DEFAULT now()
+      )`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS support_ticket_messages_external_id_uidx ON support_ticket_messages (external_message_id) WHERE external_message_id IS NOT NULL`;
+    await sql`CREATE INDEX IF NOT EXISTS support_ticket_messages_ticket_idx ON support_ticket_messages (ticket_id, created_at)`;
+  }
+  messagesReady = true;
+}
+
+/** The conversation on a ticket, oldest first. */
+export async function listMessages(ticketId: string): Promise<SupportMessage[]> {
+  await ensureMessagesTable();
+  const sql = db();
+  return await sql`
+    SELECT * FROM support_ticket_messages
+    WHERE ticket_id = ${ticketId}
+    ORDER BY created_at ASC
+    LIMIT 500` as SupportMessage[];
+}
+
+/**
+ * Add a message. Returns null when `externalMessageId` was already recorded —
+ * an inbound provider retrying the same webhook, which must not add a duplicate.
+ */
+export async function addMessage(input: {
+  ticketId: string;
+  authorType: MessageAuthor;
+  authorName?: string | null;
+  authorEmail?: string | null;
+  body: string;
+  source: MessageSource;
+  externalMessageId?: string | null;
+}): Promise<SupportMessage | null> {
+  await ensureMessagesTable();
+  const sql = db();
+  try {
+    const rows = await sql`
+      INSERT INTO support_ticket_messages
+        (ticket_id, author_type, author_name, author_email, body, source, external_message_id)
+      VALUES
+        (${input.ticketId}, ${input.authorType}, ${input.authorName ?? null}, ${input.authorEmail ?? null},
+         ${input.body.slice(0, MESSAGE_MAX)}, ${input.source}, ${input.externalMessageId ?? null})
+      RETURNING *` as SupportMessage[];
+    await touchTicket(input.ticketId);
+    return rows[0] ?? null;
+  } catch (err) {
+    if (isUniqueViolation(err)) return null;
+    throw err;
+  }
+}
+
+async function touchTicket(ticketId: string): Promise<void> {
+  const sql = db();
+  try {
+    await sql`UPDATE support_tickets SET last_activity_at = now(), updated_at = now() WHERE id = ${ticketId}`;
+  } catch (err) {
+    // A database without V078's column still records the message.
+    if ((err as { code?: string })?.code !== "42703") throw err;
+  }
+}
+
+/** A ticket, only when it belongs to this user. */
+export async function getTicketForUser(ticketNumber: string, userId: string): Promise<SupportTicket | null> {
+  await ensureTable();
+  const sql = db();
+  const rows = await sql`
+    SELECT * FROM support_tickets
+    WHERE ticket_number = ${ticketNumber} AND user_id = ${userId}
+    LIMIT 1` as SupportTicket[];
+  return rows[0] ?? null;
+}
+
+/** Match mail from the help desk that no longer carries the Vectorbea number. */
+export async function getTicketByHelpdeskRef(ref: string): Promise<SupportTicket | null> {
+  await ensureTable();
+  const sql = db();
+  try {
+    const rows = await sql`
+      SELECT * FROM support_tickets WHERE helpdesk_ref = ${ref}
+      ORDER BY created_at DESC LIMIT 1` as SupportTicket[];
+    return rows[0] ?? null;
+  } catch (err) {
+    if ((err as { code?: string })?.code === "42703") return null;
+    throw err;
+  }
+}
+
+/** Remember the help desk's ticket number the first time its mail names it. */
+export async function setHelpdeskRef(ticketId: string, ref: string): Promise<void> {
+  const sql = db();
+  try {
+    await sql`UPDATE support_tickets SET helpdesk_ref = ${ref} WHERE id = ${ticketId} AND helpdesk_ref IS NULL`;
+  } catch (err) {
+    if ((err as { code?: string })?.code !== "42703") throw err;
+  }
+}
+
+/** Move a ticket to a status from outside the portal (the help desk, or a customer reply). */
+export async function setTicketStatus(
+  ticketId: string,
+  status: TicketStatus,
+  resolvedBy: string | null,
+): Promise<SupportTicket | null> {
+  await ensureTable();
+  const sql = db();
+  const rows = status === "RESOLVED"
+    ? await sql`
+        UPDATE support_tickets
+        SET status = 'RESOLVED', resolved_at = now(), resolved_by = ${resolvedBy}, updated_at = now()
+        WHERE id = ${ticketId} AND status <> 'RESOLVED'
+        RETURNING *` as SupportTicket[]
+    : await sql`
+        UPDATE support_tickets
+        SET status = 'OPEN', resolved_at = NULL, resolved_by = NULL, updated_at = now()
+        WHERE id = ${ticketId} AND status <> 'OPEN'
+        RETURNING *` as SupportTicket[];
   return rows[0] ?? null;
 }
 
