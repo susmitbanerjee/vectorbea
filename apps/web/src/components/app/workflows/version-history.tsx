@@ -104,7 +104,7 @@ export function VersionHistory({ workflow }: { workflow: Workflow }) {
           </Link>
         }
         title="Version history"
-        description={`Every publish of ${workflow.name} is an immutable record. Restoring one creates a new draft — history is never overwritten.`}
+        description={`Every published version of ${workflow.name}. Restoring one creates a new draft.`}
         actions={
           <Button asChild variant="secondary" size="sm">
             <Link href={`/workflows/${workflow.id}` as Route}>Back to overview</Link>

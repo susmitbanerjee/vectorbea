@@ -26,6 +26,7 @@ const PatchSchema = z
   .object({
     fullName: z.string().max(PROFILE_LIMITS.FULL_NAME_MAX).nullable().optional(),
     avatarUrl: z.string().max(PROFILE_LIMITS.AVATAR_URL_MAX).nullable().optional(),
+    timeZone: z.string().max(64).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: "Send at least one field to change.",
@@ -72,8 +73,8 @@ export async function PATCH(request: NextRequest) {
       targetId: after.id,
       actorType: "user",
       actorId: after.id,
-      before: before ? { fullName: before.fullName, avatarUrl: before.avatarUrl } : null,
-      after: { fullName: after.fullName, avatarUrl: after.avatarUrl },
+      before: before ? { fullName: before.fullName, avatarUrl: before.avatarUrl, timeZone: before.timeZone } : null,
+      after: { fullName: after.fullName, avatarUrl: after.avatarUrl, timeZone: after.timeZone },
       request,
     });
 

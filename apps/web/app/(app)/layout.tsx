@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 // stays in the repo until the last screen is migrated (CLAUDE.md).
 import { AppShell } from "~/components/app/shell/app-shell";
 import { TelemetryPageViews } from "@/components/layout/telemetry-page-views";
-import { SupportWidget } from "@/components/support/support-widget";
+import { SupportWidget } from "~/components/app/support/support-widget";
 import { OAuthTokenTransfer } from "@/components/layout/OAuthTokenTransfer";
 import {
   getAuthenticatedUserFromCookies,

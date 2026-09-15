@@ -173,7 +173,7 @@ function RequestSection({
   return (
     <Section
       title="Request"
-      description="The call this tool makes. A relative path is joined onto the connection's base URL; an absolute one is used as written."
+      description="A path is added to the connection's base URL."
     >
       <div className="grid gap-3 sm:grid-cols-[140px_1fr]">
         <Field label="Method">
@@ -206,7 +206,7 @@ function RequestSection({
 
       <Field
         label="Base URL override"
-        description="Leave empty to use the connection's. Set it only when this one operation lives somewhere else."
+        description="Leave empty to use the connection's address."
       >
         <Input
           value={override}
@@ -250,7 +250,7 @@ function InputsSection({
   return (
     <Section
       title="Inputs"
-      description="What the agent may supply, and where each value lands on the wire. The two names are separate on purpose — the model reads one and the service reads the other."
+      description="The values the agent provides and where each one is sent."
     >
       {inputs.length === 0 ? (
         <div className="border-subtle rounded-md border border-dashed p-6 text-center">
@@ -403,7 +403,7 @@ function InputRow({
         <div className="mt-2">
           <Field
             label="Bound value"
-            description="Sent every time. Not offered to the model, so it cannot be talked out of this scope."
+            description="Sent every time. The agent cannot change it."
           >
             <Input
               value={String(input.constant ?? "")}
@@ -449,7 +449,7 @@ function InputRow({
           {input.type === "array" ? (
             <Field
               label="Array serialisation"
-              description="Explode sends a=1&a=2; joined sends a=1,2. Getting this wrong makes a filter silently match nothing."
+              description="How lists are sent: a=1&a=2 or a=1,2."
             >
               <Select
                 value={(input.explode ?? true) ? "explode" : "joined"}
@@ -499,7 +499,7 @@ function BodySection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
   return (
     <Section
       title="Request body"
-      description="How the body is built and what it is labelled as. Body inputs are assembled automatically; a template is only needed for a shape that is not a projection of arguments."
+      description="Body inputs are added automatically. Use a template only for a custom shape."
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Encoding">
@@ -547,7 +547,7 @@ function BodySection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
         </Note>
       ) : null}
 
-      {template !== undefined ? <Field label="Request template" description="Placeholders are filled from agent inputs at runtime. This template is preserved when saving.">
+      {template !== undefined ? <Field label="Request template" description="Placeholders are filled from inputs.">
         <Textarea mono readOnly autoGrow={false} minRows={5} value={typeof template === "string" ? template : JSON.stringify(template, null, 2)} />
       </Field> : null}
       {encoding !== "none" ? (
@@ -590,7 +590,7 @@ function AuthSection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
     <Section
       title="Authentication"
       icon={LockKey}
-      description="How this tool proves who it is. The credential itself lives on the connection — everything here names a field of it."
+      description="How the request is authenticated, using the connection's credentials."
     >
       <Field label="Strategy">
         <Select
@@ -606,7 +606,7 @@ function AuthSection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
         <div className="grid gap-3 sm:grid-cols-2">
           <Field
             label="Header name"
-            description="The service decides this. api_key, X-API-Key and Authorization are all real."
+            description="The name your API expects."
           >
             <Input
               value={field("header", "X-API-Key")}
@@ -712,7 +712,7 @@ function AuthSection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
           </div>
           <Field
             label="Scopes"
-            description="Space separated. Ask for what this one tool needs, not for everything."
+            description="Space separated."
           >
             <Input
               value={(Array.isArray(auth.scopes) ? (auth.scopes as string[]) : []).join(" ")}
@@ -767,7 +767,7 @@ function AuthSection({ doc, set, disabled }: { doc: SpecDocument; set: Setter; d
             />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Timestamp header" description="Omitting it is the usual cause of a signature the service rejects.">
+            <Field label="Timestamp header" >
               <Input
                 value={field("timestampHeader", "X-Timestamp")}
                 onChange={(e) => set(["auth", "timestampHeader"], e.target.value || undefined)}
@@ -824,11 +824,11 @@ function ResponseSection({ doc, set, disabled }: { doc: SpecDocument; set: Sette
     <Section
       title="Response"
       icon={Function}
-      description="What counts as success, and what the agent is shown. Extraction narrows the document; the result contract narrows the fields within it."
+      description="What counts as success and what the agent sees."
     >
       <Field
         label="Success statuses"
-        description="Comma separated. Empty means any 2xx. Declare 404 here when 'not found' is an answer rather than a failure."
+        description="Comma separated. Empty means any 2xx."
       >
         <Input
           value={expected.join(", ")}
@@ -863,7 +863,7 @@ function ResponseSection({ doc, set, disabled }: { doc: SpecDocument; set: Sette
         {extract.engine !== "none" ? (
           <Field
             label="Expression"
-            description="Cuts the envelope away before the model sees it. An expression that matches nothing falls back to the whole response rather than to an empty one."
+            description="The part of the response the agent sees."
           >
             <Input
               value={extract.expression}
@@ -1002,7 +1002,7 @@ function PaginationSection({ doc, set, disabled }: { doc: SpecDocument; set: Set
   return (
     <Section
       title="Pagination"
-      description="An agent handed a cursor will follow it until the context window ends the run. Declaring the strategy moves the loop into the runtime, where the bound is a number."
+      description="How to fetch further pages."
     >
       <Field label="Strategy">
         <Select
@@ -1060,7 +1060,7 @@ function PaginationSection({ doc, set, disabled }: { doc: SpecDocument; set: Set
               </Field>
               <Field
                 label="Has-more path"
-                description="Wins over the cursor. Some APIs return a cursor on the last page too, and following it loops forever."
+                description="Stops paging when this is false."
               >
                 <Input
                   value={field("hasMorePath")}
@@ -1115,7 +1115,7 @@ function PaginationSection({ doc, set, disabled }: { doc: SpecDocument; set: Set
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
               label="Maximum pages"
-              description="Bounds the requests. An API with ten-item pages needs this one."
+              description="Most pages to fetch."
             >
               <Input
                 type="number"
@@ -1127,7 +1127,7 @@ function PaginationSection({ doc, set, disabled }: { doc: SpecDocument; set: Set
             </Field>
             <Field
               label="Maximum items"
-              description="Bounds the tokens. An API with thousand-item pages needs this one."
+              description="Most records to collect."
             >
               <Input
                 type="number"
@@ -1161,7 +1161,7 @@ function ReliabilitySection({ doc, set, disabled }: { doc: SpecDocument; set: Se
     <Section
       title="Timeout, retry and idempotency"
       icon={ArrowsClockwise}
-      description="A retry without jitter means every worker that failed at the same moment retries at the same moment, and knocks the provider over as it recovers."
+      description="How failed requests are retried."
     >
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label="Timeout (ms)" description="Total call, including the body.">
@@ -1266,12 +1266,12 @@ function TransportSection({ doc, set, disabled }: { doc: SpecDocument; set: Sett
   return (
     <Section
       title="Transport"
-      description="For a private network. Certificate material is referenced by secret, never pasted here."
+      description="For a private network."
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label="Client certificate secret"
-          description="The reference, not the certificate. Store the PEM as a secret first."
+          description="The name of the stored certificate secret."
         >
           <Input
             value={String(mtls.clientCertSecretRef ?? "")}
@@ -1292,7 +1292,7 @@ function TransportSection({ doc, set, disabled }: { doc: SpecDocument; set: Sett
 
       <Field
         label="CA bundle (PEM)"
-        description="A CA certificate is public material, so it may be pasted. There is deliberately no option to skip verification."
+        description="Paste the CA certificate."
       >
         <Input
           value={String(transport.caBundlePem ?? "")}
@@ -1340,7 +1340,7 @@ function TransportSection({ doc, set, disabled }: { doc: SpecDocument; set: Sett
             className="font-code"
           />
         </Field>
-        <Field label="Host header" description="Selects the virtual host it routes to. Not the same thing.">
+        <Field label="Host header" >
           <Input
             value={String(transport.hostHeader ?? "")}
             onChange={(e) => set(["transport", "hostHeader"], e.target.value || undefined)}

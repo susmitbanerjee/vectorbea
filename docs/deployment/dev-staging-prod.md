@@ -241,7 +241,103 @@ NEXT_PUBLIC_VECTORBEA_ENV=dev
 NEXT_PUBLIC_SUPABASE_URL=<staging supabase url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<staging anon key>
 NEXT_PUBLIC_PRIVATE_BETA_MODE=true
+DATABASE_URL=<the SAME database the staging api/worker use>
 ```
+
+**`DATABASE_URL` on Vercel must be the environment's database.** The web app's
+own server routes read it directly: Settings → Profile (name, time zone), the
+support widget and `/support` portal (`support_tickets`), beta access. When the
+API and worker moved to another database and Vercel kept the old one, the
+support portal kept showing the old database's tickets and the profile showed
+the old account row. The database must accept connections from Vercel (its
+addresses are not fixed, so allow SSL connections broadly or use a connection
+proxy). `support_tickets` is created by V077; the web app no longer needs
+CREATE on the schema for it.
+
+**Forwarding support reports to Spiceworks (optional).** The free Spiceworks
+Cloud Help Desk creates tickets from email, so the web app emails each new report
+to your help desk address after saving it (`lib/server/support-spiceworks.ts`).
+
+```
+SPICEWORKS_HELPDESK_EMAIL=help@<your-account>.on.spiceworks.com
+# plus a working email provider, which the portal already uses:
+RESEND_API_KEY=...            # or SENDGRID_API_KEY / SMTP_HOST ...
+FROM_EMAIL=support@<your verified domain>
+```
+
+1. In Spiceworks, find the help desk email address (Settings → Email) and make
+   sure tickets from `FROM_EMAIL` are accepted.
+2. Set the variables on the Vercel scope and redeploy.
+3. Open `/support` — the strip under the header says "Spiceworks connected".
+   Press **Send test ticket** and confirm it appears in Spiceworks.
+
+What to expect: the subject starts with the Vectorbea ticket number; the
+requester's name, email, workspace, priority and category are the first lines;
+Reply-To is the customer. A report that fails to send is marked on the ticket and
+can be sent again from `/support`. While forwarding is on, the support-admin
+notification email is not sent; Spiceworks notifies your technicians itself.
+
+**Syncing Spiceworks back to the customer (optional, off by default).** Customers
+never get a Spiceworks account. Vectorbea stays their view: the widget's My
+reports shows the conversation and status, they comment there (or by replying to
+the update email), and technicians keep working in Spiceworks. The free help desk
+has no API or webhooks, so the sync runs over email
+(`lib/server/support-inbound.ts`, `support-sync.ts`):
+
+1. Reports are sent to Spiceworks FROM a support mailbox you own, so Spiceworks
+   makes that mailbox the requester and emails every comment and status change
+   to it.
+2. An inbound-mail provider posts each message in that mailbox to
+   `/api/support/inbound/<SUPPORT_INBOUND_TOKEN>`.
+3. Mail from the help desk becomes a support comment and/or a status change
+   (closed/resolved → Resolved, reopened → Open); the customer is emailed once
+   and sees it under My reports. Mail from the customer becomes a comment, is
+   passed on to Spiceworks, and reopens a resolved report.
+
+```
+SUPPORT_INBOUND_ADDRESS=support@<your verified domain>   # the requester mailbox
+SUPPORT_INBOUND_TOKEN=<random, 24+ characters>           # openssl rand -hex 24
+SUPPORT_HELPDESK_SENDERS=@acme.com,it@acme.com            # optional: other senders that count as the help desk
+```
+
+Set up the mailbox with one of these (each posts to the URL above):
+
+| Provider | Setup |
+|---|---|
+| SendGrid Inbound Parse | MX for a subdomain to `mx.sendgrid.net`; Inbound Parse → the URL; leave "POST the raw MIME" off. |
+| Mailgun | Receiving → Create route → match recipient → forward to the URL. |
+| Postmark | Inbound stream → webhook URL; forward the mailbox to the inbound address. |
+| Anything else | POST JSON `{from, subject, text, html, headers, messageId}` (a Cloudflare Email Worker works). |
+
+Then: `SUPPORT_INBOUND_ADDRESS` must be a sender your email provider can send as
+(same verified domain as `FROM_EMAIL`), and in Spiceworks turn on requester
+notifications for comments and status changes. `/support` says "Comments and
+status changes sync back" when both variables are set. File a report, comment on
+the ticket in Spiceworks, and close it: both should appear under My reports
+within a minute.
+
+How messages are matched, and what is deliberately conservative:
+- By the `[VB-XXXXXX]` number Spiceworks keeps in the subject, or by the
+  Spiceworks ticket number learned from an earlier message.
+- Only mail from `*.spiceworks.com`, the help desk address's domain,
+  `SUPPORT_HELPDESK_SENDERS` or a support admin can change a status; a customer
+  writing "resolved?" cannot close their own report. Status is read from what the
+  help desk ADDED to the subject and from a sentence about the ticket in the first
+  lines, never from the customer's own subject.
+- Mail Vectorbea sent carries `X-Vectorbea-Support` and is dropped if it comes
+  back; automatic replies are dropped; a provider redelivering the same
+  Message-ID adds nothing.
+- Spiceworks does not document its notification format. The footer, links and
+  the status sentence are removed from a technician's comment; if a notification
+  template adds other text, it shows in the conversation. Unmatched mail is
+  logged as `support.inbound.unmatched`.
+- Replies written in `/support` are emailed to the customer but not copied into
+  Spiceworks; work a ticket in one place.
+
+Without the sync variables, comments in the widget still work: they go to
+Spiceworks when forwarding is on, otherwise to the support admins, and update
+emails ask the customer to answer in Vectorbea. `support_ticket_messages` and
+`support_tickets.helpdesk_ref` / `last_activity_at` are created by V078.
 
 The build command is already pinned in `apps/web/vercel.json`
 (`npm run prisma:generate && next build`). Set the Vercel project **Root

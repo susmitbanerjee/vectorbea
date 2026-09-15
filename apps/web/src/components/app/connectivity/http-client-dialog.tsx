@@ -57,7 +57,7 @@ export function HttpClientDialog({ onClose, onCreateTool }: { onClose: () => voi
   }, [result]);
 
   return <Modal open onOpenChange={(open) => { if (!open) { controller.current?.abort(); onClose(); } }} size="xl">
-    <ModalHeader eyebrow="Integrations · Generic HTTP" title="HTTP request client" description="Test a request, then create a reusable agent tool. Test values and credentials are never copied into the tool definition." />
+    <ModalHeader eyebrow="Integrations · Generic HTTP" title="HTTP request client" description="Test a request, then save it as a tool." />
     <ModalBody>
       <div className="grid gap-4">
         <fieldset disabled={busy || fileBusy} className="grid min-w-0 gap-4">
@@ -113,7 +113,7 @@ export function HttpClientDialog({ onClose, onCreateTool }: { onClose: () => voi
             <Text variant="caption" tone="muted">Request bodies and files: 1 MiB total. Multipart boundaries are generated automatically.</Text>
           </div> : null}
           {tab === "Import cURL" ? <div className="grid gap-3">
-            <Field label="cURL command" description="Paste a single cURL command. It is parsed, never executed as a shell command. Unsupported flags and local file references are reported."><Textarea mono autoGrow={false} minRows={8} value={curl} onChange={(event) => setCurl(event.target.value)} placeholder={"curl -X POST 'https://api.example.com/search' -H 'Content-Type: application/json' --data-raw '{\"query\":\"hello\"}'"} /></Field>
+            <Field label="cURL command" description="Paste one cURL command."><Textarea mono autoGrow={false} minRows={8} value={curl} onChange={(event) => setCurl(event.target.value)} placeholder={"curl -X POST 'https://api.example.com/search' -H 'Content-Type: application/json' --data-raw '{\"query\":\"hello\"}'"} /></Field>
             <div className="flex flex-wrap items-center gap-3">
               <Button variant="secondary" disabled={!curl.trim()} onClick={() => loadCurl(curl)}>Import request</Button>
               <Field label="Upload cURL text file"><input type="file" accept=".txt,.curl,.sh" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 1024 * 1024) { setError("cURL file exceeds 1 MiB."); return; } try { loadCurl(await file.text()); } catch { setError("Could not read the cURL file."); } }} /></Field>

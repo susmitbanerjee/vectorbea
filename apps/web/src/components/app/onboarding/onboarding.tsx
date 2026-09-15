@@ -312,7 +312,7 @@ function StepWorkspace({ state, update }: StepProps) {
             <Checkbox
               checked={state.createStaging}
               onCheckedChange={(v) => update({ createStaging: v === true })}
-              description="A separate environment with its own connections and budgets, for verifying changes before they touch customers."
+              description="A separate environment for testing changes."
             >
               Also create staging
             </Checkbox>

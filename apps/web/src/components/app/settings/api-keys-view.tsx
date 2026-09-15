@@ -141,9 +141,9 @@ export function ApiKeysView() {
       <PageHeader
         eyebrow="Govern"
         title="API keys"
-        description="A key lets your own code start runs and read results. It names a workspace, and it is held to exactly the limits the browser is."
+        description="Let your own code start runs and read results."
         actions={
-          <Tooltip content={denial ?? (atLimit ? "This workspace is at its plan's key limit." : "")} disabled={mayManage && !atLimit}>
+          <Tooltip content={denial ?? (atLimit ? (limit === 0 ? "Your plan does not include API keys." : "This workspace is at its plan's key limit.") : "")} disabled={mayManage && !atLimit}>
             <span>
               <Button
                 variant="primary"
@@ -162,8 +162,9 @@ export function ApiKeysView() {
       <div className="grid grid-cols-1 gap-4">
         {atLimit ? (
           <Banner tone="warning">
-            This workspace holds {live.length} of {limit} keys its plan allows. Revoke one, or
-            rotate instead of adding — rotation replaces a key without spending a slot.
+            {limit === 0
+              ? "Your plan does not include API keys. Upgrade under Settings → Plan & access to create one."
+              : `This workspace has ${live.length} of ${limit} keys. Revoke or rotate one to make room.`}
           </Banner>
         ) : null}
 
@@ -479,7 +480,7 @@ function CreateKeyDialog({
             <Field
               label="Name"
               required
-              description="Say where it will live — 'CI pipeline', 'Zapier', 'billing-service'. This is the only thing you will have to go on when deciding whether a key is still needed."
+              description="Where it will be used, for example CI pipeline or billing-service."
             >
               <Input
                 value={name}
@@ -663,20 +664,14 @@ function UsageNote({ rateLimitPerMinute }: { rateLimitPerMinute: number | null }
           </Text>
         </div>
 
-        <Text variant="body-sm" tone="secondary" className="block max-w-[80ch] leading-snug">
-          A key names this workspace, so a request it authenticates resolves the same plan, quota,
-          concurrency ceiling and feature gates as the same request from the browser. There is no
-          second enforcement path that could fall behind the first.
-          {rateLimitPerMinute && rateLimitPerMinute > 0 ? (
-            <> This workspace&rsquo;s plan allows {rateLimitPerMinute} requests a minute per key.</>
-          ) : null}
-        </Text>
+        {rateLimitPerMinute && rateLimitPerMinute > 0 ? (
+          <Text variant="caption" tone="muted" className="block">
+            Up to {rateLimitPerMinute} requests a minute per key.
+          </Text>
+        ) : null}
 
         <div className="flex flex-wrap gap-2">
           <Button asChild size="xs" variant="secondary">
-            <Link href={"/settings/sdk" as Route}>SDK and docs</Link>
-          </Button>
-          <Button asChild size="xs" variant="ghost">
             <Link href={"/workflows" as Route}>Workflows you can trigger</Link>
           </Button>
         </div>
@@ -697,8 +692,7 @@ function Empty({
       <div className="max-w-[46ch] text-center">
         <Text variant="heading-sm" tone="max" as="p" className="block">No API keys yet</Text>
         <Text variant="body-sm" tone="secondary" className="mt-1.5 block leading-snug">
-          A key is what lets something other than this browser start a run — your backend, a cron, a
-          CI job, somebody else&rsquo;s webhook. Nothing is exposed until you make one.
+          Create a key to start runs from your backend, a scheduled job or CI.
         </Text>
         {denial ? (
           <Text variant="caption" tone="muted" className="mt-2 block leading-snug">{denial}</Text>

@@ -312,7 +312,7 @@ export function ConnectMcpDialog({
       <ModalHeader
         eyebrow="Connect · Integrations"
         title="Connect an MCP server"
-        description="Paste the server's URL. If it uses sign-in you'll sign in once; its tools are discovered as soon as it connects."
+        description="Paste the server URL. Its tools are added once it connects."
         mark={<Icon icon={Plugs} size="md" decorative />}
         closeDisabled={saving}
       />
@@ -325,7 +325,7 @@ export function ConnectMcpDialog({
             activeIndex={step}
             reachableIndex={reachable}
             onSelect={(i) => { if (saved ? i >= 2 && i <= reachable : i <= reachable) setStep(i); }}
-            footnote="Credentials and sign-ins are encrypted at rest and never returned by the API."
+            footnote="Credentials are encrypted and never shown again."
           />
         }
       >
@@ -476,7 +476,7 @@ function ServerStep({
         </div>
       </ModalSection>
 
-      <ModalSection title="Name" description="Prefixes every tool this server adds, so it's what you'll read in an agent's tool list.">
+      <ModalSection title="Name" description="Shown before each of this server's tool names.">
         <Field label="Name" labelHidden>
           <Input value={name} maxLength={80} onChange={(event) => onName(event.target.value)} placeholder="Linear" />
         </Field>

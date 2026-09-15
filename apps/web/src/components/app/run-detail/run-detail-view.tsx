@@ -16,7 +16,6 @@ import { ResultPanel } from "./result-panel";
 import { DeliveryPanel } from "./delivery-panel";
 import { StepTimeline } from "./step-timeline";
 import { CanvasMirror } from "./canvas-mirror";
-import { Inspector } from "./inspector";
 import { LogStream } from "./log-stream";
 import type { RunStreamState } from "~/lib/api/run-stream";
 import { CompareView } from "./compare";
@@ -160,11 +159,11 @@ function RunDetailBody({
 
   const [comparing, setComparing] = React.useState(false);
   const [logFullscreen, setLogFullscreen] = React.useState(false);
-  const [logHeight, setLogHeight] = React.useState(220);
+  const [logHeight, setLogHeight] = React.useState(340);
   const [leftWidth, setLeftWidth] = React.useState(272);
-  const [rightWidth, setRightWidth] = React.useState(300);
+
   const [leftOpen, setLeftOpen] = React.useState(true);
-  const [rightOpen, setRightOpen] = React.useState(true);
+
   const [cancelling, setCancelling] = React.useState(false);
   const [cancelError, setCancelError] = React.useState<string | null>(null);
   const [retrying, setRetrying] = React.useState(false);
@@ -225,7 +224,7 @@ function RunDetailBody({
   };
 
   const startLeft = React.useRef(leftWidth);
-  const startRight = React.useRef(rightWidth);
+
   const startLog = React.useRef(logHeight);
 
   return (
@@ -269,11 +268,11 @@ function RunDetailBody({
 
       {/* ── Panes ──────────────────────────────────────────────────────────── */}
       {logFullscreen ? (
-        <div className="border-subtle relative h-[70vh] overflow-hidden rounded-lg border">
+        <div className="border-subtle relative h-[80vh] overflow-hidden rounded-lg border">
           <LogStream fullscreen onToggleFullscreen={() => setLogFullscreen(false)} className="h-full" stream={stream} />
         </div>
       ) : (
-        <div className="border-subtle flex h-[62vh] min-h-[26rem] overflow-hidden rounded-lg border">
+        <div className="border-subtle flex h-[78vh] min-h-[36rem] overflow-hidden rounded-lg border">
           {leftOpen ? (
             <>
               <div style={{ width: leftWidth }} className="flex min-w-0 shrink-0 flex-col">
@@ -303,7 +302,7 @@ function RunDetailBody({
               label="Resize log"
               onPointerDown={(e) => {
                 startLog.current = logHeight;
-                drag("y", (d) => setLogHeight(Math.min(520, Math.max(96, startLog.current - d))))(e);
+                drag("y", (d) => setLogHeight(Math.min(720, Math.max(120, startLog.current - d))))(e);
               }}
             />
 
@@ -317,24 +316,6 @@ function RunDetailBody({
             </div>
           </div>
 
-          {rightOpen ? (
-            <>
-              <Divider
-                axis="x"
-                label="Resize inspector"
-                onPointerDown={(e) => {
-                  startRight.current = rightWidth;
-                  drag("x", (d) => setRightWidth(Math.min(460, Math.max(220, startRight.current - d))))(e);
-                }}
-                onCollapse={() => setRightOpen(false)}
-              />
-              <div style={{ width: rightWidth }} className="flex min-w-0 shrink-0 flex-col">
-                <Inspector className="h-full" />
-              </div>
-            </>
-          ) : (
-            <CollapsedRail label="Inspector" onExpand={() => setRightOpen(true)} />
-          )}
         </div>
       )}
 

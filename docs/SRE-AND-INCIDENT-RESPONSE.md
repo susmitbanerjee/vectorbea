@@ -238,6 +238,24 @@ the work.
 
 ---
 
+### Incidents say what broke
+
+`failure_incidents` rows come from the recovery classifier chain
+(`com.vectorbea.recovery.classifier`, vendored into api and worker from
+`packages/recovery-kotlin`). Agent failures had no classifier, so budgets,
+iteration and tool-call limits, and an agent that gave up all landed in
+`UNKNOWN`, and a token-BUDGET breach matched the LLM classifier's "max token"
+rule as a context-window error. `AgentFailureClassifier` runs before the LLM
+classifier and names them (`AGENT_TOKEN_BUDGET_EXCEEDED`, `AGENT_TOOL_CALL_LIMIT`,
+`AGENT_ITERATION_LIMIT`, `AGENT_COST_LIMIT`, `AGENT_COULD_NOT_FINISH`), plus
+`TOOL_INPUT_MISSING` and `STEP_TYPE_UNSUPPORTED`.
+
+The Incidents page and the inbox never print the enum. `lib/incidents/
+describe-incident` maps each code to a title, a kind and a fix, reads records
+still stored as `UNKNOWN` from their `technical_summary` with the same
+patterns, and takes the step or agent name from the failure message. Worker
+failure messages now start `Step '<name>' failed:` instead of the node id.
+
 ## 7. Long runs — what testing found
 
 `LongRunAcceptanceTest` drives 200 ticks, 40 signals and 5 approvals against a

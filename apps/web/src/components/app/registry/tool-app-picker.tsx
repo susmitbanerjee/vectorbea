@@ -108,7 +108,7 @@ export function ToolAppPicker({
   return (
     <ModalSection
       title="Send a message or use an app"
-      description="Pick the app and what the tool does there. Vectorbea fills in the request and the input schema; you decide what is fixed and what the agent writes."
+      description="Pick the app and what the tool should do."
     >
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4" role="group" aria-label="App">
         {apps.map((candidate) => {

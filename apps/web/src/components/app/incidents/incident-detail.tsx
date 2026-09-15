@@ -18,6 +18,7 @@ import { SEVERITY_STYLE, STATUS_STYLE, Sparkline, titleFor } from "./incidents-v
 import { RootCauseIcon, BlastRadiusIcon, RecoveryEngineIcon } from "~/components/icons/domain";
 import { useIncidentsData } from "./use-incidents-data";
 import { useApi } from "~/lib/api/api-provider";
+import { LocalTime } from "~/components/ui/local-time";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    INCIDENT DETAIL
@@ -150,10 +151,10 @@ export function IncidentDetail({ incidentId }: { incidentId: string }) {
               <RootCauseIcon size={14} aria-hidden="true" className="text-status-failed shrink-0" />
               <Text variant="eyebrow" tone="muted">Root cause</Text>
             </div>
-            <Text variant="body-sm" tone="primary" className="block">{incident.signature}</Text>
+            <Text variant="body-sm" tone="primary" className="block break-words">{incident.reason ?? incident.title ?? incident.signature}</Text>
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
-              <Fact label="Classified as">{incident.classification}</Fact>
-              <Fact label="Failing component">
+              <Fact label="Kind">{incident.classification}</Fact>
+              <Fact label="Where">
                 <Link href={incident.componentHref as Route} className="hover:text-accent underline decoration-dotted underline-offset-2 rounded-xs outline-none focus-visible:focus-ring">
                   {incident.failingComponent}
                 </Link>
@@ -281,7 +282,7 @@ function ActivityRow({ entry }: { entry: IncidentActivity }) {
         <span className="font-code">{entry.actor}</span> — {entry.action}
       </Text>
       <Text variant="caption" tone="disabled" className="block" tabular>
-        {new Date(entry.at).toISOString().replace("T", " ").slice(0, 16)}Z
+        <LocalTime at={entry.at} format="short" />
       </Text>
       {entry.note ? (
         <Text variant="caption" tone="muted" className="mt-0.5 block">“{entry.note}”</Text>

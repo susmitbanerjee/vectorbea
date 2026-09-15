@@ -106,6 +106,22 @@ class Database private constructor(
         }
 
         /**
+         * The runtime tables that do not exist yet, by `to_regclass` — a lookup that
+         * needs no privilege beyond connecting, so it answers before any DDL is tried.
+         */
+        fun missingRuntimeTables(ds: DataSource): List<String> =
+            ds.connection.use { conn ->
+                RUNTIME_TABLES.filter { table ->
+                    conn.prepareStatement("SELECT to_regclass(?) IS NULL").use { st ->
+                        st.setString(1, table)
+                        st.executeQuery().use { rs -> rs.next() && rs.getBoolean(1) }
+                    }
+                }
+            }
+
+        private val RUNTIME_TABLES = listOf("workers", "run_approvals", "step_outputs", "connection_secrets")
+
+        /**
          * Ensure the `step_outputs` table exists (idempotent).
          * Stores raw/extracted/validated output tiers for each node execution.
          */

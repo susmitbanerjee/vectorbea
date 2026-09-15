@@ -126,7 +126,7 @@ export function SettingsView() {
   if (!workspaceRole.resolving && !workspaceRole.canAdminister) {
     return (
       <PageContainer>
-        <PageHeader eyebrow="Govern" title="Settings" description="This workspace's identity, the model providers it can call, and the controls that end it." />
+        <PageHeader eyebrow="Govern" title="Settings" description="Workspace details, model providers and danger zone." />
         <SettingsNav />
         <SettingsDenied role={workspaceRole.role} section="Workspace settings" />
       </PageContainer>
@@ -138,7 +138,7 @@ export function SettingsView() {
       <PageHeader
         eyebrow="Govern"
         title="Settings"
-        description="This workspace's identity, the model providers it can call, and the controls that end it."
+        description="Workspace details, model providers and danger zone."
         metadata={
           workspace.data ? (
             <>
@@ -253,7 +253,7 @@ function IdentityPanel({
   return (
     <Panel
       title="Workspace"
-      help="The name appears in the switcher, in invitations and on every screen. The slug is its stable handle."
+      help="How this workspace appears to its members."
       footer={
         <>
           <StatusLine
@@ -299,7 +299,7 @@ function IdentityPanel({
             </Field>
             <Field
               label="Slug"
-              description="Used in links and invitations. Changing it does not redirect the old one."
+              description="Used in links. Old links stop working if you change it."
               error={canEdit ? slugError : undefined}
               disabled={!canEdit}
             >
@@ -351,7 +351,7 @@ function ProvidersPanel({ workspaceId }: { workspaceId: string | null }) {
   return (
     <Panel
       title="Model providers"
-      help="The LLM connections this workspace can call. Enabling, testing and rotating one happens on Connections — that record is what the runtime resolves a model call through, so it is the only place a change takes effect."
+      help="Model connections this workspace can use. Manage them on Connections."
       action={
         <Button asChild size="xs" variant="secondary">
           <Link href={"/connections" as Route}>
@@ -530,30 +530,25 @@ function DangerPanel({ workspace }: { workspace: WorkspaceSettings }) {
                 <ul className="border-subtle divide-subtle divide-y rounded-md border">
                   {(footprint?.rows ?? []).slice(0, 8).map((row) => (
                     <li key={row.table} className="flex items-baseline justify-between gap-3 px-3 py-1.5">
-                      <Text variant="mono-sm" tone="secondary" className="truncate">{row.table}</Text>
+                      <Text variant="body-sm" tone="secondary" className="truncate">{humanTable(row.table)}</Text>
                       <Text variant="caption" tone="primary" tabular>{row.count.toLocaleString()}</Text>
                     </li>
                   ))}
                 </ul>
                 {(footprint?.rows.length ?? 0) > 8 ? (
                   <Text variant="caption" tone="muted" className="mt-1.5 block">
-                    …and {(footprint!.rows.length - 8).toLocaleString()} more tables.
+                    …and {(footprint!.rows.length - 8).toLocaleString()} more.
                   </Text>
                 ) : null}
               </ModalSection>
 
               <ModalSection title="What stays">
                 <Text variant="body-sm" tone="secondary" className="block leading-snug">
-                  The audit log. It is append-only and refuses deletion at the database, so the record of
-                  what happened in this workspace — including this deletion — survives it. That is
-                  deliberate, and it is the answer to give a compliance reviewer who asks.
+                  The audit log, including a record of this deletion.
                 </Text>
               </ModalSection>
 
-              <Field
-                label={`Type "${workspace.name}" to confirm`}
-                description="The name is checked on the server, not only here."
-              >
+              <Field label={`Type "${workspace.name}" to confirm`}>
                 <Input
                   value={confirmName}
                   autoComplete="off"
@@ -627,4 +622,10 @@ function ProviderSkeleton() {
       ))}
     </div>
   );
+}
+
+/** `agent_runs` → `Agent runs`. Stored names are ours; the reader needs the kind of thing. */
+function humanTable(table: string): string {
+  const words = table.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }

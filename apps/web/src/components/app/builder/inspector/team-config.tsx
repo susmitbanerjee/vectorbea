@@ -147,7 +147,7 @@ export function TeamConfigPanel({
       {/* ── Policy ─────────────────────────────────────────────────────────── */}
       <Section
         title="Policy"
-        help="The shape of the team. It decides which handoffs members may perform and when the team is finished — both enforced in the runtime, not suggested in a prompt."
+        help="How the team works together and when it is done."
       >
         <Select
           options={TEAM_POLICIES.map((p) => ({
@@ -170,7 +170,7 @@ export function TeamConfigPanel({
       {/* ── The delegation graph, live ─────────────────────────────────────── */}
       <Section
         title="Delegation"
-        help="What each member is allowed to hand work to. The grant is a whitelist checked in the runtime at the moment a handoff is attempted — a roster stated only in a prompt is documentation."
+        help="Who each member can hand work to."
       >
         <div className="border-subtle bg-surface-base overflow-x-auto rounded-sm border p-2">
           <TeamDiagram team={team} width={280} height={team.roster.length > 3 ? 150 : 90} unbound={unbound} />
@@ -203,7 +203,7 @@ export function TeamConfigPanel({
       {/* ── Roster ─────────────────────────────────────────────────────────── */}
       <Section
         title="Roster"
-        help="The members, and what each may hand work to. The entry member is where the team starts; every other member has to be reachable from it or it never runs."
+        help="The members and who each can hand work to."
       >
         {registry.loading ? (
           <Text variant="caption" tone="muted" className="block">Loading the registry…</Text>
@@ -339,7 +339,7 @@ export function TeamConfigPanel({
       {/* ── Entry ──────────────────────────────────────────────────────────── */}
       <Section
         title="Entry member"
-        help="Where the team starts. Left on “decide from roles”, the runtime picks the member whose role matches the policy, and falls back to the first — which means reordering the roster can change where the team starts."
+        help="The member the team starts with."
       >
         <Select
           options={[
@@ -383,7 +383,7 @@ export function TeamConfigPanel({
         <div className="grid gap-2">
           <Field
             label="Join"
-            help="“First success” cancels the rest — they are cancelled, not failed, because they were not asked to finish."
+            help="“First success” stops the others once one finishes."
           >
             <Select
               options={[
@@ -399,7 +399,7 @@ export function TeamConfigPanel({
           </Field>
           <Field
             label="If a child fails"
-            help="The default is to carry on: an agent is a callable exactly like a tool, and a failed tool call does not fail the step."
+            help="By default the team carries on when a member fails."
           >
             <Select
               options={[
@@ -417,7 +417,7 @@ export function TeamConfigPanel({
       {/* ── Limits ─────────────────────────────────────────────────────────── */}
       <Section
         title="Limits"
-        help="Multi-agent's characteristic failure is not a wrong answer, it is a system that never stops. Every value here is a bound on that, checked before an activation is created."
+        help="Limits that stop the team from running forever."
       >
         <div className="grid grid-cols-2 gap-2">
           <Field
@@ -467,7 +467,7 @@ export function TeamConfigPanel({
           </Field>
           <Field
             label="Wall clock (min)"
-            help="Excludes time parked on an approval — a team waiting three days on a person has not been running for three days."
+            help="Time waiting for approval does not count."
           >
             <Input
               type="number" min={1} max={720}
@@ -488,7 +488,7 @@ export function TeamConfigPanel({
       {/* ── Budget ─────────────────────────────────────────────────────────── */}
       <Section
         title="Budget"
-        help="A zero here means NO ceiling on that dimension, not a ceiling of zero. Breaching one is not a failure: the run ends CeilingExceeded, which is a distinct terminal state and names the limit it hit."
+        help="Zero means no limit."
       >
         <div className="grid grid-cols-2 gap-2">
           <Field label="Max cost (cents)" help="Across the whole team, children included. 0 for no ceiling.">
@@ -532,7 +532,7 @@ export function TeamConfigPanel({
       {/* ── What the runtime will refuse ───────────────────────────────────── */}
       <Section
         title="Handoffs this policy permits"
-        help="Checked in runtime code at the same boundary as the roster grant. A policy stated only in a prompt is a suggestion."
+        help="Enforced on every handoff."
       >
         <Text variant="body-sm" tone="secondary" className="block">
           {PERMITTED_LABEL[team.policy]}

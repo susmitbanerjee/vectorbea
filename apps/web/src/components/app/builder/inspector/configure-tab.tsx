@@ -59,8 +59,8 @@ export function ConfigureTab({
   return (
     <div className="grid gap-4 p-3">
       {/* ── Identity ─────────────────────────────────────────────────────── */}
-      <Section title="Identity" help="How this step is named everywhere it appears — the canvas, the run timeline, and the version diff.">
-        <Field label="Step label" help="A verb phrase reads best: what this step does, not what it is.">
+      <Section title="Identity" help="Shown on the canvas and in runs.">
+        <Field label="Step label" help="Say what the step does.">
           <Input
             value={node.name}
             onChange={(e) => onChange({ name: e.target.value })}
@@ -68,7 +68,7 @@ export function ConfigureTab({
           />
         </Field>
         <div className="mt-2">
-          <Field label="Description" help="Why this step exists. Read by whoever reviews the next version diff.">
+          <Field label="Description" help="Optional note on what this step is for.">
             <Input
               value={String(node.config.description ?? "")}
               onChange={(e) => set("description", e.target.value)}
@@ -161,7 +161,7 @@ function ToolConfig({ node, set, setMany }: {
 
   return (
     <>
-      <Section title="Tool" help="What this step calls. The risk tier decides whether the canvas will demand an approval gate upstream.">
+      <Section title="Tool" help="The tool this step runs.">
         {selected ? (
           <div className="border-subtle bg-surface-sunken flex flex-wrap items-center gap-2 rounded-sm border p-2">
             <ProviderLogo
@@ -246,7 +246,7 @@ function ToolConfig({ node, set, setMany }: {
         )}
       </Section>
 
-      <Section title="Connection" help="Which credentials the call runs under. Health is live — a failing connection means this step fails on its next run.">
+      <Section title="Connection" help="The account this step uses.">
         <Select
           options={[
             { value: "", label: selected?.connectionId ? "The tool's own connection" : "Workspace default" },
@@ -282,7 +282,7 @@ function ToolConfig({ node, set, setMany }: {
       </Section>
 
       {params.length > 0 ? (
-        <Section title="Parameters" help="Read from the tool's own input schema. Values are bound on the Inputs tab, where you can see what each one resolves to.">
+        <Section title="Parameters" help="Set values on the Inputs tab.">
           <ul className="grid gap-1">
             {params.map((p) => (
               <li key={p.id} className="flex items-baseline gap-2">
@@ -325,7 +325,7 @@ function StepLimits({ config, setMany }: {
   return (
     <Section
       title="Limits for this step"
-      help="The step stops when it reaches any of these. An agent that reads code or long results needs a larger token budget."
+      help="The step stops at any of these. Agents that read long content need more tokens."
     >
       <div className="grid grid-cols-3 gap-2">
         <Field label="Total tokens" help="Across every reply and tool result. Default 16,384.">
@@ -376,7 +376,7 @@ function AgentConfig({ node, set, setMany }: {
 
   return (
     <>
-      <Section title="Agent" help="The registered agent this step runs. Its model and tool grants come from the registry.">
+      <Section title="Agent" help="The agent this step runs.">
         {registry.loading ? (
           <Text variant="caption" tone="muted" className="block">Loading the registry…</Text>
         ) : registry.agents.length === 0 ? (
@@ -456,7 +456,7 @@ function AgentConfig({ node, set, setMany }: {
 
       <Section title="Generation" help="How the model is sampled for this step.">
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Temperature" help="0 is deterministic. Above 0.7 the same input starts producing different plans.">
+          <Field label="Temperature" help="Low is consistent, high is varied.">
             <Input
               type="number" min={0} max={2} step={0.1}
               value={Number(node.config.temperature ?? 0)}
@@ -464,7 +464,7 @@ function AgentConfig({ node, set, setMany }: {
               className="h-7 text-body-sm"
             />
           </Field>
-          <Field label="Max tokens" help="Ceiling on the response. Reached mid-sentence, it truncates rather than failing.">
+          <Field label="Max tokens" help="Longest reply allowed.">
             <Input
               type="number" min={64} step={64}
               value={Number(node.config.maxTokens ?? 2048)}
@@ -474,7 +474,7 @@ function AgentConfig({ node, set, setMany }: {
           </Field>
         </div>
         <div className="mt-2">
-          <Field label="Output schema" help="Strict rejects a response that does not match the declared shape, turning a malformed answer into a retry rather than corrupt downstream data.">
+          <Field label="Output schema" help="Strict retries any reply that does not match the output fields.">
             <Select
               options={[
                 { value: "strict", label: "Strict — reject non-conforming output" },
@@ -489,7 +489,7 @@ function AgentConfig({ node, set, setMany }: {
         </div>
       </Section>
 
-      <Section title="Tool grants" help="Which tools the agent may call from this step. Narrower than the agent's registered grants is allowed; wider is not.">
+      <Section title="Tool grants" help="Tools the agent can use in this step.">
         {/* THE LIST IS THE AGENT'S OWN GRANTS, NOT THE WHOLE REGISTRY.
             The help text above has always promised that a step cannot widen
             what the agent is allowed to call, and the previous version offered
@@ -547,7 +547,7 @@ function AgentConfig({ node, set, setMany }: {
 
 function LlmConfig({ node, set }: { node: VersionNode; set: (k: string, v: unknown) => void }) {
   return (
-    <Section title="Model" help="A single model call. Unlike an agent, it makes no tool calls and takes no further decisions.">
+    <Section title="Model" help="One model call, with no tools.">
       <Select
         options={[
           { value: "claude-haiku-4", label: "claude-haiku-4 — fastest, cheapest" },
@@ -561,7 +561,7 @@ function LlmConfig({ node, set }: { node: VersionNode; set: (k: string, v: unkno
         aria-label="Model"
       />
       <div className="mt-2 grid grid-cols-2 gap-2">
-        <Field label="Temperature" help="0 is deterministic — the right default for classification and extraction.">
+        <Field label="Temperature" help="Low is consistent, high is varied.">
           <Input
             type="number" min={0} max={2} step={0.1}
             value={Number(node.config.temperature ?? 0)}
@@ -594,7 +594,7 @@ function BranchConfig({ node, set }: { node: VersionNode; set: (k: string, v: un
   };
 
   return (
-    <Section title="Condition" help="Evaluated against the subject bound on the Inputs tab. The true arm is taken when it holds.">
+    <Section title="Condition" help="When this is true, the run takes the first branch.">
       <div className="mb-2 flex items-center gap-0.5">
         {(["visual", "raw"] as const).map((m) => (
           <button
@@ -692,7 +692,7 @@ function ParallelConfig({ node, set }: { node: VersionNode; set: (k: string, v: 
   return (
     <Section title="Fan out" help="One branch runs per item in the bound collection.">
       <div className="grid gap-2">
-        <Field label="Concurrency limit" help="How many branches run at once. Higher finishes sooner and hits downstream rate limits harder.">
+        <Field label="Concurrency limit" help="How many branches run at once.">
           <Input
             type="number" min={1} max={64}
             value={Number(node.config.maxConcurrency ?? 8)}
@@ -758,7 +758,7 @@ function MergeConfig({ node, set }: { node: VersionNode; set: (k: string, v: unk
 function WaitConfig({ node, set }: { node: VersionNode; set: (k: string, v: unknown) => void }) {
   const mode = String(node.config.mode ?? "duration");
   return (
-    <Section title="Wait" help="The run holds here. Waiting is durable — a crash during the wait resumes the wait, it does not restart the run.">
+    <Section title="Wait" help="The run pauses here, then continues.">
       <Field label="Wait for" help="Which kind of wait this is.">
         <Select
           options={[
@@ -840,7 +840,7 @@ function ApprovalConfig({ node, set }: { node: VersionNode; set: (k: string, v: 
         <div className="grid gap-2">
           <Field
             label="Approver group"
-            help="A workspace role. Anyone with that role or higher may decide, and the first decision wins."
+            help="Anyone with this role or higher can approve."
           >
             <Select
               options={options}
@@ -850,7 +850,7 @@ function ApprovalConfig({ node, set }: { node: VersionNode; set: (k: string, v: 
               aria-label="Approver group"
             />
           </Field>
-          <Field label="SLA" help="Minutes before the gate is considered breached. The Approvals page counts down against this.">
+          <Field label="SLA" help="Minutes to respond.">
             <Input
               type="number" min={5}
               value={Number(node.config.slaMinutes ?? 240)}
@@ -888,7 +888,7 @@ function ApprovalConfig({ node, set }: { node: VersionNode; set: (k: string, v: 
       {/* The template editor that produces the Approvals page's resolved context. */}
       <Section
         title="Decision context"
-        help="What the approver sees. Each row is bound to an upstream field on the Inputs tab and appears on the Approvals page with its resolved value and its source."
+        help="What the approver sees. Set the values on the Inputs tab."
       >
         {context.length === 0 ? (
           <Text variant="caption" tone="muted" className="block leading-snug">
@@ -955,7 +955,7 @@ function ApprovalConfig({ node, set }: { node: VersionNode; set: (k: string, v: 
 
 function TriggerConfig({ node, set }: { node: VersionNode; set: (k: string, v: unknown) => void }) {
   return (
-    <Section title="Schedule" help="When the run starts. Overlap policy matters more than it looks — it decides what happens when a run is still going as the next one is due.">
+    <Section title="Schedule" help="When the workflow runs.">
       <div className="grid gap-2">
         <Field label="Cron" help="Standard five-field cron, in the timezone below.">
           <Input
@@ -965,7 +965,7 @@ function TriggerConfig({ node, set }: { node: VersionNode; set: (k: string, v: u
             className="h-7 font-code text-mono-sm"
           />
         </Field>
-        <Field label="Timezone" help="Daylight saving is honoured, so 09:00 stays 09:00 local.">
+        <Field label="Timezone" help="Daylight saving is handled.">
           <Input
             value={String(node.config.timezone ?? "UTC")}
             onChange={(e) => set("timezone", e.target.value)}
@@ -984,7 +984,7 @@ function TriggerConfig({ node, set }: { node: VersionNode; set: (k: string, v: u
             aria-label="Overlap policy"
           />
         </Field>
-        <Field label="Jitter" help="Seconds of random delay. Spreads load when many workflows share a schedule.">
+        <Field label="Jitter" help="Adds a small random delay, in seconds.">
           <Input
             type="number" min={0}
             value={Number(node.config.jitterSeconds ?? 0)}
@@ -1013,7 +1013,7 @@ function OutputConfig({ node, set }: { node: VersionNode; set: (k: string, v: un
             aria-label="Output format"
           />
         </Field>
-        <Field label="Destination" help="A channel, address, bucket or webhook. Leave empty to keep the result on the run only.">
+        <Field label="Destination" help="Where to send the result. Leave empty to keep it on the run.">
           <Input
             value={String(node.config.destination ?? "")}
             onChange={(e) => set("destination", e.target.value)}

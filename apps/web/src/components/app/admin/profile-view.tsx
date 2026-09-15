@@ -8,7 +8,8 @@ import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
-import { MonoId } from "~/components/ui/mono-id";
+import { TimezonePicker } from "~/components/ui/timezone-picker";
+import { browserTimeZone, setPreferredTimeZone } from "~/lib/time/time-zone";
 import { cn } from "~/lib/cn";
 import { AdminInlineState, describeAdminFailure } from "./admin-states";
 import { SettingsNav } from "./settings-nav";
@@ -44,6 +45,7 @@ interface Profile {
   isPlatformAdmin: boolean;
   hasPassword: boolean;
   createdAt: string;
+  timeZone: string | null;
 }
 
 const NAME_MAX = 120;
@@ -66,13 +68,16 @@ export function ProfileView() {
       readJson<Profile>(await fetch("/api/settings/profile", { cache: "no-store" }), "Your profile could not be loaded"),
     retry: false,
   });
+  React.useEffect(() => {
+    if (profile.data) setPreferredTimeZone(profile.data.timeZone ?? null);
+  }, [profile.data]);
 
   return (
     <PageContainer>
       <PageHeader
         eyebrow="Govern"
         title="Profile"
-        description="Your account, across every workspace you belong to."
+        description="Your account, across every workspace."
         metadata={
           profile.data ? (
             <>
@@ -112,14 +117,14 @@ export function ProfileView() {
 function AccountPanel({ profile, loading }: { profile: Profile | undefined; loading: boolean }) {
   const queryClient = useQueryClient();
   const [fullName, setFullName] = React.useState("");
-  const [avatarUrl, setAvatarUrl] = React.useState("");
+  const [timeZone, setTimeZone] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<SaveState>(null);
   const [loaded, setLoaded] = React.useState(false);
 
   React.useEffect(() => {
     if (profile && !loaded) {
       setFullName(profile.fullName ?? "");
-      setAvatarUrl(profile.avatarUrl ?? "");
+      setTimeZone(profile.timeZone ?? null);
       setLoaded(true);
     }
   }, [profile, loaded]);
@@ -130,46 +135,34 @@ function AccountPanel({ profile, loading }: { profile: Profile | undefined; load
         await fetch("/api/settings/profile", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fullName: fullName.trim() || null,
-            avatarUrl: avatarUrl.trim() || null,
-          }),
+          body: JSON.stringify({ fullName: fullName.trim() || null, timeZone }),
         }),
         "Your profile could not be saved",
       ),
     onSuccess: (next) => {
-      setStatus({ tone: "ok", text: "Saved. Your name updates everywhere it appears." });
+      setStatus({ tone: "ok", text: "Profile saved." });
+      setPreferredTimeZone(next.timeZone ?? null);
       queryClient.setQueryData(["settings", "profile"], next);
-      // The member list and the account menu both render this name.
       void queryClient.invalidateQueries({ queryKey: ["session"] });
     },
     onError: (error: Error) => setStatus({ tone: "error", text: error.message }),
   });
 
   const nameError = fullName.length > NAME_MAX ? `Keep it to ${NAME_MAX} characters or fewer.` : undefined;
-  const avatarError =
-    avatarUrl.trim() && !/^https:\/\//i.test(avatarUrl.trim())
-      ? "Enter a full image URL starting with https://."
-      : undefined;
-
   const dirty =
     Boolean(profile) &&
-    (fullName !== (profile!.fullName ?? "") || avatarUrl !== (profile!.avatarUrl ?? ""));
+    (fullName !== (profile!.fullName ?? "") || timeZone !== (profile!.timeZone ?? null));
 
   return (
     <Panel
       title="Account"
-      help="What other people in your workspaces see next to your activity."
       footer={
         <>
-          <StatusLine
-            state={status}
-            resting={dirty ? "Unsaved changes." : "Your name appears on members lists, approvals and the audit log."}
-          />
+          <StatusLine state={status} resting={dirty ? "Unsaved changes." : ""} />
           <Button
             size="sm"
             variant="primary"
-            disabled={!dirty || Boolean(nameError || avatarError) || loading}
+            disabled={!dirty || Boolean(nameError) || loading}
             loading={save.isPending}
             loadingLabel="Saving"
             onClick={() => { setStatus(null); save.mutate(); }}
@@ -182,61 +175,40 @@ function AccountPanel({ profile, loading }: { profile: Profile | undefined; load
       {loading ? <FormSkeleton rows={2} /> : null}
 
       {profile ? (
-        <>
-          <div className="flex items-start gap-4">
-            <Avatar url={avatarUrl.trim() || profile.avatarUrl} name={fullName || profile.email || "?"} />
-            <div className="grid flex-1 gap-3">
-              <Field
-                label="Display name"
-                error={nameError}
-                characterCount={{ value: fullName.length, max: NAME_MAX }}
-              >
-                <Input
-                  value={fullName}
-                  maxLength={NAME_MAX}
-                  placeholder="Not set"
-                  onChange={(event) => { setFullName(event.target.value); setStatus(null); }}
-                />
-              </Field>
-              <Field
-                label="Avatar URL"
-                description="An https image URL. Uploads are not hosted here."
-                error={avatarError}
-              >
-                <Input
-                  mono
-                  value={avatarUrl}
-                  placeholder="https://…"
-                  onChange={(event) => { setAvatarUrl(event.target.value); setStatus(null); }}
-                />
-              </Field>
-            </div>
-          </div>
-
-          <div className="border-subtle grid gap-3 border-t pt-3 sm:grid-cols-2">
-            <ReadOnlyRow
-              label="Email"
-              help="Your sign-in identifier and the address invitations are sent to. Changing it is an account-recovery flow, not a settings field — contact support."
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <Avatar url={profile.avatarUrl} name={fullName || profile.email || "?"} />
+          <div className="grid min-w-0 flex-1 gap-4 md:grid-cols-2">
+            <Field label="Display name" error={nameError}>
+              <Input
+                value={fullName}
+                maxLength={NAME_MAX}
+                placeholder="Not set"
+                onChange={(event) => { setFullName(event.target.value); setStatus(null); }}
+              />
+            </Field>
+            <Field
+              label="Time zone"
+              description={timeZone ? undefined : `Using your browser's zone, ${browserTimeZone()}.`}
             >
+              <TimezonePicker
+                value={timeZone}
+                onValueChange={(value) => { setTimeZone(value); setStatus(null); }}
+              />
+            </Field>
+            <ReadOnlyRow label="Email">
               <span className="flex flex-wrap items-center gap-2">
                 <Text variant="body-sm" tone="primary">{profile.email ?? "Not recorded"}</Text>
-                <Badge tone={profile.emailVerified ? "success" : "waiting"}>
-                  {profile.emailVerified ? "Verified" : "Unverified"}
-                </Badge>
+                {profile.emailVerified ? <Badge tone="success">Verified</Badge> : <Badge tone="waiting">Unverified</Badge>}
               </span>
             </ReadOnlyRow>
-
-            <ReadOnlyRow label="Account" help={`Joined ${new Date(profile.createdAt).toLocaleDateString()}.`}>
+            <ReadOnlyRow label="Member since">
               <span className="flex flex-wrap items-center gap-2">
-                <MonoId value={profile.id} srLabel="Your user id" />
-                <Badge tone={profile.betaStatus === "approved" ? "success" : "waiting"}>
-                  {profile.betaStatus === "approved" ? "Beta approved" : profile.betaStatus}
-                </Badge>
+                <Text variant="body-sm" tone="primary">{new Date(profile.createdAt).toLocaleDateString()}</Text>
                 {profile.isPlatformAdmin ? <Badge tone="accent">Platform admin</Badge> : null}
               </span>
             </ReadOnlyRow>
           </div>
-        </>
+        </div>
       ) : null}
     </Panel>
   );
@@ -269,12 +241,8 @@ function SecurityPanel({ profile }: { profile: Profile }) {
 
   if (!profile.hasPassword) {
     return (
-      <Panel title="Password" help="How you sign in.">
-        <AdminInlineState
-          tone="neutral"
-          title="This account signs in through an identity provider"
-          body="There is no password stored here, so there is nothing to change. Update your credentials with the provider you sign in through."
-        />
+      <Panel title="Password">
+        <Text variant="body-sm" tone="secondary">You sign in through a single sign-on provider, so there is no password to change here.</Text>
       </Panel>
     );
   }
@@ -287,12 +255,12 @@ function SecurityPanel({ profile }: { profile: Profile }) {
   return (
     <Panel
       title="Password"
-      help="Changing it needs your current password — a session proves the browser was signed in, not that you are the one at it."
+      help="Changing it needs your current password."
       footer={
         <>
           <StatusLine
             state={status}
-            resting={`At least ${PASSWORD_MIN} characters. Successes and failures are both recorded in the audit log.`}
+            resting={`At least ${PASSWORD_MIN} characters.`}
           />
           <Button
             size="sm"

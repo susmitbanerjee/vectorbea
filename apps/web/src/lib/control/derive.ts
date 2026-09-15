@@ -1,4 +1,5 @@
 import type { contracts } from "@vectorbea/shared";
+import { describeIncident } from "~/lib/incidents/describe-incident";
 
 import {
   DAY, HOUR,
@@ -169,7 +170,10 @@ export function deriveHealth(
 
   // The largest single failure cause, from real incidents.
   const byCode = new Map<string, number>();
-  for (const inc of incidents) byCode.set(inc.code, (byCode.get(inc.code) ?? 0) + 1);
+  for (const inc of incidents) {
+    const title = describeIncident(inc).title;
+    byCode.set(title, (byCode.get(title) ?? 0) + 1);
+  }
   const top = [...byCode.entries()].sort((a, b) => b[1] - a[1])[0];
   const topCause = top
     ? { label: top[0], share: top[1] / Math.max(1, incidents.length), href: "/incidents" }
@@ -278,11 +282,11 @@ export function deriveAttention(
       id: `attn-inc-${inc.id}`,
       kind: "incident",
       severity: inc.severity === "HIGH" || inc.severity === "CRITICAL" ? "critical" : "high",
-      problem: inc.summary,
-      blastRadius: [
-        { label: "run", value: inc.runId, id: true },
-        ...(inc.category ? [{ label: "category", value: inc.category }] : []),
-      ],
+      problem: (() => {
+        const words = describeIncident(inc);
+        return words.where ? `${words.title} in ${words.where}` : words.title;
+      })(),
+      blastRadius: [{ label: "run", value: inc.runId, id: true }],
       since: now - at(inc.detectedAt),
       action: { label: "Investigate", href: `/runs/${inc.runId}` },
     });

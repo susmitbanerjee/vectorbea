@@ -87,17 +87,17 @@ export function ConnectionEditor({ id, scope, onUpdated }: { id: string; scope: 
         <div className="mt-4 grid gap-4">
           <Field label="Name" required><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
           {meta.type === "http" && httpConfig ? <>
-            <Field label="Base URL" description="The API base used by HTTP tools. Known providers use their standard endpoint for connection tests.">
+            <Field label="Base URL" description="The API address tools call.">
               <Input value={String(httpConfig.baseUrl ?? httpConfig.base_url ?? httpConfig.url ?? "")} onChange={(e) => setHttpField("baseUrl", e.target.value)} placeholder="https://api.example.com" />
             </Field>
-            <Field label="Test endpoint path" description="For custom providers, use a read-only endpoint that requires authentication, such as /me. Known providers supply their own test endpoint.">
+            <Field label="Test endpoint path" description="A read-only endpoint that needs authentication, such as /me.">
               <Input value={String(httpConfig.healthPath ?? "")} onChange={(e) => setHttpField("healthPath", e.target.value)} placeholder="/me" />
             </Field>
             {meta.authType === "api_key" ? <Field label="API key header" description="Custom provider header. Authorization sends a Bearer token.">
               <Input value={String(httpConfig.authHeaderName ?? httpConfig.apiKeyHeaderName ?? "")} onChange={(e) => setHttpField("authHeaderName", e.target.value)} placeholder="Authorization" />
             </Field> : null}
           </> : null}
-          <Field label="Provider configuration" description="Non-secret runtime configuration. Credentials belong in the encrypted field below."><Textarea mono autoGrow={false} minRows={9} value={config} onChange={(e) => setConfig(e.target.value)} /></Field>
+          <Field label="Provider configuration" description="Settings that are not secret."><Textarea mono autoGrow={false} minRows={9} value={config} onChange={(e) => setConfig(e.target.value)} /></Field>
         </div>
       </section>
       <section className="border-subtle bg-surface-raised rounded-lg border p-4">

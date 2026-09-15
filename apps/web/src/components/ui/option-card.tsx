@@ -119,11 +119,13 @@ export function OptionCards<T extends string = string>({
             ) : null}
 
             <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-2">
+              {/* Wraps rather than truncating: a badge beside a long label cut the
+                  label to "Native …" in a three-column grid. */}
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <Text
                   variant="body-sm"
                   tone={selected ? "accent" : off ? "muted" : "primary"}
-                  className="min-w-0 truncate font-medium"
+                  className="min-w-0 break-words font-medium"
                 >
                   {option.label}
                 </Text>

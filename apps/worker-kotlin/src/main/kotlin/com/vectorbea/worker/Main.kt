@@ -88,7 +88,13 @@ fun main() {
     }
 
     // Ensure runtime tables exist (idempotent DDL)
-    try {
+    /* Only when one is actually missing. `CREATE TABLE IF NOT EXISTS` still needs
+       CREATE on the schema — Postgres checks the privilege before it checks the
+       table — so a least-privilege worker role logged "permission denied for
+       schema public" on every boot for tables Flyway had already made. */
+    val missingTables = runCatching { Database.missingRuntimeTables(database.dataSource) }.getOrDefault(listOf("unknown"))
+    if (missingTables.isEmpty()) log.info("[startup] runtime tables ready")
+    else try {
         Database.ensureWorkersTable(database.dataSource)
         Database.ensureCheckpointsTable(database.dataSource)
         Database.ensureApprovalsTable(database.dataSource)

@@ -14,6 +14,7 @@ class FailureClassifier(
             ConnectionFailureClassifier(),
             HttpFailureClassifier(),
             DbFailureClassifier(),
+            AgentFailureClassifier(),
             LlmFailureClassifier(),
             MappingFailureClassifier(),
             ApprovalFailureClassifier(),

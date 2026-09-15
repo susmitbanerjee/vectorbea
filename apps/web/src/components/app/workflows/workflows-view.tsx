@@ -413,7 +413,7 @@ export function WorkflowsView({ forceState, forceView }: WorkflowsViewProps) {
       <PageHeader
         eyebrow="Build"
         title="Workflows"
-        description="Every workflow with the shape of its last thirty runs inline — you see which ones are working before you read a name."
+        description="Your workflows and how their recent runs went."
         actions={
           <>
             <ViewToggle

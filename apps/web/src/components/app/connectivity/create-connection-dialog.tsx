@@ -733,7 +733,7 @@ function CreateConnectionDialogBody({
       <ModalHeader
         eyebrow="Connect · Integrations"
         title={integration ? `Connect ${integration.name}` : "Connect a provider"}
-        description="A connection is one credential Vectorbea holds on your behalf. Tools and agents reference it by id — the secret itself is encrypted and never read back."
+        description="Connect an account your tools and agents can use."
         mark={<Icon icon={Plugs} size="md" decorative />}
         closeDisabled={busy || discovering}
       />
@@ -748,7 +748,7 @@ function CreateConnectionDialogBody({
             activeIndex={step}
             reachableIndex={reachableIndex}
             onSelect={setStep}
-            footnote="The credential is encrypted at rest and never returned by the API, including to this screen."
+            footnote="Credentials are encrypted and never shown again."
           />
         }
       >
@@ -1097,7 +1097,7 @@ function CredentialStep({
 
   return (
     <div className="grid gap-4">
-      <ModalSection title="Identity" description="What this connection is called wherever a tool or agent binds to it.">
+      <ModalSection title="Identity" description="Shown when you pick this connection.">
         <Field label="Name" required>
           <Input value={name} onChange={(event) => onName(event.target.value)} maxLength={255} autoComplete="off" />
         </Field>
@@ -1192,11 +1192,11 @@ function CredentialStep({
         </ModalSection>
       ) : null}
 
-      {integration.id === "http" ? <ModalSection title="HTTP connection test" description="Test a read-only endpoint before saving this connection. Request bodies, input mappings and pagination are configured on HTTP tools.">
-        <Field label="Test endpoint path" description="Appended to the base URL. Use an endpoint that requires authentication, such as /me, to check your credential. Leave blank for a reachability check.">
+      {integration.id === "http" ? <ModalSection title="HTTP connection test" description="Check the connection works before saving.">
+        <Field label="Test endpoint path" description="Added to the base URL, for example /me. Leave blank to check it is reachable.">
           <Input value={healthPath} onChange={(event) => onHealthPath(event.target.value)} placeholder="/me" className="font-code text-mono-sm" />
         </Field>
-        {method === "api-key" ? <Field label="API key header" description="Use the header required by your API, such as X-API-Key. Authorization sends the key as a Bearer token.">
+        {method === "api-key" ? <Field label="API key header" description="The header your API expects, such as X-API-Key.">
           <Input value={apiKeyHeader} onChange={(event) => onApiKeyHeader(event.target.value)} placeholder="X-API-Key" className="font-code text-mono-sm" />
         </Field> : null}
       </ModalSection> : null}
@@ -1205,7 +1205,7 @@ function CredentialStep({
         <>
           <ModalSection
             title="Where it is hosted"
-            description="Decides the port, the username shape and whether TLS is mandatory. Vectorbea reads this off the connection string when it can."
+            description="Detected from the connection string when possible."
           >
             <Field label="Hosting">
               <Select
@@ -1231,7 +1231,7 @@ function CredentialStep({
 
           <ModalSection
             title="Connection mode"
-            description="How the database is reached. This is not a preference — a transaction pooler cannot carry a server-side prepared statement, so picking the wrong one fails on the fifth run rather than the first."
+            description="Choose how this database is reached. A transaction pooler needs the pooler option."
           >
             {hosting && hosting.modes.length > 1 ? (
               <OptionCards
@@ -1285,11 +1285,11 @@ function CredentialStep({
       {isDatabase ? (
         <>
           <ModalDivider />
-          <ModalSection title="Blast radius" description="Enforced by the engine on every tool call that uses this connection.">
+          <ModalSection title="Blast radius" description="Applies to every tool using this connection.">
             <Checkbox
               checked={readOnly}
               onCheckedChange={(value) => onReadOnly(value === true)}
-              description="Statements that write are refused. Turn this off only when a workflow genuinely has to write."
+              description="Blocks writes. Turn off only if a workflow needs to write."
             >
               Read-only connection
             </Checkbox>
@@ -1457,7 +1457,7 @@ function DiscoverStep({
     <div className="grid gap-4">
       <ModalSection
         title={`${discovery.toolsWritten} tool${discovery.toolsWritten === 1 ? "" : "s"} registered from ${serverName}`}
-        description="Each one is now a tool in your registry. None is granted to an agent yet — grant them individually from an agent's Grants tab."
+        description="These tools are ready. Grant them to agents from each agent's Tool grants tab."
       >
         <ul className="grid gap-1.5">
           {shown.map((tool) => (

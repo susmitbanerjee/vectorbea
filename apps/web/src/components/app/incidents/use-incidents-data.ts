@@ -8,6 +8,7 @@ import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { toUiRun } from "~/components/app/runs/use-runs-data";
 import type { IncidentSeverity, IncidentStatus, IncidentView } from "~/lib/incidents/model";
+import { describeIncident, failureReason } from "~/lib/incidents/describe-incident";
 
 const PAGE_SIZE = 100;
 
@@ -36,7 +37,7 @@ function groupIncidents(source: contracts.FailureIncident[], workflows: contract
   const runById = new Map(runs.map((run) => [run.id, run]));
   const groups = new Map<string, contracts.FailureIncident[]>();
   for (const incident of source) {
-    const key = [incident.category, incident.code, incident.failedNodeId ?? incident.failedToolId ?? incident.failedConnectionId ?? "unknown"].join(":");
+    const key = describeIncident(incident).groupKey;
     groups.set(key, [...(groups.get(key) ?? []), incident]);
   }
   return [...groups.values()].map((items) => {
@@ -49,11 +50,15 @@ function groupIncidents(source: contracts.FailureIncident[], workflows: contract
       const run = runById.get(item.runId);
       return run ? [toUiRun(run, item)] : [];
     });
-    const component = first.failedNodeId ?? first.failedToolId ?? first.failedConnectionId ?? first.code;
+    const latest = sorted.at(-1) ?? first;
+    const words = describeIncident(latest);
+    const component = words.where ?? (first.failedToolId ? "Tool" : first.failedConnectionId ? "Connection" : "Workflow");
     return {
       id: first.id,
       sourceIds: sorted.map((item) => item.id),
-      signature: `${first.category} · ${component} · ${first.code}`,
+      title: words.title,
+      reason: failureReason(latest),
+      signature: words.where ? `${words.title} · ${words.where}` : words.title,
       firstSeen: first.detectedAt,
       lastSeen: sorted.at(-1)?.detectedAt ?? first.detectedAt,
       occurrences: sorted.length,
@@ -61,10 +66,10 @@ function groupIncidents(source: contracts.FailureIncident[], workflows: contract
       affectedRuns: sorted.length,
       status: toStatus(sorted),
       assignee: null,
-      remediation: first.recommendedAction ?? first.technicalSummary ?? "Review the failed run and resolve the underlying dependency.",
+      remediation: words.fix,
       sparkline: hourlyBuckets(sorted),
       severity: toSeverity(sorted.map((item) => item.severity)),
-      classification: first.category,
+      classification: words.kind,
       failingComponent: component,
       componentHref: first.failedConnectionId ? `/connections/${first.failedConnectionId}` : first.failedToolId ? `/tools/${first.failedToolId}` : "/runs",
       blastRadius: {
@@ -74,7 +79,7 @@ function groupIncidents(source: contracts.FailureIncident[], workflows: contract
         runs: sorted.length,
         costOfFailureUsd: runRecords.reduce((sum, run) => sum + run.costUsd, 0),
       },
-      activity: sorted.map((item) => ({ at: Date.parse(item.detectedAt), actor: "recovery-engine", action: item.summary })),
+      activity: sorted.map((item) => ({ at: Date.parse(item.detectedAt), actor: "Run failed", action: failureReason(item) ?? describeIncident(item).title })),
       mutedUntil: null,
       autoResolveAfterMs: 0,
       autoResolveAvailable: false,

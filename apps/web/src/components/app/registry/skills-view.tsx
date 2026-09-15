@@ -122,7 +122,7 @@ export function SkillsView() {
       <PageHeader
         eyebrow="Build"
         title="Skills"
-        description="Reusable instructions that shape how an agent works — a writing style, a design eye, a tighter token budget. Add a skill to any agent and it applies every time that agent runs."
+        description="Reusable instructions you can add to any agent."
         actions={
           <Button
             variant="primary"
@@ -874,7 +874,7 @@ function SkillLibraryPanel({
       <ModalHeader
         eyebrow="Build · Skills"
         title={`Add a skill to ${agentName}`}
-        description="Adding a skill installs it in this workspace and applies it to this agent. Other agents are unaffected until you add it to them too."
+        description="Applies to this agent only."
       />
       <ModalBody>
         <div className="grid grid-cols-1 gap-3">
@@ -1227,7 +1227,7 @@ export function CreateSkillDialog({
           <Field
             label="Instructions"
             required
-            description="Written to the agent. Say what to do, in what order, and what to avoid. They're added after the agent's own instructions on every run."
+            description="Tell the agent what to do, in what order, and what to avoid."
             characterCount={{ value: instructions.length, max: 20_000 }}
             error={tooShort ? "Add a little more detail — a sentence or two at least." : undefined}
           >

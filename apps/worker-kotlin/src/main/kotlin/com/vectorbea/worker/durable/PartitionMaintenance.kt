@@ -169,7 +169,17 @@ class PartitionMaintenance(
                                 }
                             }
                     }
-                }.onFailure { log.warn("[partitions] ensure failed for {}: {}", table, it.message) }
+                }.onFailure {
+                    /* A month already inside another partition is covered, not
+                       missing. The partitioning migration attached the pre-existing
+                       table as `<table>_historical` up to the month after it ran, so
+                       on a database migrated this month the current month's partition
+                       can never be created — and the rows already land correctly. It
+                       warned about that on every maintenance tick. */
+                    if (it.message?.contains("would overlap partition") == true)
+                        log.debug("[partitions] {} month already covered: {}", table, it.message?.lineSequence()?.firstOrNull())
+                    else log.warn("[partitions] ensure failed for {}: {}", table, it.message)
+                }
             }
     }
 

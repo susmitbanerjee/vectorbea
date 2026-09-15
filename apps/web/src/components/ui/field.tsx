@@ -53,7 +53,15 @@ export function useFieldControl(): {
 
 export interface FieldProps extends Omit<React.HTMLAttributes<HTMLDivElement>, "onChange"> {
   label: React.ReactNode;
-  /** Supporting text. Rendered above the control so it is read before input. */
+  /**
+   * Supporting text, rendered BELOW the control.
+   *
+   * It used to sit between the label and the control, so in any two-column row
+   * where one field had a description and its neighbour did not, the two inputs
+   * started at different heights — visible on nearly every edit screen. Below the
+   * control, labels and inputs line up whatever the help text says; the text is
+   * still announced through aria-describedby.
+   */
   description?: React.ReactNode;
   /** Present = invalid. The message must say what to do, not just what failed. */
   error?: React.ReactNode;
@@ -74,7 +82,7 @@ export const Field = React.forwardRef<HTMLDivElement, FieldProps>(function Field
 ) {
   const reactId = React.useId();
   const id = `field-${reactId}`;
-  const descriptionId = description ? `${id}-description` : undefined;
+  const descriptionId = description && !error ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   const invalid = Boolean(error);
 
@@ -84,6 +92,9 @@ export const Field = React.forwardRef<HTMLDivElement, FieldProps>(function Field
   );
 
   const over = characterCount ? characterCount.value > characterCount.max : false;
+  /* The count appears as the limit gets close. "15 / 120" on every name field
+     was a number to read that said nothing. */
+  const showCount = characterCount ? characterCount.value >= characterCount.max * 0.8 : false;
 
   return (
     <FieldContext.Provider value={ctx}>
@@ -105,7 +116,7 @@ export const Field = React.forwardRef<HTMLDivElement, FieldProps>(function Field
             {required ? <span className="sr-only"> (required)</span> : null}
           </label>
 
-          {characterCount ? (
+          {characterCount && showCount ? (
             <span
               className={cn(
                 "font-code text-mono-sm tabular shrink-0",
@@ -125,13 +136,13 @@ export const Field = React.forwardRef<HTMLDivElement, FieldProps>(function Field
           ) : null}
         </div>
 
-        {description ? (
+        {children}
+
+        {description && !error ? (
           <p id={descriptionId} className={cn("font-ui text-caption text-fg-muted", disabled && "text-fg-disabled")}>
             {description}
           </p>
         ) : null}
-
-        {children}
 
         {/* Reserved space is NOT used here on purpose: a permanently reserved
             error row on a 40-field form wastes a third of the viewport. The

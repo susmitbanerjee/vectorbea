@@ -174,7 +174,7 @@ function OperationParams({
     <div className="grid gap-4">
       <ModalSection
         title="Set once"
-        description="Every run uses these. An agent or workflow step cannot change them."
+        description="Fixed values used on every call."
       >
         {fixed.length === 0 ? (
           <ModalNote tone="warning" title="Everything is chosen on each run">
@@ -223,7 +223,7 @@ function OperationParams({
 
       <ModalSection
         title="Filled in on each run"
-        description="The agent, or the workflow step that uses this tool, provides these every time."
+        description="Values provided each time the tool is used."
       >
         {perCall.length === 0 ? (
           <ModalNote title="Nothing is filled in on each run">
@@ -859,7 +859,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
       <ModalHeader
         eyebrow="Build · Tools"
         title="Register a tool"
-        description="A tool is a capability an agent may be granted. What you set here is enforced by the engine, not by this screen."
+        description="Something an agent can do, such as posting a message or reading a record."
         closeDisabled={busy}
       />
 
@@ -873,7 +873,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
             activeIndex={step}
             reachableIndex={reachableIndex}
             onSelect={setStep}
-            footnote="Nothing is called until an agent is granted this tool and a run reaches it."
+            
           />
         }
       >
@@ -895,7 +895,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
 
               <ModalSection
                 title="Identity"
-                description="The name is what appears in an agent's grant list and in every audit line."
+                
               >
                 <div className="grid gap-3 sm:grid-cols-2">
                   {/* Keeps the header the same shape as Lifecycle beside it,
@@ -944,7 +944,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
 
               <ModalSection
                 title="Or build your own"
-                description="For any other API or a database. How the engine executes it cannot be changed after registration."
+                description="For any other API or a database."
               >
                 <OptionCards
                   label="Adapter type"
@@ -974,7 +974,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
 
           {stepId === "details" && operation ? (
             <div className="grid gap-4">
-              <ModalSection title="Name" description="How this tool appears when you give it to an agent or add it to a workflow.">
+              <ModalSection title="Name" >
                 <Field label="Tool name" labelHidden required>
                   <Input
                     value={name}
@@ -1098,7 +1098,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
               {type === "http" && usesCatalogue ? (
                 <ModalSection
                   title="What this tool does"
-                  description={`One call to the connected ${selectedConnection ? providerDisplayName(selectedConnection) : "account"}. Everything below is the request Vectorbea will issue — you are choosing the capability, not writing the endpoint.`}
+                  description={`Choose what the tool does in ${selectedConnection ? providerDisplayName(selectedConnection) : "the connected account"}.`}
                 >
                   <OptionCards
                     label="Operation"
@@ -1186,7 +1186,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                       <Checkbox
                         checked={writes}
                         onCheckedChange={(value) => setWrites(value === true)}
-                        description="Registers the tool as a write. Database writes are approval-gated by default."
+                        description="Database writes need approval by default."
                       >
                         This statement modifies data
                       </Checkbox>
@@ -1225,7 +1225,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
               <>
               <ModalSection
                 title={type === "http" || type === "database" ? "Additional configuration" : "Configuration"}
-                description="Merged into the stored config. Credentials are rejected — they belong on the connection."
+                description="Extra settings. Do not put credentials here."
               >
                 <CodeEditor
                   value={extraConfig}
@@ -1281,7 +1281,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
             <div className="grid gap-4">
               <ModalSection
                 title="Risk tier"
-                description="Drives the default approval gate, the audit level, and how the tool is ranked in the registry."
+                description="Higher risk tools need approval by default."
               >
                 <Segmented
                   label="Risk tier"
@@ -1294,7 +1294,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                 </Text>
               </ModalSection>
 
-              <ModalSection title="Controls" description="Persisted with the tool and enforced by the engine, independently of this UI.">
+              <ModalSection title="Controls" >
                 <Checkbox
                   checked={requiresApproval}
                   onCheckedChange={(value) => { setApprovalTouched(true); setRequiresApproval(value === true); }}
@@ -1482,7 +1482,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
 
               <ModalSection
                 title="Pre-flight"
-                description="Validates the exact configuration below against the API. Nothing is executed and nothing is written."
+                description="Checks the settings below. Nothing is sent."
                 aside={
                   <Button
                     variant="secondary"

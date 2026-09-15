@@ -13,6 +13,7 @@ import { formatSpan } from "~/lib/control/model";
 import { slaState, type GateView } from "~/lib/approvals/model";
 import { SlaRing } from "./sla-ring";
 import { EscalationIcon, ApprovalGateIcon } from "~/components/icons/domain";
+import { LocalTime } from "~/components/ui/local-time";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    GATE CARD
@@ -229,7 +230,7 @@ export function GateCard({
                   {gate.audit.map((entry, i) => (
                     <li key={i} className="flex flex-wrap items-baseline gap-2">
                       <Text variant="caption" tone="muted" tabular className="shrink-0">
-                        {new Date(entry.at).toISOString().replace("T", " ").slice(0, 16)}Z
+                        <LocalTime at={entry.at} format="short" />
                       </Text>
                       <Text variant="caption" tone="primary" className="font-code shrink-0">{entry.actor}</Text>
                       <Text variant="caption" tone="secondary">{entry.action}</Text>

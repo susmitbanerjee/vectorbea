@@ -4,7 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 
 import { BootstrapProvider } from "@/components/BootstrapProvider";
 import { ThemeProvider } from "@/components/ui/theme-provider";
-import { Toaster } from "@/components/ui/toaster";
+import { Toaster } from "~/components/ui/toaster";
 import { SITE } from "@/lib/seo";
 import { fontVariables } from "~/styles/fonts";
 import "@/app/globals.css";

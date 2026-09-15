@@ -292,6 +292,12 @@ export const runEvent = z.object({
   source: maybe(z.string()),
   timestamp: isoDateTime,
   durationMs: z.number().nullish(),
+  /** The workflow step the event belongs to, when it belongs to one. */
+  stepId: z.string().nullish(),
+  /** The model a model-call event used. */
+  modelName: z.string().nullish(),
+  /** 1 on the first attempt; higher on a retry. */
+  retryAttempt: z.number().nullish(),
 });
 export type RunEvent = z.infer<typeof runEvent>;
 /** `GET /api/runs/:id/events` returns the standard Page envelope. */

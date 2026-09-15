@@ -57,14 +57,14 @@ function Panel({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   children: React.ReactNode;
 }) {
   return (
     <section className="border-subtle bg-surface-raised rounded-lg border">
       <header className="border-subtle border-b px-4 py-3">
         <Text variant="heading-sm" tone="max" as="h2" className="block">{title}</Text>
-        <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{description}</Text>
+        {description ? <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{description}</Text> : null}
       </header>
       <div className="grid gap-4 p-4">{children}</div>
     </section>
@@ -225,12 +225,12 @@ export function ToolEditor({
 
   return (
     <div className="grid gap-3">
-      <Panel title="Identity" description="The adapter is fixed at registration — it decides the shape of everything below.">
+      <Panel title="Identity" >
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Name" required>
             <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={255} />
           </Field>
-          <Field label="Adapter" description="Cannot be changed. Register a new tool to switch adapter.">
+          <Field label="Adapter" description="Set when the tool is created.">
             <Select
               disabled
               value={type}
@@ -286,7 +286,7 @@ export function ToolEditor({
         </div>
       </Panel>
 
-      <Panel title="Risk and control" description="Persisted with the tool and enforced by the engine, independently of this UI.">
+      <Panel title="Risk and control" >
         <Field label="Risk tier">
           <Segmented
             label="Risk tier"
@@ -321,7 +321,7 @@ export function ToolEditor({
       {type === "http" ? (
         <Panel
           title="What this tool sends"
-          description="The whole call, declared: where each input lands on the wire, how the body is encoded, how it authenticates, and what the agent is shown of the response."
+          description="The request this tool sends and what the agent sees back."
         >
           {httpSpec ? (
             <HttpSpecEditor
@@ -506,7 +506,7 @@ export function AgentEditor({
 
   return (
     <div className="grid gap-3">
-      <Panel title="Identity" description="The behaviour type is fixed at registration.">
+      <Panel title="Identity">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="Name" required>
             <Input value={name} onChange={(event) => setName(event.target.value)} maxLength={255} />
@@ -516,7 +516,7 @@ export function AgentEditor({
           </Field>
         </div>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="Agent type" description="Cannot be changed. Register a new agent to switch behaviour.">
+          <Field label="Agent type" description="Set when the agent is created.">
             <Select
               disabled
               value={type}
@@ -559,12 +559,12 @@ export function AgentEditor({
         </Field>
       </Panel>
 
-      <Panel title="Model and limits" description="Model calls are billed to the credential on the connection.">
+      <Panel title="Model and limits">
         <div className="grid gap-4 md:grid-cols-2">
           <Field
             label="LLM connection"
             required={needsModel}
-            description={needsModel ? "Required for a native LLM agent — there is no workspace default." : "Optional for this agent type."}
+            description={needsModel ? undefined : "Optional for this agent type."}
             error={needsModel && connectionId === "none" ? "Pick the connection this agent runs on." : undefined}
           >
             <Select
@@ -602,7 +602,7 @@ export function AgentEditor({
         <div className="grid gap-4 md:grid-cols-2">
           <Field
             label="Max reply length"
-            description="Tokens in one model reply, not the whole run. Keep it within the model's limit (gpt-4o: 16,000) or the call is refused. The run's total is set per step in the workflow."
+            description="Tokens per reply. Stay within the model's limit."
             error={!(Number.isInteger(maxTokensValue) && maxTokensValue > 0) ? "Must be a whole number above zero." : undefined}
           >
             <Input mono type="number" min={1} value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} />
@@ -616,7 +616,7 @@ export function AgentEditor({
         </div>
       </Panel>
 
-      <Panel title="Tool grants" description="Only what is granted here can be called. Everything else is refused by the engine.">
+      <Panel title="Tool grants" description="The agent can only use the tools selected here.">
         {tools.length === 0 ? (
           <Text variant="body-sm" tone="muted">No tools are registered yet.</Text>
         ) : (

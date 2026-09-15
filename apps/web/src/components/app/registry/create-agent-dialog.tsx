@@ -377,7 +377,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
       <ModalHeader
         eyebrow="Build · Agents"
         title="Register an agent"
-        description="An agent is a reusable identity: a behaviour, a model, and an explicit set of tools it is allowed to call."
+        description="Set up an agent your workflows can use."
         closeDisabled={busy}
       />
 
@@ -391,14 +391,13 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
             activeIndex={step}
             reachableIndex={reachableIndex}
             onSelect={setStep}
-            footnote="Grants are enforced by the engine. An ungranted tool cannot be called, whatever the prompt says."
           />
         }
       >
         <ModalBody ref={bodyRef}>
           {step === 0 ? (
             <div className="grid gap-4">
-              <ModalSection title="Identity" description="How this agent is referred to in workflows, runs and audit.">
+              <ModalSection title="Identity">
                 <div className="grid gap-3 sm:grid-cols-2">
                   {/* The description is not decoration: its neighbour has one,
                       and a field without it sits a line higher than the field
@@ -406,7 +405,6 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                   <Field
                     label="Name"
                     required
-                    description="Renaming later is safe — workflows bind by id."
                     characterCount={{ value: name.length, max: 255 }}
                   >
                     <Input
@@ -418,7 +416,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                       autoFocus
                     />
                   </Field>
-                  <Field label="Role" description="Optional. One phrase, shown in the registry list.">
+                  <Field label="Role">
                     <Input
                       value={role}
                       onChange={(event) => setRole(event.target.value)}
@@ -427,7 +425,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                     />
                   </Field>
                 </div>
-                <Field label="Lifecycle" description="Draft agents cannot be attached to a running workflow.">
+                <Field label="Lifecycle">
                   <Select
                     value={lifecycle}
                     onValueChange={(value) => setLifecycle(value as Lifecycle)}
@@ -442,7 +440,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
               <ModalDivider />
 
-              <ModalSection title="Behaviour" description="How the engine drives it. Fixed at registration.">
+              <ModalSection title="Behaviour" description="Cannot be changed later.">
                 <OptionCards
                   label="Agent type"
                   columns={3}
@@ -468,8 +466,8 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                 title="LLM connection"
                 description={
                   spec.needsModel
-                    ? "Required for this agent type. Model calls are billed to the credential on the connection."
-                    : "Optional for this agent type. Attach one if the behaviour makes model calls."
+                    ? undefined
+                    : "Optional for this agent type."
                 }
               >
                 {loadingRefs ? (
@@ -495,19 +493,17 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                     noneLabel="No model connection"
                     noneDescription="This agent does not call a model directly."
                     emptyTitle="No LLM connection in this workspace"
-                    emptyBody="An agent cannot be created without one. Register the provider credential first — it is reused by every agent."
+                    emptyBody="Add a model connection first."
                   />
                 )}
               </ModalSection>
 
-              <ModalSection title="Model" description="The exact model id sent to the provider.">
+              <ModalSection title="Model">
                 <Field
                   label="Model"
                   required={spec.needsModel}
                   description={
-                    selectedConnection
-                      ? `Sent to ${selectedConnection.provider.replace(/_/g, " ")} verbatim.`
-                      : "Pick a connection first to see suggestions for that provider."
+                    selectedConnection ? undefined : "Pick a connection to see suggestions."
                   }
                 >
                   <Input
@@ -544,10 +540,10 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
               <ModalDivider />
 
-              <ModalSection title="Limits" description="Persisted with the agent and enforced per run.">
+              <ModalSection title="Limits">
                 <Field
                   label="Temperature"
-                  description="Low is repeatable, high is varied. Operational agents belong near zero."
+                  description="Low is consistent, high is varied."
                 >
                   <Slider
                     value={[temperature]}
@@ -573,7 +569,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                   </Field>
                   <Field
                     label="Max iterations"
-                    description="How many reason-and-call cycles before the engine stops it."
+                    description="Steps before the agent must finish."
                     error={
                       !(Number.isInteger(maxIterationsValue) && maxIterationsValue > 0)
                         ? "Must be a whole number above zero."
@@ -591,7 +587,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
             <div className="grid gap-4">
               <ModalSection
                 title="System instructions"
-                description="The standing brief. Say what the agent does, what it must not do, and what a good answer looks like."
+                description="What the agent does, what it must not do, and what a good answer looks like."
               >
                 <Field
                   label="Instructions"
@@ -625,7 +621,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
             <div className="grid gap-4">
               <ModalSection
                 title="Tool grants"
-                description="Only what you grant here can be called. Everything else is refused by the engine, silently and always."
+                description="The agent can only use the tools selected here."
                 aside={
                   grants.length > 0 ? (
                     <Button variant="ghost" size="xs" onClick={() => setGrants([])}>

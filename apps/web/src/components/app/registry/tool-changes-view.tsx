@@ -392,7 +392,7 @@ export function ToolChangesDialog({
       <ModalHeader
         eyebrow="Build · Tools"
         title="Tool changes waiting for review"
-        description="An API document that changed proposes new definitions rather than editing tools in place. Nothing here is live until it is applied."
+        description="Updates from a changed API document. Nothing changes until you apply them."
       />
       <ModalBody>
         <ToolChangesView />

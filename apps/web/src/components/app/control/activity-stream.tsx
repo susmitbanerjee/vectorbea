@@ -6,6 +6,8 @@ import type { Route } from "next";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import type { contracts } from "@vectorbea/shared";
+import { LocalTime } from "~/components/ui/local-time";
+import { describe } from "~/lib/runs/log-vocabulary";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    BAND 4 · LIVE ACTIVITY STREAM
@@ -155,12 +157,10 @@ function ActivityRow({ event, index, animate }: { event: contracts.ControlActivi
           {event.workflowName}
         </span>
         <span className="font-ui text-caption text-fg-muted hidden min-w-0 truncate sm:block">
-          {event.summary ?? event.title ?? event.stepId ?? event.source ?? event.type}
+          {event.title ?? describe(event.type)}
         </span>
         <span className="font-code text-mono-sm text-fg-disabled tabular shrink-0">
-          {new Date(event.timestamp).toLocaleTimeString("en-GB", {
-            hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "UTC",
-          })}
+          <LocalTime at={event.timestamp} format="clock" />
         </span>
       </Link>
     </li>

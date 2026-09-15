@@ -151,7 +151,7 @@ function Gallery() {
     <PageContainer>
       <PageHeader
         title="Templates"
-        description="Each one runs end to end once this workspace has one model connection. Nothing here needs an hour of setup before it does anything."
+        description="Ready-made workflows. Most need only a model connection."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
