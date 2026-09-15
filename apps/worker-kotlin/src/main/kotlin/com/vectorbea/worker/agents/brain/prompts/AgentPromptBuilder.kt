@@ -122,7 +122,10 @@ object AgentPromptBuilder {
             })
         val rosterJson = mapper.writerWithDefaultPrettyPrinter()
             .writeValueAsString(roster.map { mapOf("id" to it.id, "name" to it.name, "description" to it.description) })
-        val outputSchemaSection = if (config.outputSchemaJson != "{}") "\n\nFINAL OUTPUT SCHEMA (your finalOutput MUST match this JSON Schema):\n${config.outputSchemaJson}" else ""
+        val outputSchemaSection = if (config.outputSchemaJson != "{}") "\n\nFINAL OUTPUT SCHEMA (your finalOutput MUST match this JSON Schema):\n${config.outputSchemaJson}"
+            /* Without a schema the loop accepted `"finalOutput": {}`, and the next step
+               in the workflow received nothing. */
+            else "\n\nFINAL OUTPUT: put your complete answer, written for whoever reads it next, in finalOutput.content as text. Never return an empty finalOutput."
 
         /* Together or not at all: an agent offered DELEGATE with an empty roster
            spends an iteration discovering it has nobody to delegate to. */
@@ -244,8 +247,7 @@ SAFETY RULES:
         if (!enabled) return BuiltPrompt(buildUserPrompt(config, state), null)
 
         val parts = buildList {
-            add(ContextAssembler.Part(ContextAssembler.Section.OBJECTIVE,
-                config.taskInstruction ?: "Complete the task based on the provided inputs."))
+            add(ContextAssembler.Part(ContextAssembler.Section.OBJECTIVE, objectiveText(config)))
 
             if (config.resolvedInput.isNotEmpty()) add(ContextAssembler.Part(
                 ContextAssembler.Section.INPUTS,
@@ -303,6 +305,18 @@ SAFETY RULES:
             "- [sent at iteration ${g.iterationNumber}] ${g.text}"
         }
 
+    /**
+     * The task, and today's date.
+     *
+     * A model does not know what day it is. Asked for "changes in the last 24h" it
+     * guessed a year from its training data, queried commits since 2024, and then
+     * called a real commit "dated in the future". The DATE, not the time, so the
+     * prompt text is stable across a run's iterations and a day's resumes.
+     */
+    private fun objectiveText(config: AgentBrainConfig): String =
+        (config.taskInstruction ?: "Complete the task based on the provided inputs.") +
+            "\n\nToday's date (UTC): ${java.time.LocalDate.now(java.time.ZoneOffset.UTC)}"
+
     private fun budgetFooter(state: AgentLoopState): String {
         val warning = if (state.budget.iterationsUsed >= state.budget.maxIterations - 1)
             "\n\n\u26a0 BUDGET WARNING: This is your last iteration (${state.iteration + 1}/${state.budget.maxIterations}). You MUST return FINAL or FAIL now."
@@ -312,7 +326,7 @@ SAFETY RULES:
     }
 
     fun buildUserPrompt(config: AgentBrainConfig, state: AgentLoopState): String {
-        val task = config.taskInstruction ?: "Complete the task based on the provided inputs."
+        val task = objectiveText(config)
         val inputSection = if (config.resolvedInput.isNotEmpty())
             "\n\nINPUT DATA:\n${mapper.writerWithDefaultPrettyPrinter().writeValueAsString(config.resolvedInput)}"
         else ""

@@ -1,5 +1,5 @@
 import {
-  resolveTool, resolveConnection, type BuilderRegistry,
+  resolveTool, resolveConnection, isUsableConnection, type BuilderRegistry,
 } from "./use-builder-registry";
 import { readInputMapping, stepInputs } from "./step-io";
 import { downstreamOf } from "./store";
@@ -290,7 +290,7 @@ export function validateGraph(
         detail: `‘${name}’ binds credentials this workspace does not have.`,
         fix: `Create it under Connections, or bind a different one.`,
       });
-    } else if (registry && boundConnection && boundConnection.status !== "active") {
+    } else if (registry && boundConnection && !isUsableConnection(boundConnection.status)) {
       issues.push({
         id: `unhealthy-conn-${id}`, category: "resource", severity: "warning", nodeId: id,
         title: `Connection ‘${boundConnection.name}’ is ${boundConnection.status}`,

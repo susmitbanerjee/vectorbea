@@ -127,7 +127,7 @@ class AgentSafetyGuard {
         val redacted = raw
             .replace(Regex("""sk-[A-Za-z0-9]+"""), "[REDACTED-KEY]")
             .replace(Regex("""eyJ[A-Za-z0-9._-]{50,}"""), "[REDACTED-JWT]")
-            .replace(Regex("""[A-Za-z0-9+/]{40,}={0,2}"""), "[REDACTED]")
+            .replace(LONG_OPAQUE) { m -> if (isHexDigest(m.value)) m.value else "[REDACTED]" }
         return if (redacted.length <= maxChars) redacted
         else redacted.take(maxChars) +
             "… [truncated — ${redacted.length} characters total. Narrow the tool's " +
@@ -137,9 +137,28 @@ class AgentSafetyGuard {
     fun sanitizeReasoningSummary(summary: String?): String {
         if (summary.isNullOrBlank()) return ""
         return summary.take(500)
-            .replace(Regex("""[A-Za-z0-9+/]{40,}"""), "[REDACTED]")
+            .replace(LONG_OPAQUE) { m -> if (isHexDigest(m.value)) m.value else "[REDACTED]" }
             .replace(Regex("""sk-[A-Za-z0-9]+"""), "[REDACTED-KEY]")
             .replace(Regex("""eyJ[A-Za-z0-9._-]{50,}"""), "[REDACTED-JWT]")
+    }
+
+    private companion object {
+        /** A long run of base64 alphabet — what an unlabelled secret usually looks like. */
+        val LONG_OPAQUE = Regex("""[A-Za-z0-9+/]{40,}={0,2}""")
+
+        /**
+         * A git commit SHA (40 hex) or a SHA-256 digest (64 hex).
+         *
+         * ── WHY THESE ARE LEFT ALONE ────────────────────────────────────────
+         * The base64 rule matched every commit SHA a GitHub tool returned, so the
+         * agent was handed `"sha": "[REDACTED]"`, passed that literal string to
+         * `get_commit`, and every code-review workflow failed at its second tool
+         * call. A digest identifies content; it is the handle a later call needs,
+         * not a credential. Exactly 40 or 64 characters of hex only — a mixed-case
+         * base64 token still contains non-hex letters and is still redacted.
+         */
+        fun isHexDigest(value: String): Boolean =
+            (value.length == 40 || value.length == 64) && value.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
     }
 }
 

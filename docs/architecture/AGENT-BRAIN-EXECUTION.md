@@ -307,7 +307,24 @@ Built on the canvas, a step's data lives in its own `config`:
   and merges the parsed fields into the output. The loop receives them as
   `outputSchemaJson`, which `AgentBrainConfig` carried and nothing set.
 - **`content` always exists.** "Full reply" is offered for every agent step, so
-  the loop's final output gains `content` when it has none (`withFullReply`).
+  the loop's final output gains `content` when it has none (`withFullReply`). The
+  loop's prompt also asks for the answer in `finalOutput.content` when no output
+  fields are declared, and a FINAL with an empty `finalOutput` keeps its
+  reasoning summary as `content` rather than handing the next step `{}`.
+- **The loop is told today's date** (`objectiveText`, UTC date only, so the text
+  is stable across a run's iterations). Without it "the last 24h" was computed
+  from the model's training year.
+- **Commit SHAs are not redacted.** `AgentSafetyGuard` masks any 40+ character
+  base64-alphabet run in tool results; exactly 40- or 64-character hex (git SHAs,
+  SHA-256 digests) is now exempt, because a masked SHA was passed back to
+  `get_commit` as the literal `[REDACTED]`.
+- **Provider errors say what they are.** A non-2xx LLM response keeps the
+  provider's `error.message` (credential patterns masked, capped at 300 chars)
+  instead of "HTTP 400". OpenAI reasoning models (`o*`, `gpt-5*`) are sent
+  `max_completion_tokens` (floor 8192) and no `temperature`, which they otherwise
+  reject with 400.
+- **A thrown iteration is closed as `failed`** (`markIterationFailed`), so the
+  Activity tab no longer shows "Still running" under a failed run.
 - The builder's field lists come from these keys and the tool registry
   (`components/app/builder/step-io.ts`), not from fixtures. An agent's registered
   `outputSchema` is not offered, because no step execution path sends it.

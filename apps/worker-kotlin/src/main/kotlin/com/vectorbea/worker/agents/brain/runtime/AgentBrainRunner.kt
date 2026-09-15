@@ -1115,6 +1115,11 @@ class AgentBrainRunner(
            [IterationSpan.close] is close-once, so the ordinary paths that already
            closed it are unaffected. */
         var openIteration: IterationSpan? = null
+        /* The row of the iteration in progress, so a throw out of the middle of one
+           can close it. Without this a failed provider call left the row at
+           `running` forever, and the Activity tab showed "Still running" under a
+           run that had already failed. */
+        var openIterationId: UUID? = null
 
         /*
          * ── WHICH SKILLS WERE ACTIVE, CARRIED OUT TO THE ACTIVATION SPAN ─────
@@ -1190,6 +1195,7 @@ class AgentBrainRunner(
                     "Iteration ${state.iteration}/${config.maxIterations}")
 
                 val iterationId = persistIterationStart(config, state)
+                openIterationId = iterationId
 
                 /* Opened alongside the row and closed alongside it, so the trace and
                    the reconstruction can never disagree about whether an iteration
@@ -1537,7 +1543,15 @@ class AgentBrainRunner(
 
                     AgentAction.ActionType.FINAL -> {
                         if (validateFinalOutput(action.finalOutput, config)) {
-                            state.finalOutput = action.finalOutput
+                            /* A FINAL with an empty finalOutput still carries its answer in
+                               the one-sentence summary — "only one commit, dated in the
+                               future, so no changes in 24h". Passing on `{}` handed the
+                               next step nothing at all, which read as a broken handoff. */
+                            state.finalOutput = action.finalOutput.ifEmpty {
+                                action.reasoningSummary?.takeIf { it.isNotBlank() }
+                                    ?.let { mapOf("content" to safetyGuard.sanitizeReasoningSummary(it)) }
+                                    ?: action.finalOutput
+                            }
                             state.stopReason  = AgentLoopState.StopReason.FINAL_OUTPUT
                             emitEvent(config, RunEventStore.EventType.AGENT_FINAL_OUTPUT_CREATED, "running",
                                 "Final output ready — ${action.finalOutput.keys.take(5).joinToString()}")
@@ -1767,6 +1781,7 @@ class AgentBrainRunner(
             log.error("[brain] unexpected error runId={}: {}", config.runId, e.message)
             if (state.stopReason == null) state.stopReason = AgentLoopState.StopReason.ERROR
             failureReason = e.message?.take(300) ?: e.javaClass.simpleName
+            openIterationId?.let { markIterationFailed(it, failureReason) }
             emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed", "Agent error: ${e.message?.take(200)}")
         }
 
@@ -3470,6 +3485,30 @@ class AgentBrainRunner(
         companion object {
             fun of(b: AgentBudget) = BudgetMark(b.tokensUsed, b.estimatedCostCents, b.toolCallsUsed)
         }
+    }
+
+    /**
+     * Close an iteration that ended by an exception rather than by an action.
+     *
+     * Guarded on `status = 'running'`, so an iteration a branch already completed
+     * (and then something after it threw) keeps the verdict it was given.
+     */
+    private fun markIterationFailed(iterationId: UUID, reason: String?) {
+        val ds = dataSource ?: return
+        runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement(
+                    """UPDATE agent_iterations
+                          SET status = 'failed', observation_summary_sanitized = ?, completed_at = ?
+                        WHERE id = ? AND status = 'running'"""
+                ).use { stmt ->
+                    stmt.setString(1, safetyGuard.sanitizeReasoningSummary(reason ?: "The step failed."))
+                    stmt.setTimestamp(2, Timestamp.from(Instant.now()))
+                    stmt.setObject(3, iterationId)
+                    stmt.executeUpdate()
+                }
+            }
+        }.onFailure { log.warn("[brain] could not mark iteration {} failed: {}", iterationId, it.message) }
     }
 
     private fun persistIterationComplete(

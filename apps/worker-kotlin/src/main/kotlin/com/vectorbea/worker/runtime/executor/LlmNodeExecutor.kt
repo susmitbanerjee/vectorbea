@@ -944,11 +944,21 @@ class LlmNodeExecutor(
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.openai.com") + "/v1/chat/completions"
 
+        /* OpenAI's reasoning models (o1, o3, o4-mini, gpt-5…) refuse `max_tokens`
+           and any non-default `temperature` with HTTP 400 before doing anything,
+           so an agent configured with one of them failed on its first call.
+           They take `max_completion_tokens`, which also covers the hidden
+           reasoning tokens — hence the floor, or the reasoning alone uses the
+           allowance and the visible answer comes back empty. */
+        val reasoningModel = isOpenAiReasoningModel(provider, baseUrl, model)
         val body = buildMap<String, Any> {
             put("model", model)
             put("messages", messages)
-            temperature?.let { put("temperature", it) }
-            maxTokens?.let { put("max_tokens", it) }
+            if (!reasoningModel) temperature?.let { put("temperature", it) }
+            maxTokens?.let {
+                if (reasoningModel) put("max_completion_tokens", maxOf(it, REASONING_MIN_COMPLETION_TOKENS))
+                else put("max_tokens", it)
+            }
             // Layer 0. `strict: true` is the whole point - without it json_schema is
             // advisory and the model may still return prose.
             outputSchema?.let { put("response_format", ConstrainedDecoding.openAiResponseFormat(it)) }
@@ -1250,8 +1260,13 @@ class LlmNodeExecutor(
 
         if (result.statusCode !in 200..299) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "http_error")
-            // Never log the response body raw — it may echo the request including prompt content
-            throw LlmCallException("LLM API returned HTTP ${result.statusCode}")
+            // Never log the response body raw — it may echo the request including prompt content.
+            // The provider's own error MESSAGE is kept, redacted and capped: "LLM API
+            // returned HTTP 400" alone gave nobody anything to act on, and the message
+            // is where "Unsupported parameter: 'max_tokens'" or "model not found" lives.
+            val detail = providerErrorDetail(result.body)
+            throw LlmCallException(
+                "LLM API returned HTTP ${result.statusCode}" + (detail?.let { ": $it" } ?: ""))
         }
 
         WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "ok")
@@ -1650,3 +1665,41 @@ class LlmNodeExecutor(
 }
 
 private class LlmCallException(message: String) : Exception(message)
+
+/** Floor for `max_completion_tokens` on a reasoning model: reasoning spends from the same allowance. */
+internal const val REASONING_MIN_COMPLETION_TOKENS = 8192
+
+private val OPENAI_REASONING_MODEL = Regex("""^(o\d|gpt-5)""")
+
+/** A reasoning model on OpenAI itself. OpenAI-compatible hosts keep the classic parameters. */
+internal fun isOpenAiReasoningModel(provider: String, baseUrl: String?, model: String): Boolean {
+    val onOpenAi = provider.equals("openai", ignoreCase = true) &&
+        (baseUrl.isNullOrBlank() || baseUrl.contains("api.openai.com", ignoreCase = true))
+    return onOpenAi && OPENAI_REASONING_MODEL.containsMatchIn(model.trim().lowercase().substringAfterLast('/'))
+}
+
+/**
+ * The provider's error message from a non-2xx body, safe to put in a run's failure.
+ *
+ * OpenAI, Anthropic and Gemini all nest it at `error.message` (Anthropic and Gemini
+ * add a type or status beside it). Only that field is read — never the body — then
+ * anything credential-shaped is masked and it is capped, because a message can quote
+ * a fragment of the request.
+ */
+internal fun providerErrorDetail(body: String?): String? {
+    if (body.isNullOrBlank()) return null
+    val error = runCatching {
+        (com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readValue(body, Map::class.java)["error"])
+    }.getOrNull()
+    val message = when (error) {
+        is Map<*, *> -> error["message"] as? String
+        is String -> error
+        else -> null
+    }?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val code = (error as? Map<*, *>)?.let { (it["code"] ?: it["type"] ?: it["status"])?.toString() }
+    return (message.take(300)
+        .replace(Regex("""sk-[A-Za-z0-9_-]+"""), "[REDACTED-KEY]")
+        .replace(Regex("""eyJ[A-Za-z0-9._-]{20,}"""), "[REDACTED-JWT]")
+        .replace(Regex("""[A-Za-z0-9+/]{40,}={0,2}"""), "[REDACTED]")) +
+        (code?.takeIf { it.isNotBlank() && it.length < 60 }?.let { " ($it)" } ?: "")
+}
