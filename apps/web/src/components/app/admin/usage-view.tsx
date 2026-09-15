@@ -178,7 +178,7 @@ export function UsageView() {
       <PageHeader
         eyebrow="Govern"
         title="Usage & limits"
-        description="What this workspace is allowed, what it has used, and which of the two the platform will stop you on. Every figure is read from the table the runtime checks."
+        description="What this workspace has used against its limits."
         metadata={
           query.data ? (
             <>
@@ -283,7 +283,7 @@ export function UsageView() {
 
           <Section
             title="This month"
-            description="Counted, not capped. Nothing here can refuse a run — it is what the workspace has done since the first of the month."
+            description="Activity since the first of the month."
           >
             {usage?.ok ? (
               <>
@@ -313,7 +313,7 @@ export function UsageView() {
 
           <Section
             title="Per-run ceilings"
-            description="These bound a single run rather than a period, so there is nothing to fill up — a run that reaches one of them is stopped."
+            description="Limits that apply to each run."
           >
             {policy?.ok ? <CeilingList policy={policy.value} /> : (
               <SourceFailures onRetry={retry} sources={[{ result: policy, noun: "workspace limits" }]} />
@@ -322,7 +322,7 @@ export function UsageView() {
 
           <Section
             title="Capabilities"
-            description="Feature switches on this workspace's policy. A capability that is off is refused at the API, not hidden in the UI."
+            description="Features turned on for this workspace."
           >
             {policy?.ok ? <CapabilityList policy={policy.value} /> : (
               <SourceFailures onRetry={retry} sources={[{ result: policy, noun: "workspace limits" }]} />

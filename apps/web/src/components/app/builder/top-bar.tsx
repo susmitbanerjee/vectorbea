@@ -8,6 +8,7 @@ import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { Kbd } from "~/components/ui/kbd";
 import type { ValiditySummary } from "./validation";
+import { formatClock, useTimeZone } from "~/lib/time/time-zone";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    TOP BAR
@@ -233,12 +234,13 @@ export function TopBar({
 }
 
 function SaveIndicator({ state, lastSavedAt }: { state: SaveState; lastSavedAt: number | null }) {
+  const timeZone = useTimeZone();
   const label =
     state === "saving" ? "Saving…"
       : state === "dirty" ? "Unsaved changes"
         : state === "error" ? "Autosave failed"
           : lastSavedAt
-            ? `Saved ${new Date(lastSavedAt).toISOString().slice(11, 16)}`
+            ? `Saved ${formatClock(lastSavedAt, timeZone).slice(0, 5)}`
             : "Saved";
 
   return (

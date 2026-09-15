@@ -119,7 +119,7 @@ export function ArchitectView() {
           </Link>
         }
         title="AI Architect"
-        description="Describe what you want to happen. The Architect proposes a durable workflow, explains every decision, and builds it once you approve."
+        description="Describe what you want to automate. The Architect proposes a workflow and builds it when you approve."
         actions={
           state.stage !== "describe" ? (
             <Button
@@ -387,7 +387,7 @@ function Analyze({ session }: { session: ArchitectSessionApi }) {
     <div className="grid gap-3">
       <Panel
         title={`${state.questions.length} question${state.questions.length === 1 ? "" : "s"} before designing`}
-        help="Only what the Architect genuinely needs. Each one says how the answer changes the design — anything you skip becomes a documented assumption rather than a blocker."
+        help="Answer what you can. Anything you skip becomes an assumption."
       >
         <ol className="grid gap-3">
           {state.questions.map((question, index) => (
@@ -725,7 +725,7 @@ function Connect({ session }: { session: ArchitectSessionApi }) {
     <div className="grid gap-3">
       <Panel
         title="Connections this workflow needs"
-        help="Credentials cannot be generated. Bind an existing connection, or mark one as simulated to build now and connect it later — the workflow installs either way, but a simulated connection cannot make a real call."
+        help="Pick an existing connection, or simulate one and connect it later."
       >
         <ul className="grid gap-2">
           {requirements.map((requirement) => (
@@ -1048,7 +1048,7 @@ function Build({ session }: { session: ArchitectSessionApi }) {
     <div className="grid gap-3">
       <Panel
         title="Building"
-        help="Tools, agents, the graph and the first version are created in one transaction. If any part fails, everything created is rolled back — a half-built workflow is worse than none."
+        help="Everything is created together. If any part fails, nothing is created."
       >
         <WorkingRow
           label={building

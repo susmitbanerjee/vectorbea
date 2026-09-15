@@ -159,7 +159,7 @@ export function ImportSpecDialog({
       <ModalHeader
         eyebrow="Build · Tools"
         title="Import an API document"
-        description="One OpenAPI or Postman document becomes many tools, with their parameters, bodies, auth and response shapes already correct."
+        description="Create tools from an OpenAPI or Postman document."
         closeDisabled={importSpec.isPending || createTools.isPending}
       />
       {/* Steps are not clickable backwards: each one narrows the next, and jumping
@@ -311,7 +311,7 @@ function SourceStep({
       {mode === "url" ? (
         <Field
           label="Document URL"
-          description="Fetched by the server, so it needs no CORS and works for any public document. Redirects are followed and re-checked at every hop."
+          description="A public URL to the document."
           error={error}
         >
           <Input
@@ -324,7 +324,7 @@ function SourceStep({
       ) : (
         <Field
           label="Document file"
-          description="Read in the browser and sent as text. A very large document is better fetched by URL — the server's request limit is smaller than its document limit."
+          description="Upload the document."
           error={error}
         >
           <div className="flex items-center gap-3">
@@ -382,7 +382,7 @@ function AuthStep({
 
       <ModalSection
         title="What this API needs"
-        description="Read from the document's own security schemes, including the exact header or parameter name."
+        description="Detected from the document."
       >
         {candidates.map((candidate, index) => (
           <div
@@ -419,7 +419,7 @@ function AuthStep({
 
       <ModalSection
         title="Which connection holds it"
-        description="Every tool from this import authenticates through one connection, so the credential is stored once and rotated once."
+        description="All imported tools use this connection."
       >
         <ConnectionPicker
           connections={connections}

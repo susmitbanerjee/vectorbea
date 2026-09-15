@@ -9,23 +9,28 @@ import type { contracts } from "@vectorbea/shared";
 import type { LogLine } from "~/mocks/run-detail";
 import type { LogLevel } from "~/lib/runs/model";
 import { describe, isPlumbing, levelFor } from "~/lib/runs/log-vocabulary";
+import { formatDuration } from "~/lib/format";
+import { formatClock, timeZoneLabel, useTimeZone } from "~/lib/time/time-zone";
 import { useReplay, timeAt } from "./replay";
 
 /* ══════════════════════════════════════════════════════════════════════════════
-   BOTTOM PANE · LOG STREAM
+   BOTTOM PANE · LOGS
 
-   Terminal aesthetic because that is the register: monospace, dense, level
-   prefixes, no decoration. Virtualised, so 100,000 lines is a scroll rather than
-   a hang.
+   Virtualised, so 100,000 lines is a scroll rather than a hang.
+
+   ── WHAT A LINE SAYS ────────────────────────────────────────────────────────
+   Time of day in the viewer's time zone, level, the STEP NAME, and a sentence.
+   It used to be a UTC fragment, the node id ("run" for most lines) and the
+   event's type as a phrase with no step attached, plus a Raw toggle and a Debug
+   level that showed our worker ids and durable-execution mechanics. Both are
+   gone: the platform's own plumbing is not shown at all, and nothing here names
+   our infrastructure.
 
    SCRUB SEEKS THE LOG. When the ribbon is dragged, this pane jumps to the first
-   line at or after the focused step's timestamp (§7.2 #7). Seeking by index into
-   an already-sorted array, not re-filtering — this runs on every pointer move.
+   line at or after the focused step's timestamp.
 
-   AUTO-SCROLL WITH A JUMP-TO-LIVE PILL (§7.2 #3). Following the tail is the
-   default; scrolling up detaches and says so, because a log that silently yanks
-   you back to the bottom while you are reading is the most annoying possible
-   behaviour.
+   AUTO-SCROLL WITH A JUMP-TO-LIVE PILL. Following the tail is the default;
+   scrolling up detaches and says so.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 const LEVEL_STYLE: Record<LogLevel, string> = {
@@ -35,10 +40,12 @@ const LEVEL_STYLE: Record<LogLevel, string> = {
   error: "text-status-failed",
 };
 
-const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
-const LINE_H = 18;
+const LEVELS: LogLevel[] = ["info", "warn", "error"];
+const LEVEL_LABEL: Record<LogLevel, string> = { debug: "Debug", info: "All", warn: "Warnings", error: "Errors" };
+const LEVEL_TAG: Record<LogLevel, string> = { debug: "DEBUG", info: "INFO", warn: "WARN", error: "ERROR" };
+const LINE_H = 24;
 
-export type TimestampMode = "relative" | "absolute" | "elapsed";
+export type TimestampMode = "clock" | "elapsed";
 
 export function LogStream({
   padTo, fullscreen, onToggleFullscreen, className, stream,
@@ -47,50 +54,21 @@ export function LogStream({
   fullscreen?: boolean;
   onToggleFullscreen?: () => void;
   className?: string;
-  /**
-   * How lines are reaching this pane, or null when the run has finished and
-   * nothing is following it.
-   *
-   * A quiet log and a stalled one look identical, and the difference is the
-   * whole question a reader has while watching one. Before this the pane could
-   * not tell them apart either: it re-read the first page of events on a three
-   * second timer and said nothing about it.
-   */
+  /** How lines are reaching this pane, or null when nothing is following the run. */
   stream?: RunStreamState | null;
 }) {
   const { run, events, focusIndex, scrubbing, select } = useReplay();
-
-  /* THE LOG IS THE RUN'S EVENT LOG.
-     `buildLog` generated plausible-looking lines from a seeded RNG — timings,
-     messages, levels, all invented. On a real run that meant a log that read
-     like a log and described nothing that happened. These lines are the events
-     the worker actually recorded; when there are none, the pane says so rather
-     than filling itself in. */
-  /**
-   * Show the stored row instead of the translation.
-   *
-   * For support, and off by default. See `toLogLines` and
-   * `~/lib/runs/log-vocabulary` for what the default view removes and why.
-   */
-  const [raw, setRaw] = React.useState(false);
+  const timeZone = useTimeZone();
 
   const all = React.useMemo(
-    () => toLogLines(events, run.nodes.map((node) => node.id), raw),
-    [events, run.nodes, raw],
+    () => toLogLines(events, run.nodes.map((node) => ({ id: node.id, name: node.name }))),
+    [events, run.nodes],
   );
 
-  /*
-   * ── THE DEFAULT FLOOR IS `info`, NOT `debug` ────────────────────────────
-   * `debug` is where durable-execution mechanics live — leases, claims,
-   * re-enqueues, checkpoint writes. They are the platform doing its job, and
-   * putting them in the default view spends the reader's attention on the part
-   * that is working. One click on DEBUG brings them all back; nothing is
-   * dropped from the stream.
-   */
   const [minLevel, setMinLevel] = React.useState<LogLevel>("info");
   const [nodeFilter, setNodeFilter] = React.useState<number | null>(null);
   const [query, setQuery] = React.useState("");
-  const [tsMode, setTsMode] = React.useState<TimestampMode>("relative");
+  const [tsMode, setTsMode] = React.useState<TimestampMode>("clock");
   const [following, setFollowing] = React.useState(true);
   const [matchIndex, setMatchIndex] = React.useState(0);
 
@@ -111,7 +89,7 @@ export function LogStream({
     const needle = query.toLowerCase();
     const out: number[] = [];
     for (let i = 0; i < lines.length; i += 1) {
-      if (lines[i].message.toLowerCase().includes(needle)) out.push(i);
+      if (`${lines[i].nodeName} ${lines[i].message}`.toLowerCase().includes(needle)) out.push(i);
     }
     return out;
   }, [lines, query]);
@@ -127,7 +105,6 @@ export function LogStream({
   React.useEffect(() => {
     if (!scrubbing) return;
     const target = timeAt(run, focusIndex);
-    // Binary search: this runs on every pointer move.
     let lo = 0;
     let hi = lines.length - 1;
     while (lo < hi) {
@@ -161,58 +138,37 @@ export function LogStream({
   };
 
   const formatTs = (line: LogLine) => {
-    if (tsMode === "absolute") return new Date(line.at).toISOString().slice(11, 23);
-    if (tsMode === "elapsed") return `+${((line.at - startedAt) / 1000).toFixed(3)}s`;
-    const delta = line.at - startedAt;
-    return `${String(Math.floor(delta / 60000)).padStart(2, "0")}:${String(Math.floor((delta % 60000) / 1000)).padStart(2, "0")}.${String(delta % 1000).padStart(3, "0")}`;
+    if (tsMode === "clock") return formatClock(line.at, timeZone);
+    const delta = Math.max(0, line.at - startedAt);
+    return `+${String(Math.floor(delta / 60000)).padStart(2, "0")}:${String(Math.floor((delta % 60000) / 1000)).padStart(2, "0")}`;
   };
 
+  const controlButton =
+    "font-ui text-caption text-fg-muted hover:text-fg-primary rounded-xs px-2 py-1 outline-none transition-colors duration-fast focus-visible:focus-ring";
+
   return (
-    <div className={cn("bg-surface-base flex min-h-0 flex-col", className)}>
+    <div className={cn("bg-surface-base relative flex min-h-0 flex-col", className)}>
       {/* ── Controls ─────────────────────────────────────────────────────── */}
-      <div className="border-subtle bg-surface-sunken flex shrink-0 flex-wrap items-center gap-1.5 border-b px-2 py-1.5">
-        <Text variant="eyebrow" tone="muted">Log</Text>
+      <div className="border-subtle bg-surface-sunken flex shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
+        <Text variant="label" tone="primary">Logs</Text>
         <TransportNote stream={stream ?? null} />
 
-        <div role="group" aria-label="Minimum level" className="flex items-center gap-0.5">
+        <div role="group" aria-label="Show" className="border-subtle flex items-center rounded-sm border p-0.5">
           {LEVELS.map((level) => (
             <button
               key={level}
               onClick={() => setMinLevel(level)}
               aria-pressed={minLevel === level}
               className={cn(
-                "font-code rounded-xs px-1.5 py-0.5 text-[10px] uppercase",
+                "font-ui text-caption rounded-xs px-2 py-0.5",
                 "transition-colors duration-fast outline-none focus-visible:focus-ring",
-                minLevel === level ? "bg-surface-active text-fg-primary" : "text-fg-disabled hover:text-fg-primary",
+                minLevel === level ? "bg-surface-active text-fg-primary" : "text-fg-muted hover:text-fg-primary",
               )}
             >
-              {level}
+              {LEVEL_LABEL[level]}
             </button>
           ))}
         </div>
-
-        {/*
-          RAW: the stored row, for support.
-
-          Labelled and reachable rather than hidden, because "the log is not
-          telling me everything" is a worse feeling than a toggle. What it adds
-          back is the event type as stored, its status, and the worker the run
-          executed on.
-        */}
-        <button
-          onClick={() => setRaw((r) => !r)}
-          aria-pressed={raw}
-          title={raw
-            ? "Showing the stored event row, including the worker it ran on"
-            : "Show the stored event row, for support"}
-          className={cn(
-            "font-code rounded-xs px-1.5 py-0.5 text-[10px] uppercase",
-            "transition-colors duration-fast outline-none focus-visible:focus-ring",
-            raw ? "bg-surface-active text-fg-primary" : "text-fg-disabled hover:text-fg-primary",
-          )}
-        >
-          raw
-        </button>
 
         <div className="relative flex items-center">
           <input
@@ -221,64 +177,63 @@ export function LogStream({
             onKeyDown={(e) => {
               if (e.key === "Enter") { e.preventDefault(); gotoMatch(e.shiftKey ? -1 : 1); }
             }}
-            placeholder="Search"
-            aria-label="Search log"
+            placeholder="Search logs"
+            aria-label="Search logs"
             data-no-shortcuts
             className={cn(
-              "bg-surface-raised border-subtle font-code w-36 rounded-sm border px-1.5 py-0.5 text-[11px]",
+              "bg-surface-raised border-subtle font-ui text-caption w-44 rounded-sm border px-2 py-1",
               "text-fg-primary placeholder:text-fg-disabled outline-none focus-visible:focus-ring",
             )}
           />
           {matches.length > 0 ? (
             <span className="ml-1 flex items-center gap-0.5">
-              <span className="font-code text-fg-muted tabular text-[10px]">
+              <span className="font-code text-fg-muted tabular text-[11px]">
                 {matchIndex + 1}/{matches.length}
               </span>
               <NavButton label="Previous match" onClick={() => gotoMatch(-1)}>↑</NavButton>
               <NavButton label="Next match" onClick={() => gotoMatch(1)}>↓</NavButton>
             </span>
           ) : query ? (
-            <span className="font-code text-fg-disabled ml-1 text-[10px]">no match</span>
+            <Text variant="caption" tone="muted" className="ml-1">No match</Text>
           ) : null}
         </div>
 
         <select
           value={nodeFilter ?? ""}
           onChange={(e) => setNodeFilter(e.target.value === "" ? null : Number(e.target.value))}
-          aria-label="Filter by node"
+          aria-label="Filter by step"
           className={cn(
-            "bg-surface-raised border-subtle font-ui text-caption rounded-sm border px-1.5 py-0.5",
+            "bg-surface-raised border-subtle font-ui text-caption max-w-48 rounded-sm border px-2 py-1",
             "text-fg-secondary outline-none focus-visible:focus-ring",
           )}
         >
-          <option value="">All nodes</option>
+          <option value="">All steps</option>
           {run.nodes.map((n, i) => <option key={n.id} value={i}>{i + 1}. {n.name}</option>)}
         </select>
 
         <button
-          onClick={() => setTsMode((m) => (m === "relative" ? "absolute" : m === "absolute" ? "elapsed" : "relative"))}
-          className="font-ui text-caption text-fg-muted hover:text-fg-primary rounded-xs px-1.5 py-0.5 outline-none transition-colors duration-fast focus-visible:focus-ring"
+          onClick={() => setTsMode((m) => (m === "clock" ? "elapsed" : "clock"))}
+          title={tsMode === "clock" ? "Show time since the run started" : "Show the time of day"}
+          className={controlButton}
         >
-          {tsMode}
+          {tsMode === "clock" ? timeZoneLabel(timeZone) : "Since start"}
         </button>
 
-        <div className="ml-auto flex items-center gap-1.5">
-          <Text variant="caption" tone="muted" tabular>
-            {lines.length.toLocaleString("en-GB")} lines
+        <div className="ml-auto flex items-center gap-1">
+          <Text variant="caption" tone="muted" tabular className="mr-1">
+            {lines.length.toLocaleString("en-GB")} {lines.length === 1 ? "line" : "lines"}
           </Text>
           <button
-            onClick={() => navigator.clipboard?.writeText(lines.map((l) => `${formatTs(l)} ${l.level} ${l.message}`).join("\n"))}
-            className="font-ui text-caption text-fg-muted hover:text-fg-primary rounded-xs px-1.5 py-0.5 outline-none transition-colors duration-fast focus-visible:focus-ring"
+            onClick={() => navigator.clipboard?.writeText(
+              lines.map((l) => `${formatTs(l)} ${LEVEL_TAG[l.level]} ${l.nodeName}: ${l.message}`).join("\n"),
+            )}
+            className={controlButton}
           >
             Copy
           </button>
           {onToggleFullscreen ? (
-            <button
-              onClick={onToggleFullscreen}
-              aria-pressed={fullscreen}
-              className="font-ui text-caption text-fg-muted hover:text-fg-primary rounded-xs px-1.5 py-0.5 outline-none transition-colors duration-fast focus-visible:focus-ring"
-            >
-              {fullscreen ? "Restore" : "Full screen"}
+            <button onClick={onToggleFullscreen} aria-pressed={fullscreen} className={controlButton}>
+              {fullscreen ? "Exit full screen" : "Full screen"}
             </button>
           ) : null}
         </div>
@@ -286,32 +241,43 @@ export function LogStream({
 
       {/* ── Lines ────────────────────────────────────────────────────────── */}
       <div ref={scrollRef} onScroll={onScroll} className="relative min-h-0 flex-1 overflow-auto [contain:paint_layout]">
-        <div style={{ height: virtualizer.getTotalSize() }} className="relative">
+        {lines.length === 0 ? (
+          <div className="grid h-full place-items-center p-4">
+            <Text variant="body-sm" tone="muted">
+              {all.length === 0 ? "No log lines yet." : "No lines match these filters."}
+            </Text>
+          </div>
+        ) : null}
+        <div style={{ height: virtualizer.getTotalSize() + (padTo ?? 0) }} className="relative">
           {virtualizer.getVirtualItems().map((item) => {
             const line = lines[item.index];
             const isMatch = matches[matchIndex] === item.index;
             return (
               <div
                 key={item.key}
-                onClick={() => select(line.nodeIndex)}
+                onClick={() => { if (line.nodeIndex >= 0) select(line.nodeIndex); }}
                 className={cn(
-                  "absolute left-0 top-0 flex w-full cursor-pointer items-baseline gap-2 px-2",
+                  "absolute left-0 top-0 flex w-full items-center gap-3 px-3",
+                  line.nodeIndex >= 0 && "cursor-pointer",
                   "hover:bg-surface-hover",
                   isMatch && "bg-accent-subtle",
-                  line.nodeIndex === focusIndex && "border-accent border-l-2",
+                  line.nodeIndex >= 0 && line.nodeIndex === focusIndex && "border-accent border-l-2",
                 )}
                 style={{ height: item.size, transform: `translateY(${item.start}px)` }}
               >
-                <span className="font-code text-fg-disabled tabular shrink-0 text-[11px]">
+                <span className="font-code text-fg-muted tabular w-16 shrink-0 text-[12px]">
                   {formatTs(line)}
                 </span>
-                <span className={cn("font-code w-9 shrink-0 text-[10px] uppercase", LEVEL_STYLE[line.level])}>
-                  {line.level}
+                <span className={cn("font-code w-12 shrink-0 text-[11px]", LEVEL_STYLE[line.level])}>
+                  {LEVEL_TAG[line.level]}
                 </span>
-                <span className="font-code text-fg-disabled hidden w-28 shrink-0 truncate text-[11px] sm:block">
+                <span className="font-ui text-fg-secondary hidden w-40 shrink-0 truncate text-[12px] sm:block" title={line.nodeName}>
                   {line.nodeName}
                 </span>
-                <span className={cn("font-code min-w-0 flex-1 truncate text-[11px]", LEVEL_STYLE[line.level])}>
+                <span
+                  className={cn("font-ui min-w-0 flex-1 truncate text-[12px]", line.level === "info" ? "text-fg-primary" : LEVEL_STYLE[line.level])}
+                  title={line.message}
+                >
                   {query ? <Highlighted text={line.message} query={query} /> : line.message}
                 </span>
               </div>
@@ -320,8 +286,7 @@ export function LogStream({
         </div>
       </div>
 
-      {/* §7.2 #3 — the pill, only when detached. */}
-      {!following ? (
+      {!following && lines.length > 0 ? (
         <button
           onClick={() => setFollowing(true)}
           className={cn(
@@ -330,7 +295,7 @@ export function LogStream({
             "motion-safe:animate-[ink-log-line_180ms_var(--ease-entrance)]",
           )}
         >
-          Jump to live
+          Jump to latest
         </button>
       ) : null}
     </div>
@@ -342,7 +307,7 @@ function NavButton({ label, onClick, children }: { label: string; onClick: () =>
     <button
       onClick={onClick}
       aria-label={label}
-      className="text-fg-muted hover:text-fg-primary grid size-4 place-items-center rounded-xs text-[10px] outline-none transition-colors duration-fast focus-visible:focus-ring"
+      className="text-fg-muted hover:text-fg-primary grid size-5 place-items-center rounded-xs text-[11px] outline-none transition-colors duration-fast focus-visible:focus-ring"
     >
       {children}
     </button>
@@ -361,76 +326,66 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   );
 }
 
-/**
- * A run's events, as log lines.
- *
- * `nodeIndex` is what the pane filters and scrubs by. A run event carries no
- * node reference, so it is resolved from the event type where the type happens
- * to name a step and left at -1 otherwise — which the pane reads as "belongs to
- * the run, not to a step". Inventing an index would silently file lines under
- * whichever step the scrubber happened to be on.
- */
-/**
- * What the transport is doing, in the reader's words.
- *
- * Silent while the stream is open — the healthy state says nothing, because a
- * permanent "Live" badge is a thing people stop seeing, and the two states worth
- * distinguishing are "still connected" and "not any more".
- */
+/** Whether updates are arriving. Plain words, no transport details. */
 function TransportNote({ stream }: { stream: RunStreamState | null }) {
   if (!stream) return null;
   const label =
-    stream.status === "open" ? null
+    stream.status === "open" || stream.status === "polling" ? "Live"
     : stream.status === "connecting" ? "Connecting"
-    : stream.status === "reconnecting" ? `Reconnecting (attempt ${stream.attempt})`
-    /* Not "unavailable": lines ARE still arriving, just on a timer, and the log
-       is the same log. Saying unavailable would send somebody to check a
-       service that is working. */
-    : stream.status === "polling" ? "Refreshing on a timer"
+    : stream.status === "reconnecting" ? "Reconnecting"
     : stream.status === "closed" ? null
-    : "Updates stopped";
+    : "Paused";
   if (!label) return null;
 
   return (
-    <Text variant="eyebrow" tone="muted" aria-live="polite">
-      {label}
-    </Text>
+    <span className="flex items-center gap-1.5" aria-live="polite">
+      <span
+        aria-hidden="true"
+        className={cn(
+          "size-1.5 rounded-full",
+          label === "Live" ? "bg-status-live motion-safe:animate-pulse" : "bg-fg-disabled",
+        )}
+      />
+      <Text variant="caption" tone="muted">{label}</Text>
+    </span>
   );
 }
 
 function toLogLines(
   events: contracts.RunEvent[],
-  nodeIds: string[],
-  raw: boolean,
+  steps: Array<{ id: string; name: string }>,
 ): LogLine[] {
   return [...events]
+    .filter((event) => !isPlumbing(event.type))
     .sort((a, b) => a.sequence - b.sequence)
     .map((event) => {
-      const index = nodeIds.findIndex((id) => event.type.includes(id));
-      const duration = event.durationMs != null ? ` ${event.durationMs}ms` : "";
-      /*
-       * ── RAW IS THE STORED ROW; THE DEFAULT IS THE TRANSLATION ───────────
-       * Raw exists so support can read exactly what was written, including the
-       * worker the run executed on. It is off by default because the worker's
-       * identity is our fleet, not the customer's workflow, and because the
-       * enum is our vocabulary for a question they asked in theirs.
-       */
-      const message = raw
-        ? [
-            event.type,
-            event.status ? `status=${event.status}` : null,
-            event.source ? `source=${event.source}` : null,
-            event.durationMs != null ? `${event.durationMs}ms` : null,
-          ].filter(Boolean).join(" ")
-        : `${describe(event.type)}${duration}`;
+      /* Attributed by the event's own step id; an older event without one falls
+         back to a type that names the step. Unattributed lines belong to the run. */
+      const index = event.stepId
+        ? steps.findIndex((step) => step.id === event.stepId)
+        : steps.findIndex((step) => event.type.includes(step.id));
       return {
         seq: event.sequence,
         at: Date.parse(event.timestamp),
         level: levelFor(event.type, event.status),
         nodeIndex: index,
-        nodeName: index === -1 ? "run" : nodeIds[index],
-        message,
+        nodeName: index === -1 ? "Run" : steps[index].name,
+        message: logMessage(event),
       };
     });
 }
 
+/**
+ * One line, in the reader's words: what happened, then the facts worth having —
+ * the model a call used, the attempt when it is a retry, how long it took. Never
+ * the event's source, which names our infrastructure rather than their workflow.
+ */
+export function logMessage(
+  event: Pick<contracts.RunEvent, "type" | "durationMs" | "modelName" | "retryAttempt">,
+): string {
+  const parts = [describe(event.type)];
+  if (event.modelName && event.type.startsWith("LLM_CALL")) parts.push(event.modelName);
+  if (event.retryAttempt != null && event.retryAttempt > 1) parts.push(`attempt ${event.retryAttempt}`);
+  if (event.durationMs != null && event.durationMs > 0) parts.push(formatDuration(event.durationMs));
+  return parts.join(" · ");
+}

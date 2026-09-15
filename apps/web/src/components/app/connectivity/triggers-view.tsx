@@ -125,7 +125,7 @@ export function TriggersView() {
       <PageHeader
         eyebrow="Connect"
         title="Triggers"
-        description="Every way a run can start. A workflow can have as many as it needs — they are not exclusive."
+        description="Ways a workflow can start."
         actions={
           <>
             <Button size="sm" variant="secondary" onClick={() => setParams({ create: "event" })}>
@@ -150,7 +150,7 @@ export function TriggersView() {
         <Group
           icon={Globe}
           title="Webhooks"
-          help="A URL a third party calls. The classic 'something happened over there' trigger — a Slack event, a payment, a form submission."
+          help="A URL another service calls to start a workflow."
           count={webhookRows.length}
           loading={webhooks.isPending}
           error={webhooks.error}
@@ -185,7 +185,7 @@ export function TriggersView() {
         <Group
           icon={Broadcast}
           title="Events"
-          help="A subscription to a broker you already run — Kafka, SQS or Pub/Sub. Vectorbea consumes; you keep the broker."
+          help="Start a workflow from Kafka, SQS or Pub/Sub messages."
           count={eventRows.length}
           loading={events.isPending}
           error={events.error}
@@ -215,7 +215,7 @@ export function TriggersView() {
         <Group
           icon={Clock}
           title="Schedules"
-          help="Materialised from a workflow's published trigger config. Created by publishing a version with a cron, not from here."
+          help="Created when you publish a workflow with a schedule."
           count={scheduleRows.length}
           loading={schedules.isPending}
           error={schedules.error}
@@ -660,11 +660,11 @@ function CreateWebhookDialog({
 
           <ModalSection
             title="Signature"
-            description="Optional, and worth it whenever the sender supports one. Without it, anybody who learns the URL can start this workflow."
+            description="Recommended. Without it, anyone with the URL can start this workflow."
           >
             <Field
               label="Signing secret"
-              description="Stored encrypted and never shown again. Paste the same value the sender signs with."
+              description="The signing secret from the sender. Never shown again."
             >
               <Input
                 type="password"
@@ -677,7 +677,7 @@ function CreateWebhookDialog({
             </Field>
             <Field
               label="Signature header"
-              description="Which header carries it. Slack sends X-Slack-Signature; Stripe sends Stripe-Signature; GitHub sends X-Hub-Signature-256."
+              description="For example X-Slack-Signature, Stripe-Signature or X-Hub-Signature-256."
             >
               <Input
                 value={signatureHeader}
@@ -692,11 +692,11 @@ function CreateWebhookDialog({
 
           <ModalSection
             title="Filtering and deduplication"
-            description="Optional. Most senders fire on more than you want, and most retry."
+            description="Optional. Only these events start a run."
           >
             <Field
               label="Event type path"
-              description="Where the kind of event lives in the body. Slack puts it at event.type."
+              description="Where the event type is in the body, for example event.type."
             >
               <Input
                 value={eventTypePath}
@@ -707,7 +707,7 @@ function CreateWebhookDialog({
             </Field>
             <Field
               label="Only these types"
-              description="Comma separated. Anything else is accepted and ignored, so the sender sees a 200 rather than an error it will retry."
+              description="Comma separated. Other events are ignored."
             >
               <Input
                 value={eventTypes}
@@ -718,7 +718,7 @@ function CreateWebhookDialog({
             </Field>
             <Field
               label="Deduplicate on"
-              description="A path to the sender's own event id. A redelivery carrying an id already seen is accepted and does not run twice."
+              description="The sender's event id, so a repeated delivery does not run twice."
             >
               <Input
                 value={dedupePath}
@@ -823,7 +823,7 @@ function CreateEventTriggerDialog({
       <ModalHeader
         eyebrow="Connect · Triggers"
         title="Subscribe to a broker"
-        description="Vectorbea consumes from a queue you already run. The broker stays yours."
+        description="Start runs from messages on your queue."
         closeDisabled={saving}
       />
       <ModalBody>
@@ -868,7 +868,7 @@ function CreateEventTriggerDialog({
             </Field>
             <Field
               label="Consumer group"
-              description="Kafka and Pub/Sub only. Use a group of your own so Vectorbea's offset is independent of your other consumers."
+              description="Kafka and Pub/Sub only. Use a dedicated group."
             >
               <Input
                 value={consumerGroup}
@@ -879,7 +879,7 @@ function CreateEventTriggerDialog({
             </Field>
             <Field
               label="Deduplicate on"
-              description="A path to the message's own id. A broker redelivery carrying an id already seen does not run twice."
+              description="The message id, so a repeated message does not run twice."
             >
               <Input
                 value={dedupePath}
@@ -949,7 +949,7 @@ function UrlOnceDialog({
       <ModalHeader
         eyebrow="Connect · Triggers"
         title={`${value.name} is live`}
-        description="Copy this URL now. It is shown once — recovering it means rotating, which invalidates the one you already pasted."
+        description="Copy this URL now. It is only shown once."
       />
       <ModalBody>
         <div className="grid gap-3">

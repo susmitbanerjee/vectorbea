@@ -18,6 +18,8 @@ import { useWorkspace } from "~/lib/workspace/workspace-provider";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
+import { useQuery } from "@tanstack/react-query";
+import { setPreferredTimeZone } from "~/lib/time/time-zone";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE APPLICATION SHELL
@@ -62,6 +64,7 @@ function ShellInner({ children, user }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const { workspaces: realWorkspaces, workspaceId, setWorkspace } = useWorkspace();
   const api = useApi();
+  useSavedTimeZone();
 
   /* ── Persisted preferences ────────────────────────────────────────────────
      Read after mount so the server and first client render agree; writing on
@@ -281,4 +284,28 @@ function StaggerContent({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+/**
+ * Apply the time zone saved on the profile, once per session.
+ *
+ * Without it the saved choice took effect only after visiting Settings → Profile
+ * on each device. A failed read (no profile route in mock mode, a network blip)
+ * leaves the browser's zone in place, which is the right fallback.
+ */
+function useSavedTimeZone() {
+  const profile = useQuery<{ timeZone?: string | null }>({
+    queryKey: ["settings", "profile"],
+    queryFn: async () => {
+      const response = await fetch("/api/settings/profile", { cache: "no-store" });
+      if (!response.ok) throw new Error("profile unavailable");
+      return response.json() as Promise<{ timeZone?: string | null }>;
+    },
+    retry: false,
+    staleTime: Infinity,
+  });
+  const saved = profile.data?.timeZone;
+  React.useEffect(() => {
+    if (profile.isSuccess) setPreferredTimeZone(saved ?? null);
+  }, [profile.isSuccess, saved]);
 }

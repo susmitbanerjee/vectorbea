@@ -174,7 +174,7 @@ export function IncidentsView({ frozen: frozenProp }: { frozen?: boolean } = {})
       <PageHeader
         eyebrow="Observe"
         title="Incidents"
-        description={`${totalRuns} failed runs across ${incidents.length} signatures. The signature is the problem; the runs are symptoms.`}
+        description={`${totalRuns} failed ${totalRuns === 1 ? "run" : "runs"}, grouped into ${incidents.length} ${incidents.length === 1 ? "problem" : "problems"}.`}
         actions={
           <div className="flex flex-wrap items-center gap-1.5">
             <Button size="sm" variant="secondary" onClick={() => setConfirming({ kind: "resolve-all" })}>
@@ -309,8 +309,8 @@ function IncidentRow({ incident, onDelete }: { incident: IncidentView; onDelete:
               </span>
             </div>
 
-            <Text variant="caption" tone="muted" className="mt-0.5 block truncate font-code">
-              {incident.signature}
+            <Text variant="caption" tone="secondary" className="mt-0.5 block truncate" title={incident.reason ?? undefined}>
+              {incident.reason ?? incident.failingComponent}
             </Text>
 
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -366,6 +366,9 @@ function IncidentRow({ incident, onDelete }: { incident: IncidentView; onDelete:
 
 /** Title derived from the root cause, not the raw signature. */
 export function titleFor(incident: IncidentView): string {
+  if (incident.title) return incident.failingComponent && incident.failingComponent !== "Workflow"
+    ? `${incident.title} · ${incident.failingComponent}`
+    : incident.title;
   if (incident.failingComponent && incident.classification.includes("tool_call")) {
     return `${incident.failingComponent} is refusing connections`;
   }

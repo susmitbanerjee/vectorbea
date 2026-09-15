@@ -6,6 +6,7 @@ import { Text } from "~/components/ui/text";
 import { healthBand, type HealthBand } from "~/lib/query";
 import { EMPTY } from "~/lib/format";
 import type { RunStatus, TriggerKind, WorkflowStatus } from "~/mocks/domain";
+import { formatClock, formatDateTime, useTimeZone } from "~/lib/time/time-zone";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WORKFLOW CELL VOCABULARY
@@ -100,12 +101,13 @@ export function LastRunCell({ status, at }: { status: RunStatus | null; at: stri
 /**
  * Relative by default, absolute on hover.
  *
- * "3h ago" is what you want while scanning; the exact UTC timestamp is what you
+ * "3h ago" is what you want while scanning; the exact timestamp is what you
  * need the moment you are correlating with someone else's logs.
  */
 export function RelativeTime({ iso, className }: { iso: string; className?: string }) {
+  const timeZone = useTimeZone();
   const at = Date.parse(iso);
-  const absolute = `${new Date(at).toISOString().replace("T", " ").slice(0, 19)}Z`;
+  const absolute = formatDateTime(at, timeZone);
   // Use the viewer's actual clock. `NOW` is intentionally frozen for fixture
   // generation, but using it here made newly-created records appear to have
   // been checked days in the future once the fixture date had passed.

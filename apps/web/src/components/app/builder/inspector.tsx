@@ -6,6 +6,7 @@ import { Text } from "~/components/ui/text";
 import { Kbd } from "~/components/ui/kbd";
 import { CATEGORY_LABEL, type Issue, type IssueCategory, type ValiditySummary } from "./validation";
 import type { HistoryEntry } from "./store";
+import { LocalTime } from "~/components/ui/local-time";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    RIGHT INSPECTOR — the shell.
@@ -322,7 +323,7 @@ function HistoryPane({
                 {entry.label}
               </span>
               <span className="font-code text-fg-disabled shrink-0 text-[10px] tabular">
-                {new Date(entry.at).toISOString().slice(11, 19)}
+                <LocalTime at={entry.at} format="clock" />
               </span>
             </button>
           </li>

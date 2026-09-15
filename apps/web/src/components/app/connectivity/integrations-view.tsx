@@ -301,7 +301,7 @@ function IntegrationDetail({
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <div className="grid gap-4">
               <Text variant="body-sm" tone="secondary" className="block">{integration.description}</Text>
-              {integration.id === "http" ? <Section title="HTTP requests and API documents" help="Configure request inputs, authentication, response extraction and pagination, or generate tools from an API document.">
+              {integration.id === "http" ? <Section title="HTTP requests and API documents" help="Build a tool by hand, or import one from an API document.">
                 <div className="flex flex-wrap gap-2">
                   <Button variant="primary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("test")}>Open HTTP client</Button>
                   <Button variant="secondary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("create")}>Create HTTP tool</Button>

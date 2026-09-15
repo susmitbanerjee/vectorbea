@@ -241,7 +241,18 @@ NEXT_PUBLIC_VECTORBEA_ENV=dev
 NEXT_PUBLIC_SUPABASE_URL=<staging supabase url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<staging anon key>
 NEXT_PUBLIC_PRIVATE_BETA_MODE=true
+DATABASE_URL=<the SAME database the staging api/worker use>
 ```
+
+**`DATABASE_URL` on Vercel must be the environment's database.** The web app's
+own server routes read it directly: Settings → Profile (name, time zone), the
+support widget and `/support` portal (`support_tickets`), beta access. When the
+API and worker moved to another database and Vercel kept the old one, the
+support portal kept showing the old database's tickets and the profile showed
+the old account row. The database must accept connections from Vercel (its
+addresses are not fixed, so allow SSL connections broadly or use a connection
+proxy). `support_tickets` is created by V077; the web app no longer needs
+CREATE on the schema for it.
 
 The build command is already pinned in `apps/web/vercel.json`
 (`npm run prisma:generate && next build`). Set the Vercel project **Root

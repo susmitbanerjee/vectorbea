@@ -6,6 +6,7 @@ import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import type { Comment } from "./store";
 import type { BuilderNode } from "~/mocks/builder";
+import { LocalTime } from "~/components/ui/local-time";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    COMMENT PINS
@@ -74,7 +75,7 @@ export function CommentLayer({
                 <div className="flex items-baseline justify-between gap-2">
                   <Text variant="caption" tone="secondary">{comment.author}</Text>
                   <Text variant="caption" tone="disabled" className="tabular">
-                    {new Date(comment.at).toISOString().slice(11, 16)}
+                    <LocalTime at={comment.at} format="clock" />
                   </Text>
                 </div>
                 <Text variant="body-sm" tone="primary" className="mt-1 block break-words">

@@ -106,7 +106,7 @@ export function AdvancedTab({
   return (
     <div className="grid gap-4 p-3">
       {/* ── Retry ────────────────────────────────────────────────────────── */}
-      <Section title="Retry policy" help="What happens when this step throws. Committed work upstream is never replayed — a retry resumes here.">
+      <Section title="Retry policy" help="What happens when this step fails.">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Max attempts" help="Including the first. 1 means no retry.">
             <Input
@@ -161,7 +161,7 @@ export function AdvancedTab({
 
       {/* ── Timeout ──────────────────────────────────────────────────────── */}
       <Section title="Timeout" help="How long one attempt may run before it is abandoned.">
-        <Field label="Timeout" help="Seconds. Applies per attempt, not to the step as a whole.">
+        <Field label="Timeout" help="Seconds, per attempt.">
           <Input
             type="number" min={1}
             value={config.timeoutMs / 1000}
@@ -183,9 +183,9 @@ export function AdvancedTab({
       {/* ── Idempotency ──────────────────────────────────────────────────── */}
       <Section
         title="Idempotency key"
-        help="What makes a retry safe. Two executions carrying the same key are treated as one — the second is deduplicated rather than performed again."
+        help="Runs with the same key are treated as one, so a retry does not repeat the action."
       >
-        <Field label="Key expression" help="Bind it to whatever identifies the work, not the attempt.">
+        <Field label="Key expression" help="Use a value that identifies the work, such as an order id.">
           <Input
             value={config.idempotencyKey}
             onChange={(e) => onChange({ idempotencyKey: e.target.value })}
@@ -274,12 +274,12 @@ export function AdvancedTab({
       {/* ── Concurrency, conditional, cost ───────────────────────────────── */}
       <Section
         title="Limits"
-        help="Bounds on how hard this step may run. Skip if is enforced by the runtime; the other three are recorded and not yet applied."
+        help="Controls for how this step runs."
       >
         <div className="grid grid-cols-2 gap-2">
           <Field
             label="Max concurrency"
-            help="Simultaneous executions of this step across the workspace. Recorded, not yet enforced — the run pool bounds concurrency workspace-wide today, not per step."
+            help="How many of this step may run at once."
           >
             <Input
               type="number" min={1}
@@ -290,7 +290,7 @@ export function AdvancedTab({
           </Field>
           <Field
             label="Rate limit"
-            help="Executions per minute. Blank for none. Recorded, not yet enforced — provider rate limits are handled by backoff at the call site."
+            help="Runs per minute. Leave blank for no limit."
           >
             <Input
               type="number" min={0}
@@ -305,7 +305,7 @@ export function AdvancedTab({
         <div className="mt-2">
           <Field
             label="Cost ceiling"
-            help="USD per execution. Recorded, not yet enforced — the run-level budget ceiling is what currently halts spend."
+            help="USD per run of this step."
           >
             <Input
               type="number" min={0} step={0.001}

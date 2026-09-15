@@ -308,6 +308,13 @@ under a 120s agent timeout — and the step retry re-ran the agent from iteratio
 `LlmNodeExecutor` now passes its total budget as `headersTimeoutMs`; other callers
 keep the 30s default.
 
+**Least-privilege database roles boot quietly.** The worker's startup DDL
+(`Database.ensure*Table`) now runs only when `to_regclass` says a runtime table is
+missing, because `CREATE TABLE IF NOT EXISTS` needs CREATE on the schema even for
+an existing table. `PartitionMaintenance` treats "would overlap partition" as an
+already-covered month (the `*_historical` partition spans up to the month after
+V028 ran) and logs it at debug.
+
 **Run memory rows stay valid JSON.** `AgentMemoryStore` serialised a value and then
 cut the JSON text at 4 096 characters, which on a long observation (a patch full of
 escapes) left an unterminated string and Postgres rejected the row. `boundedJson`

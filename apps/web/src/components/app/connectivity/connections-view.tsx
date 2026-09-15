@@ -503,7 +503,7 @@ function ConnectionDetail({
 function Overview({ connection, onDelete, onEdit }: { connection: ConnectionRecord; onDelete: (id: string) => Promise<void>; onEdit: () => void }) {
   return (
     <>
-      <Section title="Configuration" help="Secrets are never displayed — only replaced. There is no path in this product that reads a credential back out.">
+      <Section title="Configuration" help="Secrets are never shown. You can replace them.">
         <Facts
           items={[
             { label: "Provider", value: connection.provider },

@@ -288,7 +288,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
       <ModalHeader
         eyebrow="Build · Workflows"
         title="New workflow"
-        description="It starts as a draft. Nothing runs, and no schedule fires, until you publish it."
+        description="It starts as a draft. Nothing runs until you publish."
         closeDisabled={busy}
       />
 
@@ -302,7 +302,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
             activeIndex={step}
             reachableIndex={reachableIndex}
             onSelect={setStep}
-            footnote="Creating writes the workflow and its first version. The version is what carries the trigger."
+            
           />
         }
       >
@@ -351,7 +351,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
 
           {step === 1 ? (
             <div className="grid gap-4">
-              <ModalSection title="Identity" description="What it is called in the list, in run history and in every alert.">
+              <ModalSection title="Identity" >
                 <Field label="Name" required characterCount={{ value: name.length, max: 255 }}>
                   <Input
                     value={name}
@@ -362,7 +362,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
                     autoFocus
                   />
                 </Field>
-                <Field label="Description" description="Optional. One line on what it does and who relies on it.">
+                <Field label="Description" description="Optional.">
                   <Textarea
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
@@ -377,7 +377,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
 
               <ModalSection
                 title="Execution mode"
-                description="Who runs the steps. This decides how much of the durability story applies."
+                description="Where the steps run."
               >
                 <OptionCards
                   label="Execution mode"
@@ -404,7 +404,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
 
           {step === 2 ? (
             <div className="grid gap-4">
-              <ModalSection title="Trigger" description="What starts a run. It becomes the first node on the canvas.">
+              <ModalSection title="Trigger" description="What starts a run.">
                 <OptionCards
                   label="Trigger"
                   columns={2}
@@ -425,7 +425,7 @@ export function CreateWorkflowDialog({ open, onOpenChange, onCreated }: CreateWo
               {trigger === "cron" ? (
                 <>
                   <ModalDivider />
-                  <ModalSection title="Schedule" description="Evaluated in the timezone below, including across daylight saving.">
+                  <ModalSection title="Schedule" description="Uses the time zone below.">
                     <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
                       <Field label="Cron expression" required>
                         <CronInput value={cron} onValueChange={setCron} timezone={zone} />

@@ -228,7 +228,7 @@ function Policy({ tool }: { tool: ToolRecord }) {
 
       <Section
         title={`Policy for ${tool.risk} risk`}
-        help="What this tier requires, and what is actually configured. Where they differ, the difference is the finding above."
+        help="What this risk level requires, and what is set."
       >
         <ul className="grid gap-2">
           <PolicyRow
@@ -527,7 +527,7 @@ function TestConsole({ tool }: { tool: ToolRecord }) {
     <>
       <Section
         title="Validate and test"
-        help="Validates the persisted adapter, schemas, and connection binding through the API. It never executes side effects."
+        help="Checks the tool's settings and connection. Nothing is sent."
         tone={tool.risk === "critical" || tool.risk === "high" ? "warning" : undefined}
       >
         {tool.risk === "critical" || tool.risk === "high" ? (

@@ -32,6 +32,8 @@ export interface UserProfile {
   /** False for OAuth-only accounts — they have no password to change. */
   hasPassword: boolean;
   createdAt: string;
+  /** IANA zone the person reads timestamps in; null means their browser's zone. */
+  timeZone: string | null;
 }
 
 interface ProfileRow {
@@ -45,6 +47,7 @@ interface ProfileRow {
   is_platform_admin: boolean;
   has_password: boolean;
   created_at: Date | string;
+  time_zone: string | null;
 }
 
 const SELECT_PROFILE = `
@@ -53,7 +56,8 @@ const SELECT_PROFILE = `
          COALESCE(beta_status, 'waitlisted') AS beta_status,
          COALESCE(is_platform_admin, false)  AS is_platform_admin,
          (password_hash IS NOT NULL)         AS has_password,
-         created_at
+         created_at,
+         to_jsonb(app_users) ->> 'time_zone' AS time_zone
     FROM app_users`;
 
 function toProfile(row: ProfileRow): UserProfile {
@@ -68,6 +72,7 @@ function toProfile(row: ProfileRow): UserProfile {
     isPlatformAdmin: row.is_platform_admin,
     hasPassword: row.has_password,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    timeZone: row.time_zone ?? null,
   };
 }
 
@@ -90,6 +95,7 @@ export const PROFILE_LIMITS = {
 export interface ProfileUpdate {
   fullName?: string | null;
   avatarUrl?: string | null;
+  timeZone?: string | null;
 }
 
 /**
@@ -106,6 +112,7 @@ export async function updateUserProfile(
 ): Promise<UserProfile> {
   const fullName = normalizeName(update.fullName);
   const avatarUrl = normalizeAvatarUrl(update.avatarUrl);
+  if (update.timeZone !== undefined) await saveTimeZone(subject, normalizeTimeZone(update.timeZone));
 
   // COALESCE on the parameter, not the column: an absent key leaves the value
   // alone, while an explicit null clears it. A blanket overwrite would wipe an
@@ -121,7 +128,8 @@ export async function updateUserProfile(
                 COALESCE(beta_status, 'waitlisted') AS beta_status,
                 COALESCE(is_platform_admin, false)  AS is_platform_admin,
                 (password_hash IS NOT NULL)         AS has_password,
-                created_at`,
+                created_at,
+                to_jsonb(app_users) ->> 'time_zone' AS time_zone`,
     [
       subject,
       update.fullName !== undefined,
@@ -133,6 +141,36 @@ export async function updateUserProfile(
 
   if (!row) throw new Error("Your account could not be found.");
   return toProfile(row);
+}
+
+/**
+ * Written on its own statement so a database that has not run V076 yet fails
+ * this one change with a clear message instead of failing the whole profile save.
+ */
+async function saveTimeZone(subject: string, timeZone: string | null): Promise<void> {
+  try {
+    await appQueryOne(
+      `UPDATE app_users SET time_zone = $2, updated_at = now()
+        WHERE (id::text = $1 OR supabase_user_id = $1) RETURNING id`,
+      [subject, timeZone],
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "42703") {
+      throw new Error("Time zone saving must be switched on by a database update first. Try again after the next deploy.");
+    }
+    throw error;
+  }
+}
+
+function normalizeTimeZone(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: trimmed });
+  } catch {
+    throw new Error("Time zone must be one from the list.");
+  }
+  return trimmed;
 }
 
 function normalizeName(value: string | null | undefined): string | null {

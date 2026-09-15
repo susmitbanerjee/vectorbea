@@ -278,7 +278,7 @@ function BuilderInner({
     void trigger(
       "test",
       () => api.workflows.run(workflow.id, { mode: "simulation" }, scope),
-      "Test run started. Nothing external was called.",
+      "Test run started.",
     );
   }, [trigger, api, workflow.id, scope]);
 
@@ -286,7 +286,7 @@ function BuilderInner({
     void trigger(
       "run",
       () => api.workflows.run(workflow.id, { mode: "real" }, scope),
-      "Run started against live connections.",
+      "Run started.",
     );
   }, [trigger, api, workflow.id, scope]);
 
@@ -294,7 +294,7 @@ function BuilderInner({
     void trigger(
       "debug",
       () => api.workflows.startDebugRun(workflow.id, {}, scope),
-      "Debug run started. Every node's payloads are being captured.",
+      "Debug run started.",
     );
   }, [trigger, api, workflow.id, scope]);
 

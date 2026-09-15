@@ -163,24 +163,15 @@ export function ApiTriggerCard({
 
       <div className="border-subtle flex flex-wrap items-start justify-between gap-x-6 gap-y-2 border-t pt-3">
         <Text variant="caption" tone="muted" className="block max-w-[70ch] flex-1 leading-snug">
-          The key goes in the <span className="font-code">Authorization</span> header and is scoped
-          to this workspace. A key inherits the member cap of whoever created it — it cannot spend
-          more than they can.
+          Send your API key in the <span className="font-code">Authorization</span> header.
         </Text>
         <div className="flex shrink-0 flex-wrap gap-2">
           <Button asChild size="xs" variant="secondary">
             <Link href={"/api-keys" as Route}>Create an API key</Link>
           </Button>
-          <Button asChild size="xs" variant="ghost">
-            <Link href={"/settings/sdk" as Route}>SDK and docs</Link>
-          </Button>
         </div>
       </div>
 
-      <Text variant="caption" tone="disabled" className="block">
-        Triggering {workflowName} this way is recorded with <span className="font-code">trigger_type: api</span> and is
-        otherwise identical to pressing Run — the same quota, the same admission control, the same trace.
-      </Text>
     </div>
   );
 }

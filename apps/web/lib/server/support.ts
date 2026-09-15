@@ -152,6 +152,15 @@ let tableReady = false;
 async function ensureTable() {
   if (tableReady) return;
   const sql = db();
+  /* Look before creating. CREATE TABLE IF NOT EXISTS needs CREATE on the schema
+     even when the table is already there, so on a least-privilege database role
+     every portal request failed with "permission denied for schema public" for a
+     table V077 had made. */
+  const existing = await sql`SELECT to_regclass('support_tickets') IS NOT NULL AS present` as { present: boolean }[];
+  if (existing[0]?.present) {
+    tableReady = true;
+    return;
+  }
   await sql`
     CREATE TABLE IF NOT EXISTS support_tickets (
       id            uuid        PRIMARY KEY DEFAULT gen_random_uuid(),

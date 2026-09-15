@@ -18,6 +18,7 @@ import { useTablePreferences } from "~/components/data/table/table-state";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { cn } from "~/lib/cn";
 import { AdminState, describeAdminFailure } from "./admin-states";
+import { LocalTime } from "~/components/ui/local-time";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    AUDIT LOG
@@ -234,7 +235,7 @@ export function AuditView() {
       <PageHeader
         eyebrow="Govern"
         title="Audit log"
-        description="Append-only record of who or what changed this workspace, and whether they were allowed to. Filtering and paging run in the database, so an empty result means it did not happen in this range — not that it fell outside a page."
+        description="Who changed what in this workspace, and when."
         actions={
           <Button
             size="sm"
@@ -418,7 +419,7 @@ function RecordDetail({ row, onClose }: { row: AuditRow | null; onClose: () => v
             <div className="grid gap-4">
               <ModalSection title="Record">
                 <dl className="border-subtle divide-subtle divide-y rounded-md border">
-                  <Row label="Recorded">{new Date(row.timestamp).toISOString()}</Row>
+                  <Row label="Recorded"><LocalTime at={row.timestamp} /></Row>
                   <Row label="Action">{row.action}</Row>
                   <Row label="Result">{RESULT_LABEL[row.result]}</Row>
                   <Row label="Actor">

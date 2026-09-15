@@ -47,16 +47,9 @@ export function ResultPanel({
   const hasOutput = output !== undefined && output !== null
     && !(typeof output === "object" && Object.keys(output as object).length === 0);
 
-  /*
-   * A finished run with no output is a REAL and ordinary state — a workflow
-   * whose last step posts to Slack has done its job and emitted nothing. Saying
-   * so beats an empty panel, which reads as a value that failed to load.
-   */
-  const terminal = detail
-    ? ["succeeded", "failed", "cancelled", "ceiling_exceeded"].includes(detail.status.toLowerCase())
-    : false;
-
-  if (!detail || (!hasOutput && !terminal)) return null;
+  /* Shown only when there is a value. A run whose last step posts a message has
+     nothing to return, and a panel explaining that on every such run was noise. */
+  if (!detail || !hasOutput) return null;
 
   return (
     <section className="border-subtle bg-surface-raised rounded-lg border">
@@ -64,9 +57,7 @@ export function ResultPanel({
         <div className="min-w-0">
           <Text variant="label" tone="primary" className="block">Result</Text>
           <Text variant="caption" tone="muted" className="block leading-snug">
-            {hasOutput
-              ? "What the output node emitted. The same value an API caller reads back."
-              : "This run finished without emitting one."}
+            The value this run returned.
           </Text>
         </div>
         {hasOutput ? <CopyButton value={JSON.stringify(output, null, 2)} /> : null}

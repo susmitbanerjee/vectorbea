@@ -32,6 +32,7 @@ import {
   WaitUntilIcon,
 } from "~/components/icons/domain";
 import type { IconComponent } from "~/components/icons/types";
+import { formatClock, formatDateTime, useTimeZone } from "~/lib/time/time-zone";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    RUNS
@@ -617,7 +618,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
         open={purgeOpen}
         onOpenChange={setPurgeOpen}
         title="Purge queued runs"
-        description="Every queued run in this workspace will be cancelled. Run records and audit history are retained, and running workflows are not affected."
+        description="Every queued run will be cancelled. Running workflows are not affected."
         confirmLabel="Cancel all queued runs"
         pending={purging}
         onConfirm={() => void purgeQueued()}
@@ -626,7 +627,7 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
         open={incidentPurgeOpen}
         onOpenChange={setIncidentPurgeOpen}
         title="Resolve every open incident"
-        description="Every open incident in this workspace is marked resolved. Nothing is deleted — the records stay available for audit under the resolved filter, and failed run history is untouched. To remove them, use Delete resolved on the Incidents page."
+        description="Every open incident will be marked resolved. Nothing is deleted."
         confirmLabel="Resolve all incidents"
         pending={purgingIncidents}
         onConfirm={() => void purgeIncidents()}
@@ -712,12 +713,13 @@ function StatusBadge({ status }: { status: RunStatus }) {
 /**
  * Relative by default, absolute on hover.
  *
- * "3h ago" is what you want while scanning; the exact UTC timestamp is what you
+ * "3h ago" is what you want while scanning; the exact timestamp is what you
  * need the moment you are correlating with someone else's logs.
  */
 function StartedCell({ startedAt, now }: { startedAt: string; now: number }) {
+  const timeZone = useTimeZone();
   const at = Date.parse(startedAt);
-  const absolute = new Date(at).toISOString().replace("T", " ").slice(0, 19) + "Z";
+  const absolute = formatDateTime(at, timeZone);
   const delta = Math.max(0, now - at);
   const relative =
     delta < 60_000 ? `${Math.round(delta / 1000)}s ago`

@@ -12,6 +12,7 @@ import { formatCost, formatDuration, formatTokens, EMPTY } from "~/lib/format";
 import { POLICY } from "~/mocks/control";
 import { useReplay } from "./replay";
 import type { Run } from "~/lib/runs/model";
+import { LocalTime } from "~/components/ui/local-time";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    RUN HEADER — status, identity, metadata, actions, and the Ribbon at lg.
@@ -305,7 +306,7 @@ export function RunHeader({
 
       {/* ── Metadata ───────────────────────────────────────────────────────── */}
       <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1.5">
-        <Meta label="Started">{new Date(run.startedAt).toISOString().replace("T", " ").slice(0, 19)}Z</Meta>
+        <Meta label="Started"><LocalTime at={run.startedAt} /></Meta>
         <Meta label="Duration">{formatDuration(run.durationMs)}</Meta>
         <Meta label="Trigger">{run.trigger}</Meta>
         <Meta label="Version">v{(run.workflowId.charCodeAt(3) % 9) + 1}</Meta>

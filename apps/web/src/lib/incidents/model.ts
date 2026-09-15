@@ -13,4 +13,8 @@ export interface IncidentView {
   activity: IncidentActivity[]; mutedUntil: number | null; autoResolveAfterMs: number;
   autoResolveAvailable: boolean; externalTracker: string | null;
   runRecords: Run[]; workflowRecords: IncidentWorkflow[];
+  /** "Agent ran out of token budget". Absent on older fixtures, which fall back to the signature. */
+  title?: string;
+  /** The failure reason as recorded, without step prefixes. */
+  reason?: string | null;
 }

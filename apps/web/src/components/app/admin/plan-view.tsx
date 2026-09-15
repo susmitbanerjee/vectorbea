@@ -347,7 +347,7 @@ export function PlanView() {
 
         <Panel
           title="This workspace is on the private beta"
-          help="There is no paid plan and no payment method on file. Vectorbea is invitation-only while real execution is being rolled out tenant by tenant, so what a workspace may do is set per workspace rather than bought."
+          help="Access is set per workspace during early access."
         >
           {usage.isPending ? <RowSkeleton rows={2} /> : null}
 
@@ -397,7 +397,7 @@ export function PlanView() {
 
         <Panel
           title="What is included"
-          help="These are the numbers the runtime checks, not a marketing table. The daily run allowance is the one that returns a 429."
+          help="The limits that apply to this workspace."
           action={
             <Button asChild size="xs" variant="secondary">
               <Link href={"/settings/usage" as Route}>See consumption</Link>
@@ -528,7 +528,7 @@ function PlanCard({ data }: { data: PlanPanelData }) {
   return (
     <Panel
       title={`${data.plan.name} plan`}
-      help="What this workspace is entitled to, resolved through the account that pays for it. A member's own plan never applies here — a workspace is governed by the account that owns it, whoever is looking."
+      help="What this workspace's plan includes."
       /* No "Compare plans" button here: `plan.upgradeUrl` points at THIS page -
          it exists so a refusal raised anywhere else in the product can send the
          reader somewhere real. A button linking the reader to the page they are
@@ -638,7 +638,7 @@ function BillingCard({ data, canManage }: { data: BillingPanelData; canManage: b
   return (
     <Panel
       title="Billing"
-      help="Your subscription, what it costs, and every invoice. Prices come from the plan catalogue, so what you see here is what you are charged."
+      help="Your subscription and invoices."
       footer={
         <StatusLine
           state={null}
@@ -848,7 +848,7 @@ function RetentionCard({ data, canRequest }: { data: RetentionPanelData; canRequ
   return (
     <Panel
       title="Data retention"
-      help="How long each kind of data is kept before it is deleted. Deleted means deleted — nothing is hidden and kept, so a shorter window genuinely costs less to store."
+      help="How long each kind of data is kept before it is deleted."
       footer={
         <StatusLine
           state={null}
@@ -1075,7 +1075,7 @@ function RequestHistory({
   return (
     <Panel
       title="Requests"
-      help="Every ask for more capacity or for real execution, and what came of it. Visible to everybody in the workspace so the same request is not filed three times."
+      help="Requests for more capacity and their status."
     >
       {query.isPending ? <RowSkeleton rows={2} /> : null}
 
