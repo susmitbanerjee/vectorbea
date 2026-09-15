@@ -33,11 +33,28 @@ http {
     # push with a 413 that reads, on the agent side, as an unexplained export failure.
     client_max_body_size 32m;
 
+    # Grafana's live features use websockets; without the upgrade headers they fail
+    # silently and dashboards stop auto-refreshing. `close` for ordinary requests.
+    map $http_upgrade $connection_upgrade {
+        default upgrade;
+        ''      close;
+    }
+
+    # ── EVERY proxy_set_header LIVES HERE, AND ONLY HERE ─────────────────────────
+    # nginx inherits proxy_set_header from this level into a location ONLY IF that
+    # location sets none of its own. The Grafana location used to set Upgrade and
+    # Connection, which silently dropped Host: Grafana saw `Host: grafana`, the
+    # browser's Origin said telemetry.vectorbea.com, and Grafana's CSRF check refused
+    # every cookie-authenticated POST — "Login failed: origin not allowed", and every
+    # dashboard query with it. scripts/monitoring/validate.mjs fails on a location
+    # block that sets a header.
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
     proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        $connection_upgrade;
 
     upstream grafana   { server 127.0.0.1:3000; }
     upstream collector { server 127.0.0.1:4318; }
@@ -74,13 +91,9 @@ http {
         location /api/v1/write { return 404; }
 
         # ── Everything else is Grafana ───────────────────────────────────────
+        # No proxy_set_header in here — see the note at the top of `http`.
         location / {
             proxy_pass http://grafana;
-
-            # Grafana's live features use websockets; without the upgrade headers
-            # they fail silently and dashboards stop auto-refreshing.
-            proxy_set_header Upgrade    $http_upgrade;
-            proxy_set_header Connection "upgrade";
             proxy_read_timeout 300s;
         }
     }
