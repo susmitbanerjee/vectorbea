@@ -102,4 +102,35 @@ sealed class NodeResult {
         val retryAfterMs: Long,
         val message: String,
     ) : NodeResult()
+
+    /**
+     * The node is parked on an external event and the worker is released.
+     *
+     * ── WHY THIS IS NOT `ApprovalPaused` WITH A WIDER MEANING ───────────────
+     * An approval parks the run as `waiting_for_approval`, and the Approvals
+     * page, `use-runs-data` and the activity stream all read that status as "a
+     * person must decide". A six-minute video render carrying that status would
+     * appear in an approvals queue nobody can action.
+     *
+     * So the two share a mechanism and not a status: an approval writes a
+     * `run_waits` row of kind `approval` AND keeps `ApprovalPaused`, and
+     * everything else uses this. The reconciler sweeps `run_waits` for every
+     * kind, which is what makes it one parking mechanism rather than two.
+     *
+     * ── THE NODE RE-EXECUTES ON RESUME, AND THAT IS SAFE ────────────────────
+     * Exactly as it is for an approval and a throttle. The re-executed step
+     * recomputes the same `wait_key` — derived from (run, node, attempt_group),
+     * never from an iteration — finds its own resolved wait, and reads the
+     * result out of it instead of submitting the job a second time.
+     */
+    data class Waiting(
+        val waitId: String,
+        /** `approval` | `async_tool` | `signal` | `agent_wait`. */
+        val kind: String,
+        /** What is being waited for, in the operator's words. Shown on the timeline. */
+        val label: String,
+        /** When the runtime gives up. Null only when the store defaulted one. */
+        val timeoutAt: java.time.Instant? = null,
+        val metadata: Map<String, Any> = emptyMap(),
+    ) : NodeResult()
 }

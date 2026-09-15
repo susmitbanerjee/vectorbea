@@ -36,8 +36,24 @@ fun requirePositiveDouble(value: Double?, fieldName: String): Double? {
     return value
 }
 
-/** Connection type allowlist */
-val CONNECTION_TYPES = setOf("llm", "database", "http", "tool", "vector_store", "object_storage")
+/**
+ * Connection type allowlist.
+ *
+ * `mcp` and `tool` are the SAME THING with two spellings, and both stay.
+ * An MCP server has always been stored as `tool` — `ConnectionTester` has
+ * treated `tool`, `mcp` and `mcp_server` as one case since it was written, and
+ * the web maps its own `mcp_server` onto `tool` before sending. Rows exist with
+ * `tool`, so removing it would orphan every MCP connection anyone has already
+ * made; `mcp` is added because a type nobody can name is a type nobody can
+ * filter a list by, which is how an MCP server became indistinguishable from
+ * anything else typed `tool`.
+ */
+val CONNECTION_TYPES = setOf(
+    "llm", "database", "http", "tool", "mcp", "vector_store", "object_storage",
+)
+
+/** The spellings that mean "an MCP server". Matches `ConnectionTester`'s `when`. */
+val MCP_CONNECTION_TYPES = setOf("tool", "mcp", "mcp_server")
 
 /** Provider allowlist for LLM connections */
 val LLM_PROVIDERS = setOf("openai", "anthropic", "google", "mistral", "cohere", "azure_openai", "custom")
@@ -50,8 +66,18 @@ val AGENT_TYPES = setOf(
     "conversational", "task", "supervisor", "router", "custom",
 )
 
-/** Tool type allowlist */
-val TOOL_TYPES = setOf("http", "database", "code", "builtin", "llm_generate", "custom")
+/**
+ * Tool type allowlist.
+ *
+ * `mcp` is here because `McpDiscovery.syncTools` has always INSERTed it, through
+ * raw SQL that never passed this check. The two agreed only because discovery
+ * never went through the create-tool route — and a vocabulary that a stored row
+ * can violate is a vocabulary that will be believed and then contradicted.
+ * Naming it also lets a person PATCH a discovered tool (its risk level, its
+ * approval requirement) without the update being refused for a type the row
+ * already has.
+ */
+val TOOL_TYPES = setOf("http", "database", "code", "builtin", "llm_generate", "mcp", "custom")
 
 /** Tool risk levels */
 val RISK_LEVELS = setOf("low", "medium", "high", "critical")
@@ -60,7 +86,12 @@ val RISK_LEVELS = setOf("low", "medium", "high", "critical")
 val WORKFLOW_STATUSES = setOf("draft", "active", "archived")
 
 /** Connection auth types */
-val AUTH_TYPES = setOf("api_key", "oauth2", "basic", "bearer", "none", "mtls", "custom", "connection_string")
+/**
+ * `webhook_url`: the credential IS the destination — a Teams, Google Chat or
+ * Discord incoming webhook. Stored encrypted as the connection's secret like any
+ * other credential, because anyone holding that URL can post to the channel.
+ */
+val AUTH_TYPES = setOf("api_key", "oauth2", "basic", "bearer", "none", "mtls", "custom", "connection_string", "webhook_url")
 
 /**
  * Returns compatible connection types for each tool type.
@@ -72,13 +103,41 @@ fun compatibleConnectionTypes(toolType: String): Set<String> = when (toolType) {
     "llm_generate" -> setOf("llm")
     "builtin" -> emptySet()   // no connection needed
     "code" -> emptySet()      // no external connection
+    /* An MCP tool's connection IS its server, and revoking it revokes every
+       tool discovered through it — the one server-level action there should be.
+       Pointing one at an LLM or a database connection would be a tool whose
+       call can never be made. */
+    "mcp" -> MCP_CONNECTION_TYPES
     "custom" -> CONNECTION_TYPES  // any
     else -> CONNECTION_TYPES
 }
 
-/** Returns true if the given tool type requires a connectionId. */
+/**
+ * Returns true if the given tool type requires a connectionId.
+ *
+ * ── WHY `http` IS NOT HERE ──────────────────────────────────────────────────
+ * It was, and it was wrong. A connection supplies an HTTP tool with two things:
+ * a base URL and a credential. Since V064 the whole call lives in
+ * `http_spec_json`, which carries its own absolute URL — so a tool that hits a
+ * public endpoint needs neither, and `HttpToolResolver` has always handled
+ * that: "Public until a connection says otherwise. A tool with no connection
+ * behind it has nothing that could have authorised private egress."
+ *
+ * The runtime was therefore already correct and only the create route refused,
+ * which made "register a tool for this public API" a dead end that ended in
+ * inventing an empty connection to get past the form.
+ *
+ * The egress story is unchanged and is the reason this is safe: no connection
+ * means `EgressPolicy.PUBLIC`, no allowed-hosts widening and no secret. A
+ * connection-less HTTP tool can reach strictly less than one with a connection,
+ * never more.
+ *
+ * `mcp` is also deliberately absent, for a different reason: a discovered MCP
+ * tool carries its server in `mcp_server_connection_id`, a separate column with
+ * its own FK. Requiring `connection_id` would refuse every row discovery writes.
+ */
 fun toolRequiresConnection(toolType: String): Boolean = when (toolType) {
-    "http", "database", "llm_generate" -> true
+    "database", "llm_generate" -> true
     else -> false
 }
 

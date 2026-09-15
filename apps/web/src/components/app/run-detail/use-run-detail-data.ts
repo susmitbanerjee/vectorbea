@@ -12,6 +12,7 @@ import { useScope } from "~/lib/workspace/workspace-provider";
 import { toUiRun } from "~/components/app/runs/use-runs-data";
 import type { Run } from "~/lib/runs/model";
 import type { VectorbeaApiError } from "~/lib/api/errors";
+import { fromStoredGraph } from "~/lib/workflows/graph-codec";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE RUN THIS PAGE IS ACTUALLY ABOUT
@@ -43,6 +44,22 @@ export interface RunDetailData {
   /** The raw detail response — `outputJson` and `errorJson` live only here. */
   detail: contracts.RunDetail | null;
   events: contracts.RunEvent[];
+  /**
+   * What the run is parked on right now. Empty for a run that is not parked,
+   * and empty for a finished one — its waits are history, and history is in
+   * `events`.
+   */
+  waits: contracts.RunWait[];
+  /**
+   * Where the result went, and whether it got there.
+   *
+   * Read for FINISHED runs, not only failed ones — "delivered" is the answer
+   * somebody is looking for as often as "not delivered", and a panel that only
+   * appeared on failure would leave every successful run silently unconfirmed.
+   */
+  deliveries: contracts.RunDelivery[];
+  /** Requeue a delivery. It carries the same idempotency key it was born with. */
+  redeliver: (deliveryId: string) => Promise<void>;
   incident: contracts.FailureIncident | null;
   loading: boolean;
   /** True only when the API positively answered 404. */
@@ -63,7 +80,22 @@ export interface RunDetailData {
 const IN_FLIGHT = new Set<contracts.RunStatus>([
   "queued", "running", "recovering", "yielded",
   "waiting_for_approval", "awaiting_approval", "waiting_for_timer",
+  /* Omitting this is how a six-minute render looks like a hung page: the run is
+     parked, more IS going to happen, and the screen would have stopped looking
+     for it until somebody reloaded. */
+  "waiting_for_event",
   "cancellation_requested", "paused",
+]);
+
+/**
+ * Statuses where the run is parked on a wait rather than executing.
+ *
+ * A subset of [IN_FLIGHT], and deliberately not derived from it: `queued` and
+ * `running` are in flight and have nothing to be parked on, and asking the waits
+ * endpoint about them would be a request per poll for an always-empty list.
+ */
+const PARKED = new Set<contracts.RunStatus>([
+  "waiting_for_approval", "awaiting_approval", "waiting_for_event",
 ]);
 
 export function useRunDetailData(runId: string): RunDetailData {
@@ -91,6 +123,40 @@ export function useRunDetailData(runId: string): RunDetailData {
     freshness: "live",
   });
 
+  /*
+   * ── WHAT THE RUN IS PARKED ON ────────────────────────────────────────────
+   * Asked only while the run is actually parked. A run that is running has no
+   * active waits, so the request would be a round trip to learn nothing, on a
+   * page that already polls.
+   *
+   * Ten seconds, matching the run-record poll rather than the stream: a wait's
+   * elapsed and remaining are clocks, and nothing emits an event as they tick.
+   * Anything faster would be redrawing a countdown from the server that the
+   * page can just as well not pretend to have to the second.
+   */
+  const parked = run.data ? PARKED.has(run.data.status) : false;
+  const waits = useApiQuery({
+    queryKey: [...queryKeys.runs.detail(keyScope, runId), "waits"],
+    queryFn: () => api.runs.waits(runId, scope),
+    enabled: enabled && parked,
+    freshness: "live",
+  });
+
+  /*
+   * ── WHERE THE RESULT WENT ─────────────────────────────────
+   * Asked once the run has finished, because nothing is delivered before then.
+   * Kept live while anything is still retrying: a delivery's backoff is minutes
+   * long, so a page opened on a failing callback should show it landing without
+   * a manual refresh.
+   */
+  const finished = run.data ? !IN_FLIGHT.has(run.data.status) : false;
+  const deliveries = useApiQuery({
+    queryKey: [...queryKeys.runs.detail(keyScope, runId), "deliveries"],
+    queryFn: () => api.runs.deliveries(runId, scope),
+    enabled: enabled && finished,
+    freshness: "live",
+  });
+
   /* The incident carries the human-readable failure summary; the run itself
      only carries the id. Skipped entirely when nothing failed. */
   const incidentId = run.data?.incidentId ?? null;
@@ -105,10 +171,38 @@ export function useRunDetailData(runId: string): RunDetailData {
     [incidents.data, incidentId],
   );
 
-  const uiRun = React.useMemo(
-    () => (run.data ? toUiRun(run.data, incident ?? undefined) : null),
-    [run.data, incident],
-  );
+  /*
+   * ── STEP NAMES ───────────────────────────────────────────────────────────
+   * The run's ribbon records node IDS, so every step on this page read
+   * "n-new-agent-2" rather than "Review changes". The names are in the graph of
+   * the version this run executed; read it once and relabel.
+   */
+  const workflowId = run.data?.workflowId ?? null;
+  const versions = useApiQuery({
+    queryKey: queryKeys.workflows.versions(keyScope, workflowId ?? ""),
+    queryFn: () => api.workflows.versions(workflowId!, { ...scope, page: 1, pageSize: 50 }),
+    enabled: enabled && Boolean(workflowId),
+  });
+  const stepNames = React.useMemo(() => {
+    const version = versions.data?.items.find((v) => v.id === run.data?.workflowVersionId);
+    if (!version) return null;
+    return new Map(fromStoredGraph(version.graph).nodes.map((n) => [n.node.id, n.node] as const));
+  }, [versions.data, run.data?.workflowVersionId]);
+
+  const uiRun = React.useMemo(() => {
+    if (!run.data) return null;
+    const base = toUiRun(run.data, incident ?? undefined);
+    if (!stepNames) return base;
+    return {
+      ...base,
+      nodes: base.nodes.map((n) => {
+        const step = stepNames.get(n.id);
+        if (!step) return n;
+        const kind = step.kind === "agent_team" ? "agent" : step.kind;
+        return { ...n, name: step.name, kind };
+      }),
+    };
+  }, [run.data, incident, stepNames]);
 
   /* A run that is still moving is followed; a finished one is not. Watching a
      completed run forever is the kind of thing nobody notices until it is a
@@ -173,15 +267,16 @@ export function useRunDetailData(runId: string): RunDetailData {
        this timer, and the fields it carries change at step boundaries. */
     const timer = window.setInterval(() => {
       void run.refetch();
+      if (parked) void waits.refetch();
     }, 10_000);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, runId]);
+  }, [live, parked, runId]);
 
   const error = (run.error ?? null) as VectorbeaApiError | null;
   const refetch = React.useCallback(async () => {
-    await Promise.all([run.refetch(), events.refetch()]);
-  }, [run, events]);
+    await Promise.all([run.refetch(), events.refetch(), parked ? waits.refetch() : null]);
+  }, [run, events, waits, parked]);
   const cancel = React.useCallback(async () => {
     await api.runs.cancel(runId, scope);
     await refetch();
@@ -205,6 +300,19 @@ export function useRunDetailData(runId: string): RunDetailData {
     await refetch();
   }, [api, runId, scope, refetch]);
 
+  /**
+   * Requeue a delivery.
+   *
+   * Refetches afterwards rather than optimistically flipping the row to
+   * `pending`: the API decides whether the delivery was in a requeueable state
+   * at all, and painting a state the server may refuse is how a UI ends up
+   * disagreeing with the thing it is showing.
+   */
+  const redeliverDelivery = React.useCallback(async (deliveryId: string) => {
+    await api.runs.redeliver(deliveryId, scope);
+    await deliveries.refetch();
+  }, [api, scope, deliveries]);
+
   const retryRun = React.useCallback(async () => {
     await api.runs.retry(runId, scope);
     await refetch();
@@ -214,6 +322,9 @@ export function useRunDetailData(runId: string): RunDetailData {
     run: uiRun,
     detail: run.data ?? null,
     events: events.data?.items ?? [],
+    waits: parked ? waits.data?.items ?? [] : [],
+    deliveries: deliveries.data?.items ?? [],
+    redeliver: redeliverDelivery,
     incident,
     loading: enabled && run.isPending,
     // Distinguished from any other failure: "this run does not exist" and "the

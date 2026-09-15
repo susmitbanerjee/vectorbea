@@ -4,6 +4,7 @@ import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { cellPath } from "~/components/app/ribbon/geometry";
+import { cellRingPath } from "~/components/app/ribbon/geometry-ring";
 // `layoutGraph` only places the nodes it is given — it invents nothing. Called
 // directly rather than through `buildGraph(run)` so the graph is laid out from
 // the REAL run's nodes and nothing else travels with it.
@@ -219,8 +220,7 @@ export function CanvasMirror({ className }: { className?: string }) {
                   />
                   {isFocus && !isSelected ? (
                     <path
-                      d={cellPath(NODE_W + 6, NODE_H + 6)}
-                      transform="translate(-3 -3)"
+                      d={cellRingPath(NODE_W, NODE_H, 3)}
                       fill="none"
                       stroke="var(--accent)"
                       strokeWidth={1.4}
@@ -234,8 +234,7 @@ export function CanvasMirror({ className }: { className?: string }) {
                       using for status. */}
                   {state === "executing" ? (
                     <path
-                      d={cellPath(NODE_W + 8, NODE_H + 8)}
-                      transform="translate(-4 -4)"
+                      d={cellRingPath(NODE_W, NODE_H, 4)}
                       fill="none"
                       stroke="var(--status-live)"
                       strokeWidth={2}
@@ -246,8 +245,7 @@ export function CanvasMirror({ className }: { className?: string }) {
                   ) : null}
                   {state === "gated" ? (
                     <path
-                      d={cellPath(NODE_W + 8, NODE_H + 8)}
-                      transform="translate(-4 -4)"
+                      d={cellRingPath(NODE_W, NODE_H, 4)}
                       fill="none"
                       stroke="var(--status-waiting)"
                       strokeWidth={2}

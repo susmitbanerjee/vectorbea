@@ -1,5 +1,4 @@
 import type { BuilderGraph, BuilderEdge, GraphNode } from "../builder-graph";
-import { writeTeamConfig, type TeamConfig } from "../team";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE STARTER TEMPLATES.
@@ -32,15 +31,45 @@ import { writeTeamConfig, type TeamConfig } from "../team";
      first run, which is the worst possible outcome for a starter template —
      it teaches the person that the product is broken, on their first minute.
 
+   · NOTHING BEHIND A RUNTIME FLAG. This one was learned the expensive way.
+     Three templates here — supervisor, router and review loop — were built on
+     the `agent_team` node, which `AgentTeamNodeExecutor` refuses unless
+     AGENT_TEAMS_ENABLED is true, and that defaults to false in the worker and in
+     the web build. So the gallery's three most interesting cards were permanently
+     disabled, each under a paragraph naming an environment variable that means
+     nothing to the person reading it. A catalogue where half the shelf is
+     labelled "not available here" does not read as a product with an unreleased
+     feature; it reads as a product that does not work, which is the first
+     impression templates exist to prevent.
+
+     They are gone rather than hidden behind a flag check, because a card nobody
+     can click is worth less than the space it occupies, and the pattern they
+     demonstrated is still here: `pipeline` chains several agents without the
+     team primitive. Bring them back WITH the feature, not before it.
+
    ── PATTERNS, NOT SCENARIOS ─────────────────────────────────────────────────
    Each template is one ORCHESTRATION PATTERN with a plausible job attached, not
-   a vertical solution. Somebody adopting "supervisor and workers" is going to
-   replace the job; what they are keeping is the shape, the guards and the
-   budget. So the documentation leads with the shape.
+   a vertical solution. Somebody adopting "agent pipeline" is going to replace
+   the job; what they are keeping is the shape, the guards and the budget. So the
+   documentation leads with the shape.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export type TemplatePattern =
-  | "single-agent" | "supervisor" | "router" | "review" | "approval" | "batch";
+  | "single-agent" | "approval" | "batch"
+  /**
+   * Several agents, wired in sequence, each with its own instructions and its
+   * own grants.
+   *
+   * ── THIS IS THE MULTI-AGENT PATTERN THE CATALOGUE SHIPS ─────────────────
+   * `agent` nodes chained by ordinary edges are several agents doing several
+   * jobs — the thing people actually mean by multi-agent — with no team
+   * primitive, no delegation, no plan feature and no flag.
+   *
+   * A supervisor is for when the SPLIT is a runtime decision. When the split is
+   * known in advance, which is most of the time, a pipeline is cheaper, easier
+   * to debug, and — unlike a team — runnable in a default deployment today.
+   */
+  | "pipeline";
 
 export type TemplateCategory =
   | "support" | "growth" | "data" | "engineering" | "operations" | "billing";
@@ -117,7 +146,14 @@ export interface WorkflowTemplate {
   requiresConnection: ConnectionKind;
   /** Entitlement keys the workspace's plan must grant. Empty for most. */
   requiresFeatures: string[];
-  /** Runtime flags that must be on. Mirrors the worker's env switches. */
+  /**
+   * Runtime flags that must be on. Mirrors the worker's env switches.
+   *
+   * Empty on every shipped template, and kept anyway. The gallery still checks
+   * it and still disables a card whose flag is off, which is the guard that
+   * makes re-adding a flagged template a visible decision rather than a silent
+   * one — see the note at the top of this file about what happened last time.
+   */
   requiresFlags: ("agentTeams" | "agentDelegation")[];
   agents: TemplateAgentSpec[];
   optionalTools: TemplateToolSpec[];
@@ -182,10 +218,12 @@ function emailNode(name: string, to: string, subject: string, body: string): Gra
   });
 }
 
-/** A team node, written in the shape `TeamConfig.parse` reads. */
-function teamNode(name: string, team: TeamConfig): GraphNode {
-  return node("agent_team", name, writeTeamConfig(team));
-}
+/* There is deliberately no `teamNode` helper here any more. An `agent_team`
+   node cannot run in a default deployment (AGENT_TEAMS_ENABLED defaults false),
+   so a helper that makes one easy to add is a trap: the next template built on
+   it would install cleanly and be permanently disabled in the gallery, which is
+   exactly the state this file was just dug out of. Multi-agent templates use
+   the `pipeline` pattern. */
 
 /* Every template ships with a cost ceiling. A zero budget means NO ceiling in
    `BudgetVector`, and a starter template that can spend without bound is the
@@ -282,307 +320,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
 
-  /* ─────────────────────────────────────────────────────── 2. supervisor team */
-  {
-    id: "supervisor-and-workers",
-    name: "Supervisor and workers",
-    summary: "One agent owns the brief and hands pieces of it to two specialists.",
-    pattern: "supervisor",
-    category: "growth",
-    difficulty: "intermediate",
-    requiresConnection: "llm",
-    requiresFeatures: ["teams", "delegation"],
-    requiresFlags: ["agentTeams", "agentDelegation"],
-    agents: [
-      {
-        ref: "lead",
-        name: "Brief supervisor",
-        type: "supervisor",
-        role: "supervisor",
-        instructions:
-          "You own a research brief. Break it into research and writing, delegate each to the "
-          + "member whose role fits, and assemble their answers into one document. Delegate at "
-          + "most once per member unless the answer you get back is unusable — say why when it is.",
-        maxIterations: 6,
-      },
-      {
-        ref: "researcher",
-        name: "Researcher",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You gather and organise facts on a narrow question. Return a bulleted list of findings "
-          + "with a confidence note on each. Say plainly when you do not know something.",
-        maxIterations: 4,
-      },
-      {
-        ref: "writer",
-        name: "Writer",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You turn findings into prose. Keep the structure the findings came in. Do not add "
-          + "facts that were not given to you.",
-        maxIterations: 4,
-      },
-    ],
-    optionalTools: [],
-    sampleInput: {
-      brief: "Summarise how durable execution differs from a retry loop, for an engineering audience.",
-    },
-    doc: {
-      whatItDoes:
-        "A supervisor receives a brief, delegates the research to one member and the writing to "
-        + "another, and assembles what comes back. The delegation graph is on the canvas: the "
-        + "supervisor has grants to both workers and neither worker has a grant at all, which is "
-        + "what makes the shape a supervisor rather than a committee.",
-      whatItNeeds: [
-        "One LLM connection.",
-        "A plan that includes agent teams and delegation.",
-        "AGENT_TEAMS_ENABLED and AGENT_ACTIVATIONS_ENABLED on in the deployment.",
-      ],
-      costPerRun: {
-        range: "about 8–20¢",
-        drivers: [
-          "Three agents, so three sets of context",
-          "How many times the supervisor re-delegates",
-          "The length of the brief",
-        ],
-        ceiling: "25¢ and 60k tokens for the whole team, children included.",
-      },
-      changeFirst: [
-        { where: "The two workers' instructions", why: "‘Researcher’ and ‘writer’ are placeholders for the two halves of YOUR job. The split is the design decision." },
-        { where: "Max activations, on the team node", why: "12 is generous for three members. Lowering it is the cheapest way to bound a supervisor that re-delegates too eagerly." },
-        { where: "The cost ceiling", why: "A team spends more than one agent and the ceiling is what turns a runaway into a CeilingExceeded rather than an invoice." },
-      ],
-      patternNote:
-        "Supervisor and workers is for work that decomposes into pieces needing DIFFERENT context. "
-        + "If every piece needs the same context, one agent doing it in several iterations is "
-        + "cheaper and easier to debug.",
-    },
-    build: (refs) => {
-      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
-      const team = teamNode("Research and write", {
-        policy: "supervisor",
-        entryAlias: "supervisor",
-        objective: "Produce the brief the input asks for.",
-        joinPolicy: { kind: "wait_all" },
-        onChildFailure: "continue",
-        roster: [
-          { agentId: refs.agents.lead, alias: "supervisor", role: "supervisor", canDelegateTo: ["researcher", "writer"] },
-          { agentId: refs.agents.researcher, alias: "researcher", role: "worker", canDelegateTo: [] },
-          { agentId: refs.agents.writer, alias: "writer", role: "worker", canDelegateTo: [] },
-        ],
-        limits: {
-          maxDepth: 2, maxActivations: 8, maxHandoffsPerPair: 2,
-          maxTeamDurationMs: 600_000, maxContextChars: null,
-          maxRounds: 4, maxIterations: 6, maxToolCalls: 0,
-        },
-        budget: STARTER_BUDGET,
-      });
-      const commit = node("checkpoint", "Commit the draft", { scope: "run" });
-      const out = node("output", "Emit the document", { format: "json", destination: "run" });
-      const end = node("end", "Done");
-      return chain([trigger, team, commit, out, end]);
-    },
-  },
-
-  /* ────────────────────────────────────────────────────── 3. router + experts */
-  {
-    id: "router-and-specialists",
-    name: "Router and specialists",
-    summary: "One agent reads the request and hands it to exactly one specialist.",
-    pattern: "router",
-    category: "support",
-    difficulty: "intermediate",
-    requiresConnection: "llm",
-    requiresFeatures: ["teams"],
-    requiresFlags: ["agentTeams"],
-    agents: [
-      {
-        ref: "router",
-        name: "Request router",
-        type: "router_agent",
-        role: "router",
-        instructions:
-          "You read one inbound request and transfer it to exactly one specialist: billing for "
-          + "anything about money, technical for anything about the product not working. Transfer "
-          + "once. Do not attempt to answer the request yourself.",
-        maxIterations: 2,
-      },
-      {
-        ref: "billing",
-        name: "Billing specialist",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You answer billing questions: invoices, charges, refunds, plan changes. State what you "
-          + "would need to look up rather than inventing an amount.",
-        maxIterations: 4,
-      },
-      {
-        ref: "technical",
-        name: "Technical specialist",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You answer questions about the product not working. Ask for the one piece of "
-          + "information that would most narrow the cause, rather than listing everything it could be.",
-        maxIterations: 4,
-      },
-    ],
-    optionalTools: [],
-    sampleInput: {
-      request: "I was charged twice for March and the second charge has not been refunded.",
-    },
-    doc: {
-      whatItDoes:
-        "A router classifies one request and TRANSFERS it — a tail call, so control does not come "
-        + "back and the specialist's answer is the team's answer. The router's own activation ends "
-        + "`handed_off`, which is terminal and graded as neither success nor failure.",
-      whatItNeeds: [
-        "One LLM connection.",
-        "A plan that includes agent teams. Delegation is NOT required — a router transfers.",
-        "AGENT_TEAMS_ENABLED on in the deployment.",
-      ],
-      costPerRun: {
-        range: "about 4–10¢",
-        drivers: [
-          "Two agents run per request, not three — the router and whichever specialist it picked",
-          "The specialist's iteration count",
-        ],
-        ceiling: "25¢ and 60k tokens for the team.",
-      },
-      changeFirst: [
-        { where: "The router's instructions", why: "The two categories are the routing table. Adding a third means adding a specialist and a grant, in that order." },
-        { where: "The specialists' instructions", why: "A router is only as good as the difference between where it can send things." },
-        { where: "Nothing about depth", why: "A transfer does not grow the delegation depth, so the depth limit has no effect on this shape. Do not spend time tuning it." },
-      ],
-      patternNote:
-        "Reach for a router when the request decides WHO should handle it and one handler is "
-        + "enough. If the answer needs two specialists to contribute, that is a supervisor.",
-    },
-    build: (refs) => {
-      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
-      const team = teamNode("Route the request", {
-        policy: "router",
-        entryAlias: "router",
-        objective: "Route this request to the right specialist and return their answer.",
-        joinPolicy: { kind: "wait_all" },
-        onChildFailure: "continue",
-        roster: [
-          { agentId: refs.agents.router, alias: "router", role: "router", canDelegateTo: ["billing", "technical"] },
-          { agentId: refs.agents.billing, alias: "billing", role: "worker", canDelegateTo: [] },
-          { agentId: refs.agents.technical, alias: "technical", role: "worker", canDelegateTo: [] },
-        ],
-        limits: {
-          maxDepth: 1, maxActivations: 4, maxHandoffsPerPair: 1,
-          maxTeamDurationMs: 300_000, maxContextChars: null,
-          maxRounds: 4, maxIterations: 4, maxToolCalls: 0,
-        },
-        budget: STARTER_BUDGET,
-      });
-      const commit = node("checkpoint", "Commit the answer", { scope: "run" });
-      const out = node("output", "Emit the answer", { format: "json", destination: "run" });
-      const end = node("end", "Done");
-      return chain([trigger, team, commit, out, end]);
-    },
-  },
-
-  /* ──────────────────────────────────────────────────────── 4. review loop */
-  {
-    id: "draft-and-review",
-    name: "Draft and review",
-    summary: "One agent drafts, another reviews, for a bounded number of rounds.",
-    pattern: "review",
-    category: "growth",
-    difficulty: "intermediate",
-    requiresConnection: "llm",
-    requiresFeatures: ["teams", "delegation"],
-    requiresFlags: ["agentTeams", "agentDelegation"],
-    agents: [
-      {
-        ref: "drafter",
-        name: "Drafter",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You write a first draft from a brief, then revise it against the reviewer's notes. "
-          + "Change only what the notes ask for; a rewrite makes the next review useless.",
-        maxIterations: 5,
-      },
-      {
-        ref: "reviewer",
-        name: "Reviewer",
-        type: "iterative_agent",
-        role: "worker",
-        instructions:
-          "You review a draft against the brief. Either approve it, or give at most three specific "
-          + "changes. Say APPROVED as the first word when it is good enough — a review that never "
-          + "approves is a loop that only the round limit ends.",
-        maxIterations: 4,
-      },
-    ],
-    optionalTools: [],
-    sampleInput: {
-      brief: "A 150-word release note for durable resume across approvals, for existing customers.",
-    },
-    doc: {
-      whatItDoes:
-        "The drafter writes, delegates to the reviewer, and revises — for at most the configured "
-        + "number of rounds. A ‘round’ here is not a second counter: it resolves onto the "
-        + "repeated-handoff guard, which counts how many times the same (from, to, task) triple "
-        + "may repeat. One bound, not two that can disagree.",
-      whatItNeeds: [
-        "One LLM connection.",
-        "A plan that includes agent teams and delegation.",
-        "AGENT_TEAMS_ENABLED and AGENT_ACTIVATIONS_ENABLED on in the deployment.",
-      ],
-      costPerRun: {
-        range: "about 6–25¢",
-        drivers: [
-          "The number of rounds actually used — a reviewer that never approves uses all of them",
-          "Draft length, which both agents pay for on every round",
-        ],
-        ceiling: "25¢ and 60k tokens for the team; 3 rounds.",
-      },
-      changeFirst: [
-        { where: "The reviewer's approval condition", why: "‘APPROVED as the first word’ is the exit. Vague approval criteria are why review loops run to the round limit every time." },
-        { where: "Max rounds", why: "3 is a starting point. Watch the first ten runs: if they all use 3, the exit condition is wrong, not the limit." },
-        { where: "The brief in the sample input", why: "It is a release note. Yours is not." },
-      ],
-      patternNote:
-        "A review loop is worth its cost when a wrong answer is expensive and a second read "
-        + "reliably catches it. It is not a general quality improvement — two agents agreeing is "
-        + "not evidence, and you pay for both every round.",
-    },
-    build: (refs) => {
-      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
-      const team = teamNode("Draft and review", {
-        policy: "review",
-        entryAlias: "drafter",
-        objective: "Produce a draft that the reviewer approves.",
-        joinPolicy: { kind: "wait_all" },
-        onChildFailure: "fail_parent",
-        roster: [
-          { agentId: refs.agents.drafter, alias: "drafter", role: "worker", canDelegateTo: ["reviewer"] },
-          { agentId: refs.agents.reviewer, alias: "reviewer", role: "reviewer", canDelegateTo: [] },
-        ],
-        limits: {
-          maxDepth: 2, maxActivations: 8, maxHandoffsPerPair: 3,
-          maxTeamDurationMs: 600_000, maxContextChars: null,
-          maxRounds: 3, maxIterations: 5, maxToolCalls: 0,
-        },
-        budget: STARTER_BUDGET,
-      });
-      const commit = node("checkpoint", "Commit the approved draft", { scope: "run" });
-      const out = node("output", "Emit the draft", { format: "json", destination: "run" });
-      const end = node("end", "Done");
-      return chain([trigger, team, commit, out, end]);
-    },
-  },
-
-  /* ───────────────────────────────────────────── 5. human in the loop */
+  /* ───────────────────────────────────────────── 2. human in the loop */
   {
     id: "human-approval-before-send",
     name: "Draft, approve, then send",
@@ -661,7 +399,7 @@ export const TEMPLATES: WorkflowTemplate[] = [
     },
   },
 
-  /* ────────────────────────────────────────────────────── 6. scheduled batch */
+  /* ────────────────────────────────────────────────────── 3. scheduled batch */
   {
     id: "scheduled-batch-digest",
     name: "Scheduled batch digest",
@@ -748,6 +486,415 @@ export const TEMPLATES: WorkflowTemplate[] = [
       return chain([trigger, fan, summarise, merge, commit, email, end]);
     },
   },
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     AGENT PIPELINES — multi-agent, and installable in a default deployment.
+
+     Each of these is three or four agents with DIFFERENT instructions and
+     different grants, wired in sequence. No team node, so no `agentTeams`, no
+     `agentDelegation`, no plan feature: one model connection and they run.
+
+     They are named after the problem rather than the shape, because the
+     question somebody brings to this page is "does this solve mine", not "what
+     can this build". The pattern note still says what the shape is for, since
+     the shape is what they keep after replacing the job.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* ──────────────────────────────────────── 4. incident first response */
+  {
+    id: "incident-first-response",
+    name: "Incident first response",
+    summary:
+      "A page fires at 03:00 and the first person awake spends twenty minutes working out what changed. Three agents do that first and hand them a written hypothesis to approve.",
+    pattern: "pipeline",
+    category: "operations",
+    difficulty: "intermediate",
+    requiresConnection: "llm",
+    requiresFeatures: [],
+    requiresFlags: [],
+    agents: [
+      {
+        ref: "gatherer",
+        name: "Signal gatherer",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "You are given an alert payload. Extract and organise every fact it contains: which "
+          + "service, which metric, the threshold crossed, when it started, and anything the "
+          + "payload says about recent changes.\n\n"
+          + "Report ONLY what the payload supports. If it does not say when the problem started, "
+          + "say that. An invented timeline at 03:00 costs more than a missing one.",
+        maxIterations: 4,
+      },
+      {
+        ref: "analyst",
+        name: "Cause analyst",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "You are given organised facts about a live incident. Produce exactly four things:\n"
+          + "1. The single most likely cause, stated plainly.\n"
+          + "2. The evidence that supports it.\n"
+          + "3. The evidence that contradicts it, if any.\n"
+          + "4. The first thing an engineer should check to confirm or rule it out.\n\n"
+          + "If the facts do not support a hypothesis, say so and stop. A confident wrong answer "
+          + "sends the on-call engineer down the wrong path, which is worse than no answer.",
+        maxIterations: 4,
+      },
+      {
+        ref: "writer",
+        name: "Response writer",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "Write the incident channel's first-response message from the hypothesis you are given. "
+          + "Lead with impact, then the hypothesis, then what is being checked. Under 200 words. "
+          + "No apologies, no filler, no severity emoji. Do not add facts the analyst did not give you.",
+        maxIterations: 3,
+      },
+    ],
+    optionalTools: [],
+    sampleInput: {
+      alert: "checkout-api p99 latency 4200ms, threshold 800ms, firing 6 minutes",
+      service: "checkout-api",
+      recentDeploys: "checkout-api v412 deployed 18 minutes ago",
+    },
+    doc: {
+      whatItDoes:
+        "Three agents in sequence, each with one job: one organises the alert into facts, one "
+        + "forms a single hypothesis from those facts and nothing else, and one writes the message "
+        + "that gets posted. A person approves before it reaches the channel. The split is the "
+        + "point — the analyst cannot go looking for more data at 03:00 because it has no tools, "
+        + "and the writer cannot change the hypothesis because it is a separate step.",
+      whatItNeeds: [
+        "One LLM connection. Nothing else.",
+        "An email address on the notification step.",
+        "A webhook trigger pointed at your alerting, once the output looks right.",
+      ],
+      costPerRun: {
+        range: "about 4–9¢",
+        drivers: [
+          "Three agents, so three sets of context",
+          "The size of the alert payload",
+          "How much the gatherer finds to organise",
+        ],
+        ceiling: "25¢ and 60k tokens per agent.",
+      },
+      changeFirst: [
+        { where: "The analyst's instructions", why: "The four outputs are the shape of YOUR incident review. If your team wants a blast-radius estimate, this is where it goes." },
+        { where: "The approval gate's SLA", why: "Ten minutes is right for a page. For a lower severity it is wrong, and a gate that times out during an incident is worse than no gate." },
+        { where: "The trigger", why: "It ships manual so the first run is under your control. Point it at your alerting webhook once you trust the output." },
+      ],
+      patternNote:
+        "A pipeline is for work that decomposes into a KNOWN sequence of judgements, each needing "
+        + "different context. Gather, then reason, then write — the order is fixed, so it does not "
+        + "need a supervisor deciding it at runtime. Reach for the supervisor pattern only when "
+        + "which steps run is itself a decision.",
+    },
+    build: (refs) => {
+      const trigger = node("trigger", "Alert received", { triggerType: "manual", type: "manual" });
+      const gather = node("agent", "Organise the alert", {
+        agentId: refs.agents.gatherer,
+        agentName: "Signal gatherer",
+        taskOverride: "Organise this alert payload into the facts it supports.",
+        maxSteps: 4, timeoutMs: 120_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      /* Committed before the reasoning, so a failure later never re-does the
+         gathering — the cheap step protecting the expensive one. */
+      const commit = node("checkpoint", "Commit the evidence", { scope: "run" });
+      const analyse = node("agent", "Form a hypothesis", {
+        agentId: refs.agents.analyst,
+        agentName: "Cause analyst",
+        taskOverride: "Form one hypothesis from these facts. No tools — reason over what you were given.",
+        maxSteps: 4, timeoutMs: 120_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      const write = node("agent", "Write the response", {
+        agentId: refs.agents.writer,
+        agentName: "Response writer",
+        taskOverride: "Write the incident channel's first-response message.",
+        maxSteps: 3, timeoutMs: 90_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      const gate = node("approval", "On-call approves", {
+        approverGroup: "on-call", slaMinutes: 10,
+        prompt: "An agent's hypothesis is about to be posted to the incident channel. Read it first.",
+      });
+      const email = emailNode(
+        "Send the first response",
+        refs.notifyEmail,
+        "Incident: {{input.service}}",
+        "<p>{{steps.Write the response.output}}</p>",
+      );
+      const out = node("output", "Incident summary", { format: "json", destination: "run" });
+      const end = node("end", "Done");
+      return chain([trigger, gather, commit, analyse, write, gate, email, out, end]);
+    },
+  },
+
+  /* ──────────────────────────────────────── 5. draft, check, approve */
+  {
+    id: "reply-draft-and-check",
+    name: "Customer reply, drafted and checked",
+    summary:
+      "First replies go out wrong because whoever picked up the ticket did not have the history. One agent assembles it, one drafts, one checks the draft against it — then a person sends.",
+    pattern: "pipeline",
+    category: "support",
+    difficulty: "intermediate",
+    requiresConnection: "llm",
+    requiresFeatures: [],
+    requiresFlags: [],
+    agents: [
+      {
+        ref: "context",
+        name: "Context assembler",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "You are given a support ticket and whatever account information came with it. Assemble "
+          + "the facts a support engineer would want before replying: what the customer asked, what "
+          + "their account is, and anything in the history that bears on the question.\n\n"
+          + "Report only what you were given. Do not interpret and do not draft — that is the next "
+          + "agent's job.",
+        maxIterations: 4,
+      },
+      {
+        ref: "drafter",
+        name: "Reply drafter",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "Draft a first reply from the assembled context. Answer the question if it is answerable "
+          + "from what you have. If it is not, say what you need and why — never guess at a "
+          + "technical detail or a date.\n\n"
+          + "Match the customer's register. No 'I hope this finds you well', no 'circling back'.",
+        maxIterations: 4,
+      },
+      {
+        ref: "reviewer",
+        name: "Reply reviewer",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "Review the draft against the assembled context. REJECT it if any of these is true: it "
+          + "states a fact the context does not support, it promises a timeline, it contradicts "
+          + "something in the history, or it answers a different question than the one asked.\n\n"
+          + "Return JSON with the keys verdict ('approved' or 'rejected'), reason, and — when "
+          + "rejected — the exact line at fault. A reviewer that never rejects is a rubber stamp; "
+          + "say no when one of the four applies.",
+        maxIterations: 3,
+      },
+    ],
+    optionalTools: [{
+      ref: "account-lookup",
+      name: "Account lookup",
+      type: "http",
+      riskLevel: "low",
+      requiresApproval: false,
+      connectionKind: "http",
+      config: { url: "https://example.invalid/accounts/{{input.accountId}}", method: "GET" },
+      withoutIt: "The context assembler works from the ticket alone, without the account's history.",
+    }],
+    sampleInput: {
+      ticket: "We were charged twice for March and the second charge has not been refunded.",
+      accountId: "acct_demo_1",
+    },
+    doc: {
+      whatItDoes:
+        "Three agents and a gate. The first assembles context, the second drafts a reply from it, "
+        + "and the third checks the draft against the same context with explicit grounds for "
+        + "refusing. Then a person sends it.\n\n"
+        + "The drafter and the reviewer are separate agents on purpose. An agent asked to write "
+        + "and then critique its own writing agrees with itself; a second agent given the original "
+        + "context and four specific reasons to reject does not.",
+      whatItNeeds: [
+        "One LLM connection.",
+        "An email address on the send step.",
+        "Optionally an HTTP connection, which turns on the account-lookup tool.",
+      ],
+      costPerRun: {
+        range: "about 5–12¢",
+        drivers: [
+          "Three agents over the same context",
+          "Ticket length",
+          "Whether the reviewer rejects and the draft is rewritten",
+        ],
+        ceiling: "25¢ and 60k tokens per agent.",
+      },
+      changeFirst: [
+        { where: "The reviewer's four rejection grounds", why: "They are the actual quality bar. Generic ones produce a reviewer that approves everything, which is the failure mode this pattern exists to avoid." },
+        { where: "The drafter's register instruction", why: "'Match the customer's register' is a starting point. Your support voice is a real thing and this is where it goes." },
+        { where: "The approval gate", why: "Leave it on until you have watched twenty of these. Two agents agreeing is not the same as being right, and the recipient is a real customer." },
+      ],
+      patternNote:
+        "Draft-then-check is the shape for anything a customer will read. The value is in the "
+        + "reviewer having the SOURCE rather than only the draft — a reviewer given just the output "
+        + "can check it for tone and nothing else.",
+    },
+    build: (refs) => {
+      const trigger = node("trigger", "Ticket received", { triggerType: "manual", type: "manual" });
+      const context = node("agent", "Assemble the context", {
+        agentId: refs.agents.context,
+        agentName: "Context assembler",
+        taskOverride: "Assemble the facts needed to reply to this ticket.",
+        maxSteps: 4, timeoutMs: 120_000,
+        toolGrants: refs.tools["account-lookup"] ? [refs.tools["account-lookup"]] : [],
+        budget: STARTER_BUDGET,
+      });
+      const commit = node("checkpoint", "Commit the context", { scope: "run" });
+      const draft = node("agent", "Draft the reply", {
+        agentId: refs.agents.drafter,
+        agentName: "Reply drafter",
+        taskOverride: "Draft the first reply from this context.",
+        maxSteps: 4, timeoutMs: 120_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      const review = node("agent", "Check the draft", {
+        agentId: refs.agents.reviewer,
+        agentName: "Reply reviewer",
+        taskOverride: "Check this draft against the context. Return verdict, reason and the line at fault.",
+        maxSteps: 3, timeoutMs: 90_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      const gate = node("approval", "Support sends", {
+        approverGroup: "support", slaMinutes: 120,
+        prompt: "Two agents have drafted and checked this reply. Read it before it reaches the customer.",
+      });
+      const email = emailNode(
+        "Send the reply",
+        refs.notifyEmail,
+        "Re: your ticket",
+        "<p>{{steps.Draft the reply.output}}</p>",
+      );
+      const out = node("output", "Reply and verdict", { format: "json", destination: "run" });
+      const end = node("end", "Done");
+      return chain([trigger, context, commit, draft, review, gate, email, out, end]);
+    },
+  },
+
+  /* ──────────────────────────────────────── 6. weekly competitive brief */
+  {
+    id: "competitive-brief",
+    name: "Weekly competitor brief",
+    summary:
+      "Sales finds out a competitor shipped something when a prospect mentions it on a call. Three agents read the week's changes, work out what they mean, and write the objection handling.",
+    pattern: "pipeline",
+    category: "growth",
+    difficulty: "intermediate",
+    requiresConnection: "llm",
+    requiresFeatures: [],
+    requiresFlags: [],
+    agents: [
+      {
+        ref: "reader",
+        name: "Change reader",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "You are given this week's competitor material and last week's. Report ONLY what "
+          + "changed: pricing, packaging, a shipped capability, or a positioning shift.\n\n"
+          + "'No change' is a complete and useful answer. Never infer a change from wording you "
+          + "are unsure about — a brief built on an imagined change is worse than a short one.",
+        maxIterations: 5,
+      },
+      {
+        ref: "analyst",
+        name: "Positioning analyst",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "For each change, say whether it closes a gap the competitor had, opens one for us, or "
+          + "is noise. Be willing to say a change is bad for us — a brief that never concedes "
+          + "anything is not read twice, and the sales team will already know.",
+        maxIterations: 4,
+      },
+      {
+        ref: "objections",
+        name: "Objection writer",
+        type: "iterative_agent",
+        role: "worker",
+        instructions:
+          "For each change a prospect might raise, write the objection in the words they would "
+          + "use, and the honest response.\n\n"
+          + "Where the honest response is 'they are better at that', write exactly that and then "
+          + "what we lead with instead. A rep who repeats a claim that does not survive the next "
+          + "question has been made worse off, not better.",
+        maxIterations: 4,
+      },
+    ],
+    optionalTools: [{
+      ref: "fetch-page",
+      name: "Public page fetch",
+      type: "http",
+      riskLevel: "low",
+      requiresApproval: false,
+      connectionKind: "http",
+      config: { url: "{{input.url}}", method: "GET" },
+      withoutIt: "The reader works from material you paste into the run input instead of fetching it.",
+    }],
+    sampleInput: {
+      competitor: "Example Corp",
+      thisWeek: "Pricing page now lists a Team tier at $49/seat with SSO included.",
+      lastWeek: "Pricing page listed Starter and Enterprise only. SSO was Enterprise-only.",
+    },
+    doc: {
+      whatItDoes:
+        "Three agents in sequence: one reports what changed, one says what it means for your "
+        + "positioning, one writes what a rep says on a call. Runs weekly and posts the brief.\n\n"
+        + "The split matters because the three are different skills. A single agent asked to do "
+        + "all three reliably blurs 'what changed' into 'what I think about what changed', and "
+        + "the brief stops being checkable.",
+      whatItNeeds: [
+        "One LLM connection.",
+        "An email address for the brief.",
+        "Optionally an HTTP connection, which lets the reader fetch public pages instead of being given them.",
+      ],
+      costPerRun: {
+        range: "about 6–15¢",
+        drivers: ["How many competitors you track", "How much changed", "Page length when fetching"],
+        ceiling: "25¢ and 60k tokens per agent.",
+      },
+      changeFirst: [
+        { where: "The run input", why: "It ships with one example competitor. The list of who you track is the template's real configuration." },
+        { where: "The trigger", why: "Manual to start. A Friday-afternoon cron is the cadence this is designed for — weekly, so it is read before Monday's calls." },
+        { where: "The objection writer's instructions", why: "Its honesty rule is the thing that makes the brief trusted. Softening it produces a document sales stops opening." },
+      ],
+      patternNote:
+        "Observe, interpret, act — three agents because the three are checkable separately. When "
+        + "the brief is wrong you can see WHICH step was wrong, which is the practical argument "
+        + "for a pipeline over one agent with a long prompt.",
+    },
+    build: (refs) => {
+      const trigger = node("trigger", "Manual start", { triggerType: "manual", type: "manual" });
+      const read = node("agent", "Find what changed", {
+        agentId: refs.agents.reader,
+        agentName: "Change reader",
+        taskOverride: "Report only what changed between this week's material and last week's.",
+        maxSteps: 5, timeoutMs: 150_000,
+        toolGrants: refs.tools["fetch-page"] ? [refs.tools["fetch-page"]] : [],
+        budget: STARTER_BUDGET,
+      });
+      const commit = node("checkpoint", "Commit the change list", { scope: "run" });
+      const analyse = node("agent", "Read the implications", {
+        agentId: refs.agents.analyst,
+        agentName: "Positioning analyst",
+        taskOverride: "Say what each change means for our positioning.",
+        maxSteps: 4, timeoutMs: 120_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      const objections = node("agent", "Write the objection handling", {
+        agentId: refs.agents.objections,
+        agentName: "Objection writer",
+        taskOverride: "Write each likely objection and the honest response.",
+        maxSteps: 4, timeoutMs: 120_000, toolGrants: [], budget: STARTER_BUDGET,
+      });
+      const email = emailNode(
+        "Send the brief",
+        refs.notifyEmail,
+        "Competitor brief: {{input.competitor}}",
+        "<p>{{steps.Read the implications.output}}</p><hr/>"
+        + "<p>{{steps.Write the objection handling.output}}</p>",
+      );
+      const out = node("output", "Weekly brief", { format: "json", destination: "run" });
+      const end = node("end", "Done");
+      return chain([trigger, read, commit, analyse, objections, email, out, end]);
+    },
+  },
 ];
 
 export function templateById(id: string): WorkflowTemplate | null {
@@ -756,9 +903,7 @@ export function templateById(id: string): WorkflowTemplate | null {
 
 export const PATTERN_LABEL: Record<TemplatePattern, string> = {
   "single-agent": "Single agent",
-  supervisor: "Supervisor and workers",
-  router: "Router and specialists",
-  review: "Review loop",
+  pipeline: "Agent pipeline",
   approval: "Human in the loop",
   batch: "Scheduled batch",
 };

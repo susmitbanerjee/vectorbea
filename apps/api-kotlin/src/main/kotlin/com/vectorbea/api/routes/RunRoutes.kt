@@ -25,6 +25,11 @@ import com.vectorbea.api.repository.RunEventRepository
 import com.vectorbea.api.repository.RunRepository
 import com.vectorbea.api.repository.WorkflowRepository
 import com.vectorbea.api.telemetry.TelemetryClient
+import com.vectorbea.api.ingress.RunIngress
+import com.vectorbea.api.ingress.RunResponseMode
+import com.vectorbea.api.ingress.SyncRunWaiter
+import com.vectorbea.api.ingress.TriggerActor
+import com.vectorbea.api.ingress.TriggerSource
 import io.lettuce.core.pubsub.RedisPubSubAdapter
 import org.slf4j.LoggerFactory
 import java.time.Instant
@@ -39,13 +44,10 @@ private val log = LoggerFactory.getLogger(RunRoutes::class.java)
 private val TERMINAL_STATUSES    = setOf("succeeded", "failed", "cancelled", "timed_out", "enqueue_failed")
 
 /**
- * Run-creation rate when a workspace has no policy row.
- *
- * 60/minute sustained with a burst of 120 — generous enough that no legitimate
- * client notices, tight enough that a runaway loop is stopped in a second rather
- * than after it has filled the queue.
+ * Values of `mode` that are asking about the RESPONSE rather than about what the
+ * run may touch. Anything else in that field is a simulation/real answer.
  */
-private val DEFAULT_RUN_RATE = 60 to 120
+private val RESPONSE_MODE_WORDS = setOf("async", "sync", "stream")
 
 /** Body of `POST /api/runs/:id/replay`. Every field optional. */
 data class ReplayRequest(
@@ -55,6 +57,9 @@ data class ReplayRequest(
      */
     val untilNode: String? = null,
 )
+/** Long enough for a service name plus a region plus a check id; short enough to index. */
+private const val MAX_DEDUP_KEY_LENGTH = 200
+
 private val CANCELLABLE_STATUSES = setOf("queued", "running", "waiting_for_approval")
 private val RETRYABLE_STATUSES   = setOf("failed", "enqueue_failed", "timed_out")
 
@@ -71,6 +76,10 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "currentStepId" to currentStepId,
     "currentAgentId" to currentAgentId?.toString(),
     "idempotencyKey" to idempotencyKey,
+    /* The live-singleton key, beside the idempotency key it is constantly
+       confused with. Shown so "why did my second alert not start a run" has an
+       answer on the run itself. */
+    "dedupKey" to dedupKey,
     "startedAt" to startedAt?.toString(),
     "completedAt" to completedAt?.toString(),
     "durationMs" to durationMs,
@@ -86,6 +95,20 @@ private fun AgentRun.toResponse(): Map<String, Any?> = mapOf(
     "nodeTotal" to nodeTotal,
     "nodeCommitted" to nodeCommitted,
     "ribbonJson" to ribbonJson,
+    // Whether the result got where it was going. On the LIST response, not only
+    // the detail one, because "which of my runs did not deliver" is a question
+    // asked of a list — and a list that needs a per-row join to answer it will
+    // not answer it.
+    "deliveryStatus" to deliveryStatus,
+    /*
+     * On the LIST response as well as the detail one, deliberately.
+     *
+     * Somebody scanning a list of runs needs to know which of them they can
+     * expect to inspect. Finding out only after opening one, and finding an
+     * empty panel, is the experience this flag exists to replace.
+     */
+    "payloadsWithheld" to payloadsWithheld,
+    "runnerPoolId" to runnerPoolId?.toString(),
     "incidentId" to incidentId?.toString(),
 )
 
@@ -192,6 +215,25 @@ class RunRoutes(
      * ledger write is never worth a customer's run.
      */
     private val usageMeter: com.vectorbea.api.entitlements.UsageMeter? = null,
+    /**
+     * The one admission path. Null makes every trigger fail loudly rather than
+     * quietly falling back to a second copy of the sequence — a second copy is
+     * exactly what this replaced.
+     */
+    private val runIngress: com.vectorbea.api.ingress.RunIngress? = null,
+    /** Injectable so a test can wait without sleeping. */
+    private val syncWaiter: com.vectorbea.api.ingress.SyncRunWaiter? = null,
+    /**
+     * The governance trail, for the two destructive run operations.
+     *
+     * `AuditLog.Action` has named `run.cancel` and `run.rerun` since it was
+     * written and nothing called either. Both are worth recording for the same
+     * reason: they are the operations where a PERSON overrides what the platform
+     * was going to do — stopping work that was in flight, or paying to run
+     * something a second time with its side effects. "Who cancelled the payment
+     * run" has exactly one correct answer and nothing recorded it.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
 
     /**
@@ -201,34 +243,6 @@ class RunRoutes(
      */
     private fun classifyVersion(versionId: UUID) =
         classResolver?.resolve(versionId) ?: com.vectorbea.api.queue.ExecutionClass.SHORT
-
-    /**
-     * Record who started this run, for per-member spend caps and the owner's
-     * spend-by-member view.
-     *
-     * Both columns are nullable and both may legitimately be null at once — a
-     * schedule has no human and no key. The API key id is recorded alongside the
-     * user rather than instead of it, because a key that acts as a member is
-     * still that member's spend: "which key" and "whose budget" are different
-     * questions and an incident asks both.
-     */
-    private fun attributeRun(runId: UUID, req: Request) {
-        val ds = dataSource ?: return
-        val userId = req.principal?.appUserId
-        val keyId = req.apiKeyId
-        if (userId == null && keyId == null) return
-
-        ds.connection.use { c ->
-            c.prepareStatement(
-                "UPDATE agent_runs SET triggered_by_user_id = ?, triggered_by_api_key_id = ? WHERE id = ?"
-            ).use { st ->
-                st.setObject(1, userId)
-                st.setObject(2, keyId)
-                st.setObject(3, runId)
-                st.executeUpdate()
-            }
-        }
-    }
 
     /**
      * Place a run in the weighted fair queue and advance the workspace clock.
@@ -258,6 +272,10 @@ class RunRoutes(
     fun register(router: Router) {
         // Workflow-scoped trigger
         router.post("/api/workflows/:workflowId/run", ::triggerRun)
+        /* Same endpoint, streamed. The router picks this one only when the caller
+           asks with `Accept: text/event-stream` or `?mode=stream`, so a plain POST
+           is unaffected — see Router.findSseRoute. */
+        router.ssePost("/api/workflows/:workflowId/run", ::triggerRunStreaming)
 
         // Run reads
         router.get("/api/runs", ::list)
@@ -281,325 +299,306 @@ class RunRoutes(
 
     // ── POST /api/workflows/:workflowId/run ────────────────────────────────────
 
+    /**
+     * Start a run.
+     *
+     * ── THIS USED TO BE THE ADMISSION SEQUENCE, AND NOW IT IS AN ADAPTER ────
+     * Rate limit, quota, placement, admission, create, meter, events, enqueue —
+     * all of that lived here, which is why `WorkflowScheduler` could not reuse
+     * it and reimplemented a subset instead, and why scheduled runs skipped
+     * every plan check in the product. It moved to [RunIngress]; what stays is
+     * what is genuinely specific to an HTTP caller: the beta gates, the request
+     * body, and which of the three response modes to answer in.
+     */
     private fun triggerRun(req: Request): Response {
         val ctx = req.context()
-        val environmentId = ctx.requireEnvironmentId()
         val workflowId = req.pathUUID("workflowId")
+        val body = parseTriggerBody(req)
+        val mode = RunResponseMode.parse(body.responseModeWire)
 
-        val wfRepo = workflowRepo
-            ?: throw ApiError.InternalError("Workflow repository not available")
-        val q = queue
-            ?: throw ApiError.ServiceUnavailable("Queue not available — Redis required")
-
-        // ── 1. Load and validate workflow ─────────────────────────────────────
-        val workflow = wfRepo.findById(workflowId, ctx.workspaceId)
-            ?: throw ApiError.NotFound("Workflow")
-
-        if (workflow.status == "archived") {
-            throw ApiError.ValidationError("Workflow '${workflow.name}' is archived and cannot be triggered")
-        }
-
-        val versionId = workflow.currentVersionId
-            ?: throw ApiError.ValidationError("Workflow '${workflow.name}' has no current version — publish a version first")
-
-        // ── 1b. Beta controls + usage limit gate ──────────────────────────────
-        val beta = betaRepo
-        if (beta != null) {
-            // Workspace must be approved and not disabled
-            val controls = beta.getWorkspaceBetaControls(ctx.workspaceId)
-            if (controls != null) {
-                if (controls.accessStatus == "disabled") {
-                    throw ApiError.Forbidden("WORKSPACE_DISABLED: This workspace has been disabled. Contact support.")
-                }
-                if (!controls.simulationEnabled && !controls.realExecutionEnabled) {
-                    throw ApiError.Forbidden("WORKSPACE_DISABLED: Execution is disabled for this workspace.")
-                }
-            }
-
-            // Daily run limit
-            val policy = beta.getUsagePolicy(ctx.workspaceId)
-            val maxRuns = policy?.maxRunsPerDay ?: (appConfig?.betaDefaultMaxRunsPerDay ?: 20)
-            val todayRuns = beta.getDailyRunCount(ctx.workspaceId)
-            if (todayRuns >= maxRuns) {
-                telemetry?.track("usage_limit_blocked", "usage_limit",
-                    workspaceId = ctx.workspaceId.toString(),
-                    appUserId = req.principal?.appUserId?.toString(),
-                    properties = mapOf("limit" to "runs_per_day", "max" to maxRuns))
-                throw ApiError.TooManyRequests("BETA_USAGE_LIMIT_EXCEEDED: Daily run limit of $maxRuns reached. Resets at midnight UTC.")
-            }
-        }
-
-        // ── 2. Parse request body ─────────────────────────────────────────────
-        data class TriggerBody(
-            val input: Map<String, Any?> = emptyMap(),
-            val idempotencyKey: String? = null,
-            val triggerType: String = "manual",
-            val mode: String = "simulation",  // "simulation" | "real"
-        )
-
-        val body = if (req.body.isBlank()) TriggerBody()
-                   else req.bodyAs<TriggerBody>()
-
-        // ── 2b. Real execution gate ───────────────────────────────────────────
-        val requestedMode = if (body.mode == "real") "real" else "simulation"
-        if (requestedMode == "real" && beta != null) {
-            val controls = beta.getWorkspaceBetaControls(ctx.workspaceId)
-            // No controls row means nobody has made a decision about this
-            // workspace, so the deployment's default applies. This read
-            // `?: false` regardless of DEFAULT_EXECUTION_MODE, which made that
-            // setting inert: it existed, was documented, and changed nothing.
-            // An explicit row still wins in both directions.
-            val realEnabled = controls?.realExecutionEnabled
-                ?: (appConfig?.defaultExecutionMode == "real_execution_enabled")
-            if (!realEnabled) {
-                throw ApiError.Forbidden("REAL_EXECUTION_NOT_ENABLED: Real execution is switched off for this " +
-                    "workspace. Ask a Vectorbea admin to enable it, or run in simulation mode.")
-            }
-        }
-
-        // Validate triggerType
-        if (body.triggerType !in setOf("manual", "api", "schedule")) {
-            throw ApiError.ValidationError("triggerType must be 'manual', 'api', or 'schedule'")
-        }
-
-        // ── 3. Idempotency check ──────────────────────────────────────────────
-        if (body.idempotencyKey != null) {
-            val cached = checkIdempotency(ctx.workspaceId, body.idempotencyKey)
-            if (cached != null) {
-                log.info("[run] idempotency hit key={} existingRunId={}", body.idempotencyKey, cached)
-                val existingRun = runRepo.findById(UUID.fromString(cached), ctx.workspaceId)
-                if (existingRun != null) {
-                    return Response.ok(mapOf(
-                        "runId" to existingRun.id.toString(),
-                        "status" to existingRun.status.uppercase(),
-                        "idempotencyHit" to true,
-                    ))
-                }
-            }
-        }
-
-        // ── 4. Serialize input (strip any secret-like values) ─────────────────
-        val inputJson = try {
-            toJson(body.input)
-        } catch (e: Exception) {
-            throw ApiError.ValidationError("Invalid input JSON: ${e.message}")
-        }
-
-        // ── 4b. Classify BEFORE the run row exists ────────────────────────────
-        // The API already holds workflow_version_id here, and therefore
-        // graph_json, so the class costs one memoised lookup. Doing it now means
-        // the class is committed atomically with the run and the message can be
-        // routed without any worker-side probe.
-        val executionClass = classifyVersion(versionId)
-
-        // ── 4c. Place in the weighted fair queue ──────────────────────────────
-        // A tenant submitting 500 runs pushes their own clock forward; a tenant
-        // submitting one lands near `now` and is served next. This is what stops
-        // a flood starving everyone else, and it replaces FIFO ordering entirely.
-        val placement = placeInFairQueue(ctx.workspaceId, executionClass)
-
-        // ── 4d. Rate limit ────────────────────────────────────────────────────
-        // Before admission, because "you are asking too fast" is a cheaper and
-        // more specific answer than "the queue is deep" — and a client hammering
-        // the endpoint should be told to slow down rather than shown a queue
-        // position that will be stale by the time they read it.
-        runRateLimiter?.let { bucket ->
-            val verdict = bucket.tryConsume(
-                key = "run-create:${ctx.workspaceId}",
-                refillPerMinute = workspaceRunRate(ctx.workspaceId).first,
-                burst = workspaceRunRate(ctx.workspaceId).second,
+        if (mode == RunResponseMode.STREAM) {
+            /*
+             * Reachable only when the caller asked for stream in the BODY and not
+             * in the Accept header or query string — the router chooses the SSE
+             * handler from those two, before the body has been read. Rather than
+             * pretend, say exactly what to change.
+             */
+            throw ApiError.ValidationError(
+                "To stream, send `Accept: text/event-stream` or add `?mode=stream` to the URL. " +
+                    "The response format is chosen before the body is read, so a mode in the " +
+                    "body cannot select it."
             )
-            if (!verdict.allowed) {
-                throw ApiError.TooManyRequests(
-                    "Too many runs created. You may create ${verdict.refillPerMinute} runs per minute; " +
-                        "retry in ${verdict.retryAfterSeconds}s.",
-                    mapOf(
-                        "limitPerMinute" to verdict.refillPerMinute,
-                        "burst" to verdict.burst,
-                        "retryAfterSeconds" to verdict.retryAfterSeconds,
-                        "retryable" to true,
-                    ),
-                )
-            }
         }
 
-        // ── 4e. Plan quota ────────────────────────────────────────────────────
-        //
-        // THE GOVERNING RULE APPLIED: entitlements resolve from the WORKSPACE's
-        // billing account, never from `req.principal`. A Pro member triggering a
-        // run here gets this workspace's quota, and the refusal names this
-        // workspace's plan.
-        //
-        // THE GRACE MODEL: this is the ONLY place a quota is checked. A run that
-        // gets past this line finishes, however far past the quota the account
-        // travels while it runs — killing a run at 90% to save the last 10% of a
-        // quota throws away every provider call already paid for and every side
-        // effect already committed, and gives the customer nothing for it. The
-        // NEXT trigger is refused instead, which costs nobody anything.
-        val effective = entitlements?.resolve(ctx.workspaceId)
-        if (effective != null) {
-            // The ACCOUNT's pool, first: when both are spent, "your account is
-            // out of runs" is the message somebody can act on.
-            entitlements.requireQuota(effective)
+        val started = startFromRequest(req, workflowId, body)
 
-            // Then this WORKSPACE's tighter bound, so one workspace — or one
-            // guest inside it — cannot drain the account's whole month before
-            // anybody else gets a run.
-            entitlements.requireWorkspaceQuota(effective)
-
-            // And then THIS MEMBER's share. A workspace is shareable, so a guest
-            // invited to help can otherwise burn the host's tokens: the account
-            // pays, the guest spends, and every other limit is satisfied right up
-            // until the month is gone.
-            //
-            // Null for a schedule, a webhook or system work — charged to the
-            // workspace and to nobody's cap, because an owner's cron job is not a
-            // guest's spend.
-            entitlements.requireMemberSpend(effective, req.principal?.appUserId)
+        return when (mode) {
+            RunResponseMode.SYNC -> respondSync(started, ctx.workspaceId, body.timeoutMs)
+            else -> Response.accepted(buildMap {
+                put("runId", started.runId.toString())
+                put("status", "QUEUED")
+                if (started.idempotentHit) put("idempotencyHit", true)
+                if (started.joinedExisting) {
+                    put("joinedExisting", true)
+                    put("message", "A run is already working on this deduplication key. " +
+                        "Your input was delivered to it as a signal; no second run was started.")
+                }
+                // Queue position and ETA when there is a queue. Absent when the run
+                // is expected to start immediately — an ETA of zero seconds reads
+                // as a system under strain when it is not.
+                started.admitted?.toResponseFields()?.let { putAll(it) }
+            })
         }
-
-        // ── 4f. Admission control ─────────────────────────────────────────────
-        // The decision to accept, and — under load — what accepting means. A run
-        // accepted silently into a deep queue is the failure this prevents: the
-        // caller gets a position and an ETA in the same response, not twenty
-        // minutes of nothing.
-        //
-        // The plan goes in so a concurrency refusal names it and the upgrade
-        // path. Same resolved snapshot as the quota check above, so two refusals
-        // in one request cannot disagree about which plan governs.
-        val admitted = admission?.admit(ctx.workspaceId, executionClass, placement.priority, effective?.plan)
-
-        // ── 5. Create run row with status=queued ──────────────────────────────
-        val run = runRepo.create(CreateRunRequest(
-            workspaceId = ctx.workspaceId,
-            environmentId = environmentId,
-            workflowId = workflowId,
-            workflowVersionId = versionId,
-            triggerType = body.triggerType,
-            inputJson = inputJson,
-            idempotencyKey = body.idempotencyKey,
-            executionClass = executionClass.wire,
-            fairVtime = placement.fairVtime,
-            priority = placement.priority,
-        ))
-
-        // ── 5a. Attribute the run to whoever started it ───────────────────────
-        //
-        // Written straight after the insert rather than passed into `create`, so
-        // the attribution cannot change the run-creation contract that the worker
-        // and the resume path both depend on. A failure here loses a member's
-        // spend attribution for one run; it must never lose the run.
-        runCatching { attributeRun(run.id, req) }
-
-        // ── 5b. Meter the run, once, against the workspace's account ──────────
-        //
-        // Keyed on the RUN id inside `meter_run_usage`, which is the only
-        // identifier that survives a resume, a retry and a redelivery — all three
-        // reach a meter call for a run that already has a ledger row, and all
-        // three must leave it at one. S4 bills from this table, so a
-        // double-counted run is a double charge.
-        //
-        // Here rather than at completion because admission is what the quota
-        // governs: metering at completion would let an account queue a thousand
-        // runs against a spent quota, since none of them had finished yet.
-        //
-        // A replay writes nothing at all — the function refuses a run whose
-        // execution_mode_kind is 'replay', so the debugger stays free.
-        usageMeter?.meterRunAdmitted(run.id, effective?.accountId)
-
-        // ── 6. Append lifecycle events ────────────────────────────────────────
-        val source = "api:trigger"
-        appendEvent(run, "RUN_CREATED", "queued", source, "Run created", "Run triggered via ${body.triggerType}")
-        appendEvent(run, "RUN_QUEUED",  "queued", source, "Run queued",  "Job placed on workflow queue")
-
-        // ── 7. Enqueue Redis job ──────────────────────────────────────────────
-        val job = WorkflowRunJob(
-            runId = run.id.toString(),
-            workspaceId = ctx.workspaceId.toString(),
-            environmentId = environmentId.toString(),
-            workflowId = workflowId.toString(),
-            workflowVersionId = versionId.toString(),
-            jobType = JobType.START_RUN,
-            inputJson = inputJson,
-            // Audit trail: identity derived from verified JWT, never from user-supplied headers
-            requestedByUserId = req.principal?.appUserId?.toString(),
-            executionClass = executionClass,
-        )
-
-        val messageId = try {
-            q.enqueue(job)
-        } catch (e: WorkflowQueueException) {
-            log.error("[run] enqueue failed for runId={}: {}", run.id, e.message)
-            // Mark run as enqueue_failed so it doesn't stay in a zombie queued state
-            runCatching { runRepo.updateStatus(run.id, ctx.workspaceId, "enqueue_failed") }
-            throw ApiError.ServiceUnavailable("Failed to enqueue workflow job: queue unavailable")
-        }
-
-        log.info("[run] triggered runId={} workflowId={} mode={} messageId={}", run.id, workflowId, requestedMode, messageId)
-
-        // ── 8. Increment daily usage counter ─────────────────────────────────
-        runCatching { beta?.incrementDailyRuns(ctx.workspaceId, isSimulation = requestedMode == "simulation") }
-
-        // ── 9. Record idempotency key ─────────────────────────────────────────
-        if (body.idempotencyKey != null) {
-            recordIdempotency(ctx.workspaceId, body.idempotencyKey, run.id.toString())
-        }
-
-        telemetry?.track("workflow_run_queued", "run",
-            workspaceId = ctx.workspaceId.toString(),
-            runId = run.id.toString(),
-            workflowId = workflowId.toString(),
-            appUserId = req.principal?.appUserId?.toString(),
-            properties = mapOf("mode" to requestedMode, "triggerType" to body.triggerType))
-
-        // Mode-specific start events feed the business dashboard (simulation vs real)
-        if (requestedMode == "simulation") {
-            telemetry?.track("simulation_run_started", "simulation",
-                workspaceId = ctx.workspaceId.toString(),
-                runId = run.id.toString(),
-                workflowId = workflowId.toString(),
-                appUserId = req.principal?.appUserId?.toString())
-        } else {
-            telemetry?.track("real_execution_started", "real_execution",
-                workspaceId = ctx.workspaceId.toString(),
-                runId = run.id.toString(),
-                workflowId = workflowId.toString(),
-                appUserId = req.principal?.appUserId?.toString())
-        }
-
-        return Response.accepted(buildMap {
-            put("runId", run.id.toString())
-            put("status", "QUEUED")
-            // Queue position and ETA when there is a queue. Absent when the run is
-            // expected to start immediately — an ETA of zero seconds reads as a
-            // system under strain when it is not.
-            admitted?.toResponseFields()?.let { putAll(it) }
-        })
     }
 
     /**
-     * Per-workspace run-creation rate, from plan policy.
+     * `POST /api/workflows/:workflowId/run` with `Accept: text/event-stream`.
      *
-     * Read per call rather than cached: a plan upgrade must take effect
-     * immediately, and this is one indexed lookup on a table already in the
-     * connection's working set from the fair-queue placement two statements
-     * earlier. Falls back to the platform default if there is no policy row.
+     * Start and watch on one request. Split into POST-then-GET the caller loses
+     * whatever happened in between — including, for a fast workflow, the whole
+     * run.
      */
-    private fun workspaceRunRate(workspaceId: UUID): Pair<Int, Int> = dataSource?.let { ds ->
-        runCatching {
-            ds.connection.use { conn ->
-                conn.prepareStatement(
-                    """SELECT max_runs_per_minute, runs_per_minute_burst
-                         FROM workspace_usage_policies WHERE workspace_id = ?"""
-                ).use { stmt ->
-                    stmt.setObject(1, workspaceId)
-                    stmt.executeQuery().use { rs ->
-                        if (rs.next()) rs.getInt(1) to rs.getInt(2) else DEFAULT_RUN_RATE
-                    }
-                }
+    private fun triggerRunStreaming(req: Request, emitter: Router.SseEmitter) {
+        val ctx = req.context()
+        val workflowId = req.pathUUID("workflowId")
+
+        /*
+         * A refusal has to reach the client as a stream event, not as a status
+         * code: the response headers went out when the stream opened, so there is
+         * no code left to set. An SSE client that gets a silent close cannot tell
+         * "refused" from "the network died".
+         */
+        val started = try {
+            startFromRequest(req, workflowId, parseTriggerBody(req))
+        } catch (e: ApiError) {
+            emitter.sendEvent("error", toJson(mapOf(
+                "code" to e.code, "message" to e.message, "status" to e.httpStatus)))
+            return
+        }
+
+        emitter.sendEvent("run_started", toJson(buildMap {
+            put("runId", started.runId.toString())
+            put("status", "QUEUED")
+            if (started.idempotentHit) put("idempotencyHit", true)
+            if (started.joinedExisting) put("joinedExisting", true)
+        }))
+
+        streamRun(started.runId, ctx.workspaceId, emitter)
+    }
+
+    /**
+     * Body of a trigger request. Every field optional.
+     *
+     * `mode` has meant "simulation | real" since long before response modes
+     * existed and clients send it, so the response mode gets its own field and
+     * `mode` keeps the meaning it had. `mode: "sync"` is still read as a
+     * response mode, because it is what somebody will type first and silently
+     * ignoring it would leave them waiting for a result that never comes.
+     */
+    private data class TriggerBody(
+        val input: Map<String, Any?> = emptyMap(),
+        val idempotencyKey: String? = null,
+        /**
+         * At most one LIVE run per (workspace, workflow, key).
+         *
+         * The caller decides what "the same thing" is — a service name, a commit
+         * sha. What happens when the key is taken is the WORKFLOW's choice, not
+         * theirs: see `workflows.dedup_policy`.
+         */
+        val dedupKey: String? = null,
+        /**
+         * 0–100, or absent to take the workflow's default.
+         *
+         * Clamped to the workspace's plan ceiling. A Sev1 raised above the
+         * workflow's normal priority is the case this exists for.
+         */
+        val priority: Int? = null,
+        val triggerType: String = "manual",
+        val mode: String? = null,
+        val responseMode: String? = null,
+        /** How long a sync caller will wait. Clamped, not rejected. */
+        val timeoutMs: Long? = null,
+    ) {
+        val executionMode: String get() = if (mode == "real") "real" else "simulation"
+        val responseModeWire: String? get() =
+            responseMode ?: mode?.takeIf { it in RESPONSE_MODE_WORDS }
+    }
+
+    private fun parseTriggerBody(req: Request): TriggerBody {
+        val body = if (req.body.isBlank()) TriggerBody() else req.bodyAs<TriggerBody>()
+        if (TriggerSource.fromWire(body.triggerType) == null) {
+            throw ApiError.ValidationError(
+                "`triggerType` must be one of ${TriggerSource.wireNames().joinToString(", ")}."
+            )
+        }
+        if (body.priority != null && body.priority !in 0..100) {
+            throw ApiError.ValidationError(
+                "`priority` must be between 0 and 100. 0 is batch, 50 is normal, 100 is the " +
+                    "priority lane; a workspace without that entitlement is clamped below it."
+            )
+        }
+        if (body.dedupKey != null && body.dedupKey.length > MAX_DEDUP_KEY_LENGTH) {
+            throw ApiError.ValidationError(
+                "`dedupKey` is over $MAX_DEDUP_KEY_LENGTH characters. It names the thing being " +
+                    "worked — a service, a deploy — not the payload."
+            )
+        }
+        return body
+    }
+
+    /**
+     * The gates specific to an HTTP caller, then [RunIngress].
+     *
+     * The beta controls stay here rather than moving into the ingress because
+     * they are about a WORKSPACE's onboarding state, not about a run: a schedule
+     * a beta workspace already owns keeps firing while an interactive trigger is
+     * refused, which is the intended behaviour and would be lost if this check
+     * sat behind every ingress path.
+     */
+    private fun startFromRequest(
+        req: Request,
+        workflowId: UUID,
+        body: TriggerBody,
+    ): RunIngress.Started {
+        val ctx = req.context()
+        val ingress = runIngress
+            ?: throw ApiError.InternalError("Run ingress is not configured")
+
+        applyBetaGates(ctx.workspaceId, req, body)
+
+        val inputJson = try {
+            toJson(body.input)
+        } catch (e: Exception) {
+            throw ApiError.ValidationError("The `input` field is not valid JSON: ${e.message}")
+        }
+
+        val started = ingress.start(RunIngress.Request(
+            workspaceId = ctx.workspaceId,
+            workflowId = workflowId,
+            environmentId = ctx.requireEnvironmentId(),
+            inputJson = inputJson,
+            source = TriggerSource.fromWire(body.triggerType) ?: TriggerSource.MANUAL,
+            actor = TriggerActor(
+                userId = req.principal?.appUserId,
+                apiKeyId = req.apiKeyId,
+            ),
+            idempotencyKey = body.idempotencyKey,
+            dedupKey = body.dedupKey,
+            priority = body.priority?.toShort(),
+            reason = "Triggered via ${body.triggerType}",
+        ))
+
+        // Nothing here fires for an idempotency hit: no run was created, so
+        // counting one would inflate the daily cap and the funnel with a
+        // duplicate that never executed.
+        if (!started.idempotentHit && !started.joinedExisting) {
+            runCatching {
+                betaRepo?.incrementDailyRuns(ctx.workspaceId,
+                    isSimulation = body.executionMode == "simulation")
             }
-        }.getOrDefault(DEFAULT_RUN_RATE)
-    } ?: DEFAULT_RUN_RATE
+            telemetry?.track("workflow_run_queued", "run",
+                workspaceId = ctx.workspaceId.toString(),
+                runId = started.runId.toString(),
+                workflowId = workflowId.toString(),
+                appUserId = req.principal?.appUserId?.toString(),
+                properties = mapOf("mode" to body.executionMode, "triggerType" to body.triggerType))
+            telemetry?.track(
+                if (body.executionMode == "simulation") "simulation_run_started" else "real_execution_started",
+                if (body.executionMode == "simulation") "simulation" else "real_execution",
+                workspaceId = ctx.workspaceId.toString(),
+                runId = started.runId.toString(),
+                workflowId = workflowId.toString(),
+                appUserId = req.principal?.appUserId?.toString())
+        }
+        return started
+    }
+
+    /** Workspace onboarding state: approved, not disabled, and under its daily cap. */
+    private fun applyBetaGates(workspaceId: UUID, req: Request, body: TriggerBody) {
+        val beta = betaRepo ?: return
+
+        val controls = beta.getWorkspaceBetaControls(workspaceId)
+        if (controls != null) {
+            if (controls.accessStatus == "disabled") {
+                throw ApiError.Forbidden(
+                    "WORKSPACE_DISABLED: This workspace has been disabled. Contact support.")
+            }
+            if (!controls.simulationEnabled && !controls.realExecutionEnabled) {
+                throw ApiError.Forbidden(
+                    "WORKSPACE_DISABLED: Execution is disabled for this workspace.")
+            }
+        }
+
+        val policy = beta.getUsagePolicy(workspaceId)
+        val maxRuns = policy?.maxRunsPerDay ?: (appConfig?.betaDefaultMaxRunsPerDay ?: 20)
+        if (beta.getDailyRunCount(workspaceId) >= maxRuns) {
+            telemetry?.track("usage_limit_blocked", "usage_limit",
+                workspaceId = workspaceId.toString(),
+                appUserId = req.principal?.appUserId?.toString(),
+                properties = mapOf("limit" to "runs_per_day", "max" to maxRuns))
+            throw ApiError.TooManyRequests(
+                "BETA_USAGE_LIMIT_EXCEEDED: Daily run limit of $maxRuns reached. " +
+                    "Resets at midnight UTC.")
+        }
+
+        if (body.executionMode == "real") {
+            // No controls row means nobody has made a decision about this
+            // workspace, so the deployment's default applies.
+            val realEnabled = controls?.realExecutionEnabled
+                ?: (appConfig?.defaultExecutionMode == "real_execution_enabled")
+            if (!realEnabled) {
+                throw ApiError.Forbidden(
+                    "REAL_EXECUTION_NOT_ENABLED: Real execution is switched off for this " +
+                        "workspace. Ask a Vectorbea admin to enable it, or run in simulation mode.")
+            }
+        }
+    }
+
+    /**
+     * Wait for the run, then answer with the result — or with the id, on time.
+     *
+     * The 202 on timeout is the contract, not a fallback: a sync caller who
+     * waited and did not get an answer holds exactly what an async caller would
+     * have held immediately, and every other endpoint works on it.
+     */
+    private fun respondSync(
+        started: RunIngress.Started,
+        workspaceId: UUID,
+        timeoutMs: Long?,
+    ): Response {
+        val waiter = syncWaiter ?: SyncRunWaiter(runRepo)
+        val requested = timeoutMs?.let { java.time.Duration.ofMillis(it) }
+
+        return when (val outcome = waiter.await(started.runId, workspaceId, requested)) {
+            is SyncRunWaiter.Outcome.Finished -> {
+                val run = outcome.run
+                val succeeded = run.status == "succeeded" || run.status == "completed"
+                Response.ok(buildMap {
+                    put("runId", run.id.toString())
+                    put("status", run.status.uppercase())
+                    put("completed", true)
+                    put("succeeded", succeeded)
+                    put("durationMs", run.durationMs)
+                    put("output", decodeJsonColumn(run.outputJson))
+                    if (!succeeded) put("error", decodeJsonColumn(run.errorJson))
+                })
+            }
+
+            is SyncRunWaiter.Outcome.StillRunning -> Response.accepted(buildMap {
+                put("runId", started.runId.toString())
+                put("status", (outcome.run?.status ?: "queued").uppercase())
+                put("completed", false)
+                put("waitedMs", outcome.waitedMs)
+                // Says what to do next, per the copy rules, rather than leaving a
+                // caller who asked for a result holding a bare id.
+                put("message",
+                    "The run is still going after ${outcome.waitedMs / 1000}s. " +
+                        "Poll GET /api/runs/${started.runId}, or stream " +
+                        "GET /api/runs/${started.runId}/stream, for the result.")
+                started.admitted?.toResponseFields()?.let { putAll(it) }
+            })
+        }
+    }
 
     // ── GET /api/runs ─────────────────────────────────────────────────────────
 
@@ -682,12 +681,27 @@ class RunRoutes(
     private fun streamEvents(req: Request, emitter: Router.SseEmitter) {
         val ctx = req.context()
         val runId = req.pathUUID("id")
-        val run = runRepo.findById(runId, ctx.workspaceId) ?: throw ApiError.NotFound("Run")
+        // Authorize here, so `streamRun` can be called from a path that has
+        // already done it without paying for the lookup twice.
+        runRepo.findById(runId, ctx.workspaceId) ?: throw ApiError.NotFound("Run")
+        streamRun(runId, ctx.workspaceId, emitter)
+    }
+
+    /**
+     * Relay a run to an open stream, from wherever it has got to.
+     *
+     * Extracted from [streamEvents] so that starting a run and watching it is
+     * the same code as watching one that already exists. Two copies would drift,
+     * and the copy that drifts is always the newer one — which here is the one a
+     * caller reaches at the moment they most want to see what is happening.
+     */
+    private fun streamRun(runId: UUID, workspaceId: UUID, emitter: Router.SseEmitter) {
+        val run = runRepo.findById(runId, workspaceId) ?: throw ApiError.NotFound("Run")
 
         // ── Phase 1: send persisted events ───────────────────────────────────
         val existingPage = eventRepo.listByRun(
             runId = runId,
-            workspaceId = ctx.workspaceId,
+            workspaceId = workspaceId,
             params = com.vectorbea.api.repository.PageParams(pageSize = 500),
         )
         for (ev in existingPage.items) {
@@ -709,7 +723,13 @@ class RunRoutes(
         }
 
         val channel = eventBus?.channelFor(runId.toString()) ?: "run-events:$runId"
-        val messageQueue = LinkedBlockingQueue<String?>() // null = poison pill (terminal / close)
+        /* The end-of-stream signal is the string POISON, not null. It used to be
+           `offer(null)`, and LinkedBlockingQueue refuses null with an NPE — thrown
+           inside Lettuce's callback ("Unexpected error occurred in
+           RedisPubSubListener callback"). The terminal event itself was queued
+           first, but the stop signal never was, so the stream stayed open on
+           heartbeats until the periodic status re-check noticed the run had ended. */
+        val messageQueue = LinkedBlockingQueue<String>()
 
         val pubSub = r.newPubSubConnection()
         pubSub.addListener(object : RedisPubSubAdapter<String, String>() {
@@ -721,7 +741,7 @@ class RunRoutes(
                     message.contains("\"RUN_CANCELLED\"") ||
                     message.contains("\"RUN_TIMED_OUT\"")
                 ) {
-                    messageQueue.offer(null) // signal end
+                    messageQueue.offer(POISON)
                 }
             }
         })
@@ -740,7 +760,7 @@ class RunRoutes(
                         heartbeatCounter++
                         if (!emitter.sendComment("heartbeat t=${Instant.now()}")) break
                     }
-                    msg == "__poison__" -> break
+                    msg == POISON -> break
                     else -> {
                         if (!emitter.sendEvent("run_event", msg)) break
                         // If the poison pill follows, we'll pick it up next iteration
@@ -749,7 +769,7 @@ class RunRoutes(
 
                 // Safety: re-check DB status every ~10 heartbeats
                 if (heartbeatCounter > 0 && heartbeatCounter % 10 == 0) {
-                    val fresh = runRepo.findById(runId, ctx.workspaceId)
+                    val fresh = runRepo.findById(runId, workspaceId)
                     if (fresh?.status in TERMINAL_STATUSES) {
                         emitter.sendEvent("run_complete", """{"status":"${fresh?.status}","final":true}""")
                         break
@@ -765,10 +785,15 @@ class RunRoutes(
         }
 
         // Send run_complete if we exited because of a terminal event
-        val finalRun = runCatching { runRepo.findById(runId, ctx.workspaceId) }.getOrNull()
+        val finalRun = runCatching { runRepo.findById(runId, workspaceId) }.getOrNull()
         if (finalRun?.status in TERMINAL_STATUSES) {
             emitter.sendEvent("run_complete", """{"status":"${finalRun?.status}","final":true}""")
         }
+    }
+
+    private companion object {
+        /** End-of-stream marker on the SSE relay queue, which cannot hold null. */
+        const val POISON = "__poison__"
     }
 
     // ── POST /api/runs/:id/cancel ─────────────────────────────────────────────
@@ -810,6 +835,12 @@ class RunRoutes(
             "api:cancel", "Cancellation requested", "Run cancellation requested via API")
 
         log.info("[run] cancellation requested runId={}", runId)
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.RUN_CANCEL,
+            targetType = "run", targetId = runId, environmentId = run.environmentId,
+            before = mapOf("status" to run.status),
+            after = mapOf("status" to "cancellation_requested"),
+        )
         return Response.ok(mapOf("runId" to runId.toString(), "status" to "cancellation_requested"))
     }
 
@@ -1066,6 +1097,15 @@ class RunRoutes(
         enqueueOrFail(q, newRun, original, rerunClass, ctx, environmentId)
 
         log.info("[run] rerun enqueued sourceRunId={} newRunId={}", runId, newRun.id)
+        /* Targeted at the ORIGINAL run, because that is the id somebody has in
+           front of them when they ask "why did this run twice"; the new run's id
+           is in `after`, so the trail leads forward as well as back. */
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.RUN_RERUN,
+            targetType = "run", targetId = runId, environmentId = environmentId,
+            before = mapOf("status" to original.status, "workflowId" to original.workflowId.toString()),
+            after = mapOf("runId" to newRun.id.toString(), "callsProvider" to true),
+        )
         return Response.accepted(mapOf(
             "operation"     to "rerun",
             "sourceRunId"   to runId.toString(),
@@ -1150,21 +1190,6 @@ class RunRoutes(
         }
     }
 
-    /** Check idempotency key in Redis — returns existing runId or null. */
-    private fun checkIdempotency(workspaceId: UUID, key: String): String? {
-        return runCatching {
-            redis?.commands?.get("idempotency:$workspaceId:$key")
-        }.getOrNull()
-    }
-
-    /** Record idempotency key → runId in Redis with 24-hour TTL. */
-    private fun recordIdempotency(workspaceId: UUID, key: String, runId: String) {
-        runCatching {
-            redis?.commands?.setex("idempotency:$workspaceId:$key", 86_400L, runId)
-        }.onFailure { e ->
-            log.warn("[run] failed to record idempotency key={}: {}", key, e.message)
-        }
-    }
 }
 
 private fun <T, R> Page<T>.mapItems(transform: (T) -> R) =

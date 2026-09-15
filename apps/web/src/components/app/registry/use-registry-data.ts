@@ -131,7 +131,17 @@ function toToolRecord(
   connections: Map<string, contracts.Connection>,
   agentNames: Map<string, string>,
 ): ToolRecord {
-  const connection = tool.connectionId ? connections.get(tool.connectionId) : undefined;
+  /*
+   * A discovered MCP tool's server is in `mcpServerConnectionId`; its
+   * `connectionId` is null. Reading only the first field left every MCP tool
+   * showing "Not configured" for its auth method and no connection at all,
+   * which reads as a broken tool rather than a remote one.
+   */
+  const mcpServer = tool.mcpServerConnectionId
+    ? connections.get(tool.mcpServerConnectionId)
+    : undefined;
+  const connection = (tool.connectionId ? connections.get(tool.connectionId) : undefined)
+    ?? mcpServer;
   const risk = toRisk(tool.riskLevel);
   const defaults = policyForRisk(risk);
   const allowedAgents = stringArray(tool.config.allowedAgentIds).map((id) => agentNames.get(id) ?? id);
@@ -171,6 +181,14 @@ function toToolRecord(
     hasUsageData: false,
     connectionStatus: toHealth(connection?.status),
     connectionLatencyMs: connection?.lastTestLatencyMs ?? null,
+    mcpServerId: tool.mcpServerConnectionId ?? null,
+    /* Falls back to the id when the connection is not in the page we fetched —
+       "unknown server" is a worse answer than a truncated id, because one of
+       them can be looked up. */
+    mcpServerName: tool.mcpServerConnectionId
+      ? mcpServer?.name ?? tool.mcpServerConnectionId
+      : null,
+    mcpToolName: tool.mcpToolName ?? null,
   };
 }
 
@@ -204,7 +222,15 @@ function toAgentType(value: string): AgentType {
 function toToolType(value: string, config: Record<string, unknown>): ToolType {
   if (value === "database") return config.write === true || config.readOnly === false ? "db-write" : "db-read";
   if (value === "builtin" || value === "code") return "builtin";
-  if (value === "custom") return "mcp";
+  /*
+   * `mcp` is what `McpDiscovery.syncTools` actually writes. It was missing, so a
+   * genuinely discovered tool fell through to the `http` default and the
+   * registry showed a remote MCP tool as an HTTP one — while `custom`, which is
+   * a bespoke adapter and often is not MCP at all, was the only thing labelled
+   * MCP. Both spellings map here now: `custom` stays for the rows created while
+   * it was the only way to say this.
+   */
+  if (value === "mcp" || value === "mcp_server" || value === "custom") return "mcp";
   return "http";
 }
 function providerFor(model?: string | null, provider?: string): string {

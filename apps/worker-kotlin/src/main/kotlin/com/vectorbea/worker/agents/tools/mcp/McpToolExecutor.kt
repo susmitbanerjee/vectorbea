@@ -2,6 +2,11 @@ package com.vectorbea.worker.agents.tools.mcp
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.vectorbea.mcp.McpClient
+import com.vectorbea.mcp.McpCredential
+import com.vectorbea.mcp.McpCredentials
+import com.vectorbea.mcp.McpDiscovery
+import com.vectorbea.mcp.McpSanitizer
 import com.vectorbea.worker.agents.tools.ToolErrorShape
 import com.vectorbea.worker.agents.tools.ToolResultContract
 import com.vectorbea.worker.connector.ConnectionResolver
@@ -39,13 +44,24 @@ import java.util.UUID
 class McpToolExecutor(
     private val connectionResolver: ConnectionResolver,
     private val discovery: McpDiscovery,
-    private val client: McpClient = McpClient(),
+    private val client: McpClient = McpClient(WorkerMcpTransport),
     /**
      * Per-server breaker. The same one every other outbound integration uses, so
      * an MCP server that is down stops being called on the same terms as an HTTP
      * endpoint that is down.
      */
     private val circuit: ConnectionCircuit? = null,
+    /**
+     * Refreshes a signed-in server's token, and persists what it refreshed.
+     *
+     * Null keeps a connection's secret exactly as it was used before sign-in
+     * existed: sent as a bearer token, never refreshed. Production wires one, so
+     * a server somebody signed in to last month still answers an agent today —
+     * the gap between "discovery found the tools" and "agents can call them"
+     * that a one-hour access token would otherwise open on the first run after
+     * lunch.
+     */
+    private val credentials: McpCredentials? = null,
 ) {
     private val log = logger()
     private val mapper = ObjectMapper()
@@ -97,23 +113,37 @@ class McpToolExecutor(
                       "Other tools are unaffected."))
         }
 
-        val token = resolved.secret?.let { sv ->
-            var t = ""
-            sv.useOnce { t = it }
-            t
+        val fromSecret = credentialOf(resolved)
+        val credential = try {
+            credentials?.current(workspaceId, connectionId, fromSecret) ?: fromSecret
+        } catch (e: McpCredentials.ReauthorizationRequired) {
+            return errorObservation(signInAgain(mcpToolName, e.message))
         }
 
         val server = McpClient.Server(
             connectionId = connectionId,
             url = serverUrl,
             transport = (resolved.record.configJson["transport"] as? String) ?: "streamable-http",
-            authToken = token,
+            authToken = McpCredentials.tokenOf(credential),
             timeoutMs = timeoutMs ?: McpClient.DEFAULT_TIMEOUT_MS,
         )
 
         val result = try {
-            client.callTool(server, mcpToolName, arguments)
-                .also { circuit?.onSuccess(connectionId) }
+            try {
+                client.callTool(server, mcpToolName, arguments)
+            } catch (e: McpClient.McpAuthRequiredException) {
+                /* Expiry is only the server's promise. A token revoked early, or
+                   one issued without `expires_in`, is found out here — refresh
+                   once and try again. Safe to repeat: a call refused at the
+                   authorization layer never reached the tool. */
+                val retried = credentials?.afterRejection(workspaceId, connectionId, fromSecret, credential)
+                    ?: return errorObservation(signInAgain(mcpToolName, null))
+                client.callTool(server.copy(authToken = retried.accessToken), mcpToolName, arguments)
+            }.also { circuit?.onSuccess(connectionId) }
+        } catch (e: McpClient.McpAuthRequiredException) {
+            /* A refusal, not an outage: the server answered. Kept off the breaker
+               for the reason below. */
+            return errorObservation(signInAgain(mcpToolName, null))
         } catch (e: McpClient.McpException) {
             /*
              * The breaker sees TRANSPORT failures, not refusals.
@@ -181,8 +211,13 @@ class McpToolExecutor(
             .firstNotNullOfOrNull { resolved.record.configJson[it] as? String }
             ?: return NodeResult.Failed("MCP resource: connection has no server URL.")
 
-        val token = resolved.secret?.let { sv -> var t = ""; sv.useOnce { t = it }; t }
-        val server = McpClient.Server(connectionId, serverUrl, authToken = token)
+        val fromSecret = credentialOf(resolved)
+        val credential = try {
+            credentials?.current(workspaceId, connectionId, fromSecret) ?: fromSecret
+        } catch (e: McpCredentials.ReauthorizationRequired) {
+            return errorObservation(signInAgain("resource $uri", e.message))
+        }
+        val server = McpClient.Server(connectionId, serverUrl, authToken = McpCredentials.tokenOf(credential))
 
         return try {
             val r = client.readResource(server, uri)
@@ -196,6 +231,28 @@ class McpToolExecutor(
             errorObservation(shapeOf(e, "resource $uri"))
         }
     }
+
+    /** The connection's secret, read once and parsed. A pasted token stays a bearer token. */
+    private fun credentialOf(resolved: com.vectorbea.worker.connector.ResolvedConnection): McpCredential? =
+        resolved.secret?.let { sv ->
+            var t = ""
+            sv.useOnce { t = it }
+            McpCredential.parse(t)
+        }
+
+    /**
+     * The one failure an agent cannot work around, stated so it stops trying.
+     *
+     * Not retryable, and the fix names a PERSON: signing in happens in a browser,
+     * and an agent that believes it can recover will spend its iterations
+     * rephrasing a call the server will keep refusing.
+     */
+    private fun signInAgain(what: String, detail: String?) = ToolErrorShape(
+        kind = "auth", retryable = false,
+        what = "The MCP server for '$what' refused this connection's sign-in.",
+        fix = (detail ?: "Someone needs to sign in to the server again from its connection in Vectorbea.") +
+              " Other tools are unaffected.",
+    )
 
     // ── Error mapping ────────────────────────────────────────────────────────
 

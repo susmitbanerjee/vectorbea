@@ -125,7 +125,13 @@ const PROVIDER_MARK_BY_NAME: Record<string, ProviderId> = {
   postgresql: "postgres",
   mysql: "mysql",
   slack: "slack",
+  teams: "teams",
+  "google-chat": "google-chat",
+  google_chat: "google-chat",
+  discord: "discord",
   gmail: "gmail",
+  google_sheets: "google-sheets",
+  "google-sheets": "google-sheets",
   notion: "notion",
   airtable: "airtable",
   hubspot: "hubspot",
@@ -149,7 +155,7 @@ function providerIdOf(connection: contracts.Connection): ProviderId | null {
  * to per-word capitalisation, which is right for "stripe" and "cohere" and no
  * worse than what it replaces for the rest.
  */
-function providerDisplayName(connection: contracts.Connection): string {
+export function providerDisplayName(connection: contracts.Connection): string {
   const id = providerIdOf(connection);
   if (id) return providerLabel(id);
   return (connection.provider ?? "")

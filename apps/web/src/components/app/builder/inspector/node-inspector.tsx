@@ -8,12 +8,12 @@ import { NODE_MARKS } from "~/components/icons/nodes";
 import { InputsTab } from "./inputs-tab";
 import { ConfigureTab } from "./configure-tab";
 import { AdvancedTab, type AdvancedConfig } from "./advanced-tab";
-import { OutputTab, TestTab } from "./output-test-tabs";
-import { type Binding, type NullPolicy } from "~/mocks/io-schema";
-import { nodeInputs } from "./node-inputs";
+import { OutputTab } from "./output-test-tabs";
 import { useBuilderRegistry } from "../use-builder-registry";
+import { stepInputs, readInputMapping } from "../step-io";
 import type { BuilderEdge, BuilderNode } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
+import { defaultStepTimeoutMs } from "~/lib/workflows/step-timeouts";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE NODE INSPECTOR
@@ -29,22 +29,22 @@ import type { VersionNode } from "~/mocks/workflow-nodes";
    clicking a different node rather than by closing anything.
 ══════════════════════════════════════════════════════════════════════════════ */
 
-export type InspectorTabId = "configure" | "inputs" | "output" | "advanced" | "test";
+export type InspectorTabId = "configure" | "inputs" | "output" | "advanced";
 
+/* No Test tab. It simulated a call with a timer, showed invented numbers and
+   JSON, and said it ran "against real connections". Run the workflow instead. */
 const TABS: { id: InspectorTabId; label: string }[] = [
   { id: "configure", label: "Configure" },
   { id: "inputs", label: "Inputs" },
   { id: "output", label: "Output" },
   { id: "advanced", label: "Advanced" },
-  { id: "test", label: "Test" },
 ];
 
+/* Inputs are part of `config` (`config.inputMapping`), so they save, reload and
+   reach the worker with everything else on the step. */
 export interface NodeEdits {
   name?: string;
   config?: Record<string, unknown>;
-  bindings: Binding[];
-  nullPolicies: Record<string, NullPolicy>;
-  defaults: Record<string, unknown>;
   advanced: AdvancedConfig;
 }
 
@@ -52,34 +52,8 @@ const WIDTH_KEY = "vectorbea-inspector-width";
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 900;
 
-/* ══════════════════════════════════════════════════════════════════════════════
-   THE 30-SECOND DEFAULT WAS THE COLD START.
-
-   `timeoutMs` defaulted to a flat 30000 for every node kind, and the commit path
-   writes the Advanced panel's values on every save — so opening the inspector on
-   an agent node once was enough to stamp 30s onto it permanently.
-
-   The worker has per-class defaults for exactly this reason
-   (`WorkflowRuntime.defaultTimeoutFor`): 120s for an agent, 90s for an LLM call,
-   30s for HTTP. A node config value OVERRIDES those, so the panel was quietly
-   cutting an agent's budget to a quarter. A first call pays DNS, the TLS
-   handshake, the JVM's TLS and JIT warm-up and a cold provider connection; a
-   tool-calling agent pays that plus several model round trips. Thirty seconds is
-   frequently not enough for the first one and comfortably enough for the second,
-   which is exactly the reported symptom: the first agent execution fails, the
-   retry succeeds.
-
-   These values MIRROR the worker's. If either side changes, change both — a
-   panel that draws a budget the runtime does not use is how this started.
-══════════════════════════════════════════════════════════════════════════════ */
-const DEFAULT_TIMEOUT_MS: Partial<Record<VersionNode["kind"], number>> = {
-  agent: 120_000,   // AGENT_NODE_TIMEOUT_MS
-  llm: 90_000,      // LLM_NODE_TIMEOUT_MS
-  tool: 30_000,     // HTTP_NODE_TIMEOUT_MS — a tool node is an outbound call
-};
-
-/** The worker's DEFAULT_NODE_TIMEOUT_MS, for every kind not listed above. */
-const FALLBACK_TIMEOUT_MS = 60_000;
+/* The per-kind starting limit lives in `lib/workflows/step-timeouts`, shared
+   with the canvas chip so the two cannot disagree about what "default" means. */
 
 /**
  * The Advanced panel's starting values, read back from what was saved.
@@ -101,7 +75,7 @@ function defaultAdvanced(node: VersionNode): AdvancedConfig {
       maxDelayMs: retry?.maxDelayMs ?? 8000,
       jitter: retry?.jitter ?? String(retry?.backoff ?? "").includes("jitter"),
     },
-    timeoutMs: Number(node.config.timeoutMs ?? DEFAULT_TIMEOUT_MS[node.kind] ?? FALLBACK_TIMEOUT_MS),
+    timeoutMs: Number(node.config.timeoutMs ?? defaultStepTimeoutMs(node.kind)),
     idempotencyKey: String(node.config.idempotencyKey ?? ""),
     errorPolicy: (node.config.errorPolicy as AdvancedConfig["errorPolicy"]) ?? "fail-run",
     fallbackNodeId: (node.config.fallbackNodeId as string | null) ?? null,
@@ -117,12 +91,11 @@ function defaultAdvanced(node: VersionNode): AdvancedConfig {
 }
 
 export function NodeInspector({
-  node, nodes, edges, bindingsByNode, onCommit, onClose, workflowBudgetMs,
+  node, nodes, edges, onCommit, onClose, workflowBudgetMs,
 }: {
   node: VersionNode;
   nodes: BuilderNode[];
   edges: BuilderEdge[];
-  bindingsByNode: Record<string, Binding[]>;
   onCommit: (nodeId: string, edits: NodeEdits) => void;
   onClose: () => void;
   workflowBudgetMs: number;
@@ -142,9 +115,6 @@ export function NodeInspector({
   const seed = React.useMemo<NodeEdits>(() => ({
     name: node.name,
     config: node.config,
-    bindings: bindingsByNode[node.id] ?? [],
-    nullPolicies: {},
-    defaults: {},
     advanced: defaultAdvanced(node),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [node.id]);
@@ -264,12 +234,10 @@ export function NodeInspector({
   const registry = useBuilderRegistry();
   const entry = NODE_MARKS.find((m) => m.type === node.kind);
   const Icon = entry?.Icon;
-  const declarations = nodeInputs(node, registry);
-  const unbound = declarations.filter(
-    (d) => d.required && !edits.bindings.some((b) => b.inputId === d.id),
-  ).length;
-
   const workingNode: VersionNode = { ...node, name: edits.name ?? node.name, config: edits.config ?? node.config };
+  const workingMapping = readInputMapping(workingNode.config);
+  const unbound = stepInputs(workingNode, registry)
+    .filter((d) => d.required && !workingMapping[d.id]?.trim()).length;
 
   return (
     <aside
@@ -387,18 +355,16 @@ export function NodeInspector({
             node={workingNode}
             nodes={nodes}
             edges={edges}
-            bindings={edits.bindings}
-            onChange={(bindings) => update({ bindings })}
-            nullPolicies={edits.nullPolicies}
-            onNullPolicyChange={(inputId, policy) => update({ nullPolicies: { ...edits.nullPolicies, [inputId]: policy } })}
-            defaults={edits.defaults}
-            onDefaultChange={(inputId, value) => update({ defaults: { ...edits.defaults, [inputId]: value } })}
-            expanded={expanded || width > 620}
+            onChange={(inputMapping) => update({ config: { ...workingNode.config, inputMapping } })}
           />
         ) : null}
 
         {tab === "output" ? (
-          <OutputTab node={workingNode} nodes={nodes} edges={edges} bindingsByNode={bindingsByNode} />
+          <OutputTab
+            node={workingNode}
+            nodes={nodes}
+            onFieldsChange={(outputFields) => update({ config: { ...workingNode.config, outputFields } })}
+          />
         ) : null}
 
         {tab === "advanced" ? (
@@ -411,7 +377,6 @@ export function NodeInspector({
           />
         ) : null}
 
-        {tab === "test" ? <TestTab node={workingNode} bindings={edits.bindings} /> : null}
       </div>
 
       <footer className="border-subtle flex items-center justify-between gap-2 border-t px-3 py-1.5">

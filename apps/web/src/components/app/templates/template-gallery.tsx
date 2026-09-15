@@ -41,12 +41,24 @@ import {
    connection; this is ready to run" and "this needs a model connection, and you
    have none" are different sentences and the second one is actionable.
 
-   ── UNAVAILABLE IS SHOWN, NOT HIDDEN ────────────────────────────────────────
-   A template gated by the plan or by a runtime flag stays in the list with its
-   documentation readable and its install button disabled. Somebody on Free
-   should be able to read exactly what the supervisor pattern would give them —
-   that is the argument for the upgrade, and hiding it makes the argument
-   impossible to have.
+   ── A PLAN GATE IS SHOWN. A DEPLOYMENT GATE IS NOT SHIPPED ──────────────────
+   These look like the same thing on this screen and they are not, so the
+   catalogue treats them differently.
+
+   A template the PLAN does not include stays in the list with its documentation
+   readable and its install button disabled, because the reader can act on it:
+   the blocker is a sentence about their plan and the next step is an upgrade.
+   Hiding it would make the argument for upgrading impossible to have.
+
+   A template a runtime FLAG blocks is a different sentence — "AGENT_TEAMS_
+   ENABLED=false in the worker" — addressed to somebody who is not reading this
+   page and could not change it if they were. Three such cards used to sit here
+   permanently disabled, which does not read as an unreleased feature; it reads
+   as a product that does not work, in the one screen built to prove otherwise.
+   Those templates were removed from the catalogue rather than dressed up here.
+
+   The flag check below stays anyway. It is what makes re-adding a flagged
+   template a visible decision instead of a silent regression.
 ══════════════════════════════════════════════════════════════════════════════ */
 
 export function TemplateGallery() {
@@ -60,7 +72,7 @@ export function TemplateGallery() {
 type PatternFilter = TemplatePattern | "all";
 
 const PATTERNS: PatternFilter[] = [
-  "all", "single-agent", "supervisor", "router", "review", "approval", "batch",
+  "all", "single-agent", "pipeline", "approval", "batch",
 ];
 
 function Gallery() {

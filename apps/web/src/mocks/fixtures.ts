@@ -616,6 +616,15 @@ export const CONNECTIONS: Connection[] = [
     blastRadius: { workflows: 3, tools: 2 },
     lastCheckedAt: iso(NOW - 78_000),
   },
+  /* An MCP server, so the connection sheet's Tools tab has somewhere to appear.
+     Without one this workspace cannot reach that surface at all in mock mode,
+     and a screen nobody can open is a screen nobody reviews. */
+  {
+    id: `conn_${uuid().slice(0, 8)}`, name: "ServiceNow — Acme", provider: "mcp",
+    status: "healthy", latencyMs: 208,
+    blastRadius: { workflows: 2, tools: 4 },
+    lastCheckedAt: iso(NOW - 39_000),
+  },
 ];
 
 /* ── Incidents ────────────────────────────────────────────────────────────── */

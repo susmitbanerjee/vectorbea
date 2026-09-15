@@ -23,6 +23,7 @@ import { fromStoredGraph } from "~/lib/workflows/graph-codec";
 import type { BuilderGraph } from "~/lib/workflows/builder-graph";
 import type { RunStatus } from "~/lib/workflows/model";
 import { WorkflowStatusBadge } from "./atoms";
+import { ApiTriggerCard } from "./api-trigger-card";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WORKFLOW OVERVIEW — on real data
@@ -157,8 +158,41 @@ export function WorkflowDetail({ workflowId }: { workflowId: string }) {
         }
       />
 
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="grid min-w-0 gap-3">
+      {/*
+        ── WHY THE TRIGGER CARD LEFT THIS ROW ────────────────────────────────
+        It used to sit in the right-hand column, and that one decision produced
+        every alignment fault on this screen.
+
+        It is a curl command and two JSON bodies. In a third of a 1180px
+        container that is ~350px of usable width for content whose SHORTEST line
+        is wider than that — so each snippet arrived already scrolled sideways,
+        and, worse, a single implicit `auto` grid track takes its minimum from
+        its widest unbreakable descendant, so the card sized its own column to
+        ~660px, pushed this row past the viewport and gave the page a horizontal
+        scrollbar. It also ran the right column to 1314px against the left's
+        340px: two unrelated halves with a screen of dead space beside the
+        graph.
+
+        Moving it below the row fixes all of it at once. Code gets the full
+        width, so nothing is pre-scrolled; the two columns come out at
+        comparable heights; and it stays high enough on the page to still be the
+        answer to "how do I call this from my own code", which is a first-visit
+        question.
+
+        `items-start` stays. Stretching the columns to a common height would
+        stretch the cards inside them, and a Versions card padded out to the
+        height of a graph is worse than an honest ragged edge.
+      */}
+      {/* `PageContainer` puts no gap between its children, so the row and the
+          section below it need one of their own. */}
+      <div className="grid grid-cols-1 gap-3">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        {/*
+          `grid-cols-1`, not a bare `grid`. A single implicit `auto` track takes
+          its minimum from the widest unbreakable descendant, and `min-w-0` on
+          the container does not help because the MINIMUM is what is oversized.
+        */}
+        <div className="grid min-w-0 grid-cols-1 gap-3">
           <Card
             title="Health"
             help="The last thirty runs, oldest first. A band of red is the answer before you read a number."
@@ -175,14 +209,18 @@ export function WorkflowDetail({ workflowId }: { workflowId: string }) {
                 simply nothing to measure yet.
               </Text>
             ) : (
-              <div className="grid gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <Heatstrip
                   statuses={runs.map((r) => toUiRunStatus(r.status))}
                   runIds={runs.map((r) => r.id)}
                   label={`Last ${runs.length} runs of ${workflow.name}`}
                   onSelect={(_, runId) => { if (runId) router.push(`/runs/${runId}` as Route); }}
                 />
-                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                {/* A grid, not a wrapping flex row. Four stats of very
+                    different label and value widths were each sized to their
+                    own content, so the columns lined up on no edge at all and
+                    re-flowed to different positions as the numbers changed. */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
                   <Stat label="Runs" value={runs.length} />
                   <Stat
                     label="Success rate"
@@ -218,7 +256,7 @@ export function WorkflowDetail({ workflowId }: { workflowId: string }) {
           </Card>
         </div>
 
-        <div className="grid min-w-0 gap-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3">
           <Card title="Versions" help="Every save writes one. The newest is what runs.">
             {versionsQuery.isPending ? (
               <WorkingRow label="Loading…" />
@@ -227,7 +265,7 @@ export function WorkflowDetail({ workflowId }: { workflowId: string }) {
                 No versions yet — the workflow exists but has no graph. Open the builder to draw one.
               </Text>
             ) : (
-              <ul className="grid gap-1">
+              <ul className="grid grid-cols-1 gap-1">
                 {versions.slice(0, 8).map((version) => (
                   <li
                     key={version.id}
@@ -273,6 +311,25 @@ export function WorkflowDetail({ workflowId }: { workflowId: string }) {
             />
           </Card>
         </div>
+      </div>
+
+      {/*
+        Full width, and directly under the row rather than at the foot of the
+        page: the endpoint has existed since the beginning and the UI never
+        named it, so the Run button looked like the only trigger there was.
+        Burying it below Cost trend and Dependencies — two panels that have no
+        data yet — would reintroduce exactly that problem.
+      */}
+      <Card
+        title="Run it from anywhere"
+        help="This workflow is an HTTP endpoint. Calling it is identical to pressing Run."
+      >
+        <ApiTriggerCard
+          workflowId={workflow.id}
+          workflowName={workflow.name}
+          hasVersion={Boolean(workflow.currentVersionId)}
+        />
+      </Card>
       </div>
     </PageContainer>
   );
@@ -425,6 +482,7 @@ function toUiRunStatus(status: string): RunStatus {
   if (status === "failed" || status === "timed_out" || status === "enqueue_failed") return "failed";
   if (status === "running" || status === "recovering") return "running";
   if (status === "awaiting_approval" || status === "waiting_for_approval" || status === "paused") return "awaiting-approval";
+  if (status === "waiting_for_event" || status === "waiting_for_timer" || status === "yielded") return "waiting";
   if (status === "cancelled" || status === "cancellation_requested") return "cancelled";
   return "queued";
 }
@@ -449,17 +507,29 @@ function Card({
   children: React.ReactNode;
 }) {
   return (
-    <section className="border-subtle bg-surface-raised rounded-lg border">
-      <header className="border-subtle flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
-        <div className="min-w-0">
+    /*
+      `min-w-0` on the section, because a grid item's automatic minimum size is
+      its content's minimum — without this the card refuses to be narrower than
+      its widest unbreakable line and takes the column with it.
+
+      `items-start` on the header rather than `items-center`: with a two-line
+      `help` string underneath the title, centring pushed a single-line action
+      button to the vertical middle of the block while the title sat at the top,
+      so the Edit button never lined up with the word it acts on.
+    */
+    <section className="border-subtle bg-surface-raised min-w-0 rounded-lg border">
+      <header className="border-subtle flex flex-wrap items-start justify-between gap-2 border-b px-3 py-2">
+        <div className="min-w-0 flex-1">
           <Text variant="eyebrow" tone="muted">{title}</Text>
           {help ? (
-            <Text variant="caption" tone="muted" className="mt-0.5 block leading-snug">{help}</Text>
+            <Text variant="caption" tone="muted" className="mt-0.5 block max-w-[60ch] leading-snug">
+              {help}
+            </Text>
           ) : null}
         </div>
-        {action}
+        {action ? <div className="shrink-0">{action}</div> : null}
       </header>
-      <div className="p-3">{children}</div>
+      <div className="min-w-0 p-3">{children}</div>
     </section>
   );
 }

@@ -84,6 +84,19 @@ object StopReasonTaxonomy {
                    one is how "approve this" becomes "why did it break". */
                 Classification.Waiting("a human approval")
 
+            StopReason.CANCELLED ->
+                /* Neither success nor failure: the work was stopped on purpose,
+                   and nothing about the agent needs changing. `Cancelled` rather
+                   than a failure class for the same reason a ceiling breach is
+                   not a failure — a correct decision must not read as a fault. */
+                Classification.Cancelled
+
+            StopReason.WAITING ->
+                /* Same argument, different thing waited on. A six-minute render in
+                   progress is not a failure, and classifying it as one would put a
+                   working run in the failure metrics and on somebody's dashboard. */
+                Classification.Waiting("an external event")
+
             // ── Unambiguous ───────────────────────────────────────────────────
             StopReason.MAX_ITERATIONS ->
                 Classification.Failed(FailureVerdict(FailureClass.MODEL_BEHAVIOR,

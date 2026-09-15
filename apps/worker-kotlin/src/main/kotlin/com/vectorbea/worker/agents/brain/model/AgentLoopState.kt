@@ -8,12 +8,40 @@ data class AgentLoopState(
     val budget: AgentBudget,
     var iteration: Int = 0,
     val observations: MutableList<AgentObservation> = mutableListOf(),
+    /**
+     * What a person has told this agent since it started.
+     *
+     * ── NOT AN OBSERVATION, AND THE DIFFERENCE IS THE POINT ─────────────
+     * Observations are rendered `takeLast(10)`, so a busy agent pushes older
+     * ones out — correct for tool results, and wrong for an instruction. A
+     * person saying "the database is the primary, do not fail over" has to still
+     * be true at iteration forty, and an agent that forgets it because it made
+     * ten tool calls in between is worse than one that was never told.
+     *
+     * Kept in arrival order, capped, and rendered as its own protected section.
+     */
+    val guidance: MutableList<Guidance> = mutableListOf(),
     val memoryEntries: MutableList<MemoryEntry> = mutableListOf(),
     var finalOutput: Map<String, Any?> = emptyMap(),
     var stopReason: StopReason? = null,
     var lastAction: AgentAction? = null,
 ) {
     fun addObservation(obs: AgentObservation) { observations.add(obs) }
+
+    /**
+     * Record guidance, oldest first, bounded.
+     *
+     * The bound is not paranoia: guidance is caller-supplied text that goes
+     * straight into a prompt, and an unbounded stream of it is a way to push the
+     * objective and the inputs out of the context window from outside the
+     * workspace's own graph. The signal rate limit bounds the RATE; this bounds
+     * the TOTAL, and drops the oldest, because the most recent correction is the
+     * one that is still true.
+     */
+    fun addGuidance(g: Guidance) {
+        guidance.add(g)
+        while (guidance.size > MAX_GUIDANCE) guidance.removeAt(0)
+    }
     fun addMemory(key: String, value: Any?, sanitized: String? = null) {
         memoryEntries.add(MemoryEntry(key, value, sanitized ?: value.toString()))
     }
@@ -30,6 +58,25 @@ data class AgentLoopState(
         memoryEntries.add(MemoryEntry(key, value, value.toString(), recalled = true))
     }
     val isDone get() = stopReason != null
+
+    companion object {
+        /**
+         * How many pieces of guidance one agent carries.
+         *
+         * Ten instructions is far past what a person sends to one agent, and
+         * far short of what it would take to crowd out the task.
+         */
+        const val MAX_GUIDANCE = 10
+    }
+
+    /** One free-text instruction, and where it came from. */
+    data class Guidance(
+        val iterationNumber: Int,
+        /** Sanitized and length-capped at the boundary that received it. */
+        val text: String,
+        /** A user id or an API key id — never a bare string from the caller. */
+        val from: String?,
+    )
 
     data class MemoryEntry(
         val key: String,
@@ -51,6 +98,30 @@ data class AgentLoopState(
     enum class StopReason {
         FINAL_OUTPUT, MAX_ITERATIONS, BUDGET_EXCEEDED, AGENT_FAILED,
         APPROVAL_REQUESTED, TOOL_NOT_ALLOWED, SCHEMA_INVALID, ERROR,
+
+        /**
+         * Parked on something that is not a person: an async tool still working,
+         * or a signal the agent chose to wait for.
+         *
+         * SEPARATE from APPROVAL_REQUESTED, which parks the run as
+         * `waiting_for_approval` and puts it on the Approvals screen. A six-minute
+         * render carrying that reason would appear in a queue nobody can action.
+         * Not retryable, for the same reason APPROVAL_REQUESTED is not: retrying
+         * a step that is waiting is not waiting.
+         */
+        WAITING,
+
+        /**
+         * Somebody asked for the run to stop, and the loop noticed.
+         *
+         * NOT a failure, and not `AGENT_FAILED`. An incident that resolved while
+         * the agent was still working is the system behaving correctly — filing
+         * it under failure would put every cancelled incident in the failure
+         * metrics and send somebody debugging a run that did exactly what it was
+         * told. Not retryable either: a retry would resume work that was
+         * deliberately stopped.
+         */
+        CANCELLED,
 
         // ── Orchestration (§5.3). All non-retryable, all ORCHESTRATION class. ──
 

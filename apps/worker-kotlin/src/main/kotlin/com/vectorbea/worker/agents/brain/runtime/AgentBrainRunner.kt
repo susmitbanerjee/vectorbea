@@ -65,6 +65,17 @@ class AgentBrainRunner(
      * still better than the silent failure this replaced.
      */
     private val approvalStore: com.vectorbea.worker.runtime.checkpoint.ApprovalStore? = null,
+    /**
+     * Where a WAIT action becomes a real parked wait instead of a dead end.
+     *
+     * Null only where there is no database to write one to, in which case an
+     * agent choosing to wait fails with a message saying so — the same honest
+     * failure [approvalStore] gives, and for the same reason: an action that
+     * silently does nothing is worse than one that reports it cannot.
+     */
+    private val waitStore: com.vectorbea.worker.durable.wait.WaitStore? = null,
+    /** Read when a WAIT's signal may already have arrived. See [openAgentWait]. */
+    private val signalStore: com.vectorbea.worker.durable.wait.SignalStore? = null,
     private val budgetGuard: AgentBudgetGuard = AgentBudgetGuard(),
     private val safetyGuard: AgentSafetyGuard = AgentSafetyGuard(),
     private val memoryStore: AgentMemoryStore = AgentMemoryStore(dataSource),
@@ -144,6 +155,21 @@ class AgentBrainRunner(
      */
     private val contextAssemblyEnabled: Boolean =
         AgentPromptBuilder.CONTEXT_ASSEMBLY_ENABLED,
+    /**
+     * The agent's granted skills, loaded per activation.
+     *
+     * Injected rather than constructed inline for the reason every other
+     * collaborator here is: a test drives both the flag-on and flag-off paths in
+     * one JVM, and JUnit cannot portably mutate process environment.
+     *
+     * The default reads AGENT_SKILLS_ENABLED and is OFF, so the loop is
+     * byte-for-byte what it was until somebody turns it on.
+     */
+    private val skillLoader: com.vectorbea.worker.agents.skills.SkillLoader =
+        com.vectorbea.worker.agents.skills.SkillLoader(dataSource),
+    /** Where the composition is written for the Debug tab. See the class note there. */
+    private val skillRecorder: com.vectorbea.worker.agents.skills.ActivationSkillRecorder =
+        com.vectorbea.worker.agents.skills.ActivationSkillRecorder(dataSource),
 ) {
     private val log = logger()
     private val mapper = jacksonObjectMapper()
@@ -157,8 +183,31 @@ class AgentBrainRunner(
          * thousand tokens at worst, against a token budget the guard already enforces.
          * Large enough for the row sets and API responses these tools actually return;
          * small enough that one enormous response cannot eat the whole budget.
+         *
+         * Two thousand characters is a few rows, and it is not a commit diff: a
+         * code-review agent was shown the first 2,000 characters of a patch, asked
+         * for the same patch again, was handed the same cut copy by the step guard,
+         * and failed saying it could not see the diff. AGENT_TOOL_RESULT_MAX_CHARS
+         * raises it (default unchanged). Only the NEWEST result is shown at this
+         * size — the prompt builder shortens older ones to
+         * [AgentPromptBuilder.OLDER_RESULT_CHARS], so ten observations cannot
+         * add up to ten times the cap.
          */
-        internal const val MAX_TOOL_PAYLOAD_CHARS = 2_000
+        internal val MAX_TOOL_PAYLOAD_CHARS: Int =
+            System.getenv("AGENT_TOOL_RESULT_MAX_CHARS")?.toIntOrNull()?.coerceIn(500, 64_000) ?: 2_000
+
+        /** The signal name free-text guidance arrives under. */
+        internal const val GUIDANCE_SIGNAL = "guidance"
+
+        /**
+         * How long one piece of guidance may be.
+         *
+         * A sentence or two of correction, not a document. Capped because this
+         * is the one part of the prompt written by a person while the run is in
+         * flight, and an uncapped one is a way to spend a workspace's own token
+         * budget from outside its graph.
+         */
+        internal const val MAX_GUIDANCE_CHARS = 2_000
 
         /** Matches the truncation notice `AgentSafetyGuard` appends. */
         internal const val TRUNCATION_MARKER = "… [truncated"
@@ -463,7 +512,11 @@ class AgentBrainRunner(
     private val toolExecutor: ToolNodeExecutor? by lazy {
         val ds = dataSource ?: return@lazy null
         val pools = dbPoolManager ?: return@lazy null
-        ToolNodeExecutor(ds, connectionResolver, pools, eventStore)
+        ToolNodeExecutor(ds, connectionResolver, pools, eventStore,
+            /* The same secrets a workflow `tool` node is built with — see
+               `ConnectionResolver.secrets`. Without them a signed-in MCP server
+               could not refresh its token for an agent, only for a workflow. */
+            secretService = connectionResolver.secrets)
     }
 
     private val activationStore: ActivationStore? by lazy {
@@ -597,6 +650,15 @@ class AgentBrainRunner(
                bucket produced children that were not — and delegation depth is
                the multiplier the bucket exists to bound. */
             capacity = capacity,
+            /* Passed through for the same reason as every other collaborator: the
+               child composes ITS OWN grants — `load` is keyed on the child's agent
+               id and checked against the child's tools — but it must do so with the
+               loader this runner was built with. Rebuilt from the default here, a
+               child would read the process environment and silently ignore a flag
+               the parent was constructed with, which is exactly how the capacity
+               bucket came to meter parents and not children. */
+            skillLoader = skillLoader,
+            skillRecorder = skillRecorder,
         )
 
         val result = child.run(childConfig, ctx)
@@ -760,9 +822,13 @@ class AgentBrainRunner(
            than being stubbed out and therefore untested. Null in production, where
            LlmNodeExecutor's own default (the shared, bounded OutboundHttp client)
            applies and this construction is byte-for-byte what it always was. */
-        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity)
+        if (llmHttpClient == null) LlmNodeExecutor(connectionResolver, eventStore, capacity = capacity,
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource),
+            callPayloads = com.vectorbea.worker.events.StepIoCapture.storeFor(dataSource))
         else LlmNodeExecutor(connectionResolver, eventStore, httpClient = llmHttpClient,
-            capacity = capacity)
+            capacity = capacity,
+            pricing = com.vectorbea.worker.pricing.ModelPricing(dataSource),
+            callPayloads = com.vectorbea.worker.events.StepIoCapture.storeFor(dataSource))
     }
 
     data class RunResult(
@@ -855,6 +921,31 @@ class AgentBrainRunner(
          */
         val approvalId: String? = null,
         val approvalMessage: String? = null,
+
+        /**
+         * The wait this run parked on, when [stopReason] is WAITING.
+         *
+         * Present for the same reason [approvalId] is: so the caller can return
+         * `NodeResult.Waiting` and let the runtime park the run against a real
+         * `run_waits` row. Without it an agent that chose to wait would have
+         * nowhere to put the question, and the wait would be reported as a step
+         * failure — which is exactly what ASK_APPROVAL used to do.
+         */
+        val wait: NodeResult.Waiting? = null,
+        /**
+         * Which skills this activation ran with, and what composing them cost.
+         *
+         * Carried out of the loop for the same reason [handedOff] is: the harness
+         * cannot infer it. The harness owns the ACTIVATION span, §5 says the
+         * active skills belong on it, and the loop is the only thing that knows
+         * what was actually composed — a grant row does not, because a skill can
+         * be granted and then dropped under budget pressure or because its tools
+         * were revoked.
+         *
+         * Empty whenever the feature is off, which is also what an activation
+         * with no skills records: nothing.
+         */
+        val skillAttributes: Map<String, Any> = emptyMap(),
     )
 
     suspend fun run(config: AgentBrainConfig, runtimeCtx: RuntimeContext): RunResult {
@@ -1004,6 +1095,9 @@ class AgentBrainRunner(
 
         /* The approval the loop is parked on, when it parks. See RunResult.approvalId. */
         var approvalId: String? = null
+        /* The wait the loop is parked on, when it parks on something that is not
+           a person. See RunResult.wait. */
+        var pendingWait: NodeResult.Waiting? = null
         var approvalMessage: String? = null
 
         /* Set by HANDOFF. See RunResult.handedOff. */
@@ -1033,11 +1127,58 @@ class AgentBrainRunner(
            [IterationSpan.close] is close-once, so the ordinary paths that already
            closed it are unaffected. */
         var openIteration: IterationSpan? = null
+        /* The row of the iteration in progress, so a throw out of the middle of one
+           can close it. Without this a failed provider call left the row at
+           `running` forever, and the Activity tab showed "Still running" under a
+           run that had already failed. */
+        var openIterationId: UUID? = null
+
+        /*
+         * ── WHICH SKILLS WERE ACTIVE, CARRIED OUT TO THE ACTIVATION SPAN ─────
+         *
+         * §5: a behaviour change has to be attributable to a skill VERSION. The
+         * activation span is where that belongs — it is the unit a reader opens
+         * when asking "what was this agent working with" — and the harness owns
+         * that span, so the answer rides out on [RunResult].
+         *
+         * Also put on each iteration span, because an iteration is what a reader
+         * is looking at when they ask why THIS call went the way it did, and
+         * walking up to the activation to find out is a click they should not
+         * have to make.
+         */
+        var skillAttributes: Map<String, Any> = emptyMap()
+        var skillsRecorded = false
 
         try {
             while (!state.isDone) {
                 budget.iterationStarted()
                 state.iteration++
+
+                /*
+                 * ── HAS SOMEBODY ASKED US TO STOP? ───────────────────────
+                 *
+                 * `WorkflowRuntime` checks cancellation BETWEEN nodes, which is
+                 * the right granularity for a node that finishes in one bounded
+                 * operation. An agent loop is not that: thirty iterations is
+                 * thirty LLM calls inside ONE node, so before this check a
+                 * cancelled incident kept paying a model to reason about a
+                 * problem that had already been resolved — until the loop
+                 * decided to stop on its own.
+                 *
+                 * EVERY iteration, not every fifth. The check is one indexed
+                 * read; the thing it might save is an LLM call, and the ratio is
+                 * not close. Placed before the budget check so a cancelled run
+                 * stops rather than being reported as over budget.
+                 */
+                if (runtimeCtx.cancellationCheck()) {
+                    state.stopReason = AgentLoopState.StopReason.CANCELLED
+                    retryable = false
+                    emitEvent(config, RunEventStore.EventType.AGENT_CANCELLED, "cancelled",
+                        "Stopped at iteration ${state.iteration}: the run was cancelled.")
+                    log.info("[brain] cancelled at iteration {} [run={}, step={}]",
+                        state.iteration, runtimeCtx.runId, config.stepId)
+                    break
+                }
 
                 // Hard budget check before each iteration
                 try { budgetGuard.checkOrThrow(budget, "before iteration ${state.iteration}") }
@@ -1051,11 +1192,22 @@ class AgentBrainRunner(
                     break
                 }
 
+                /*
+                 * ── WHAT A PERSON HAS SAID SINCE THE LAST ITERATION ─────────
+                 * Read here, before the prompt is built, so guidance sent while
+                 * the previous LLM call was in flight is in front of the model on
+                 * the very next iteration rather than one later. An agent that
+                 * acts on a correction one step after being given it is, from the
+                 * outside, an agent that ignored it.
+                 */
+                drainGuidance(config, runtimeCtx, state)
+
                 log.info("[brain] iteration {}/{} runId={}", state.iteration, config.maxIterations, config.runId)
                 emitEvent(config, RunEventStore.EventType.AGENT_ITERATION_STARTED, "running",
                     "Iteration ${state.iteration}/${config.maxIterations}")
 
                 val iterationId = persistIterationStart(config, state)
+                openIterationId = iterationId
 
                 /* Opened alongside the row and closed alongside it, so the trace and
                    the reconstruction can never disagree about whether an iteration
@@ -1070,7 +1222,39 @@ class AgentBrainRunner(
 
                 // Build prompt and call LLM
                 val tools = loadAllowedToolDescriptors(config)
-                val systemPrompt = AgentPromptBuilder.buildSystemPrompt(config, tools, loadRoster(config))
+                /*
+                 * ── SKILLS, READ FRESH LIKE THE ROSTER AND THE TOOL LIST ─────
+                 *
+                 * Inside the loop rather than before it, for the reason stated on
+                 * `loadRoster`: a grant is POLICY, and an operator who revokes a
+                 * skill — or the tool a skill needs — mid-run is making a decision
+                 * that must take effect. The read costs one query per iteration,
+                 * the same as the two beside it.
+                 *
+                 * `grantedToolIds` is passed so the loader can drop a skill whose
+                 * tools were revoked since the grant was saved. That check is the
+                 * same `SkillGrant.check` the API ran at save time, from the same
+                 * module — two implementations would drift, and the drift would be
+                 * invisible: the form would call a grant fine and the runtime
+                 * would quietly disagree.
+                 */
+                val loadedSkills = skillLoader.load(config.agentId, config.workspaceId, config.allowedToolIds)
+                val composedSkills = skillLoader.compose(loadedSkills, teamLimits.maxContextChars)
+                skillAttributes = composedSkills.spanAttributes()
+                if (!skillsRecorded && composedSkills.outcomes.isNotEmpty()) {
+                    /* Once per activation, not once per iteration. The row is keyed
+                       so a repeat would be harmless, but a write per iteration is a
+                       write per iteration. */
+                    skillRecorder.record(
+                        runId = config.runId, workspaceId = config.workspaceId,
+                        agentId = config.agentId, stepId = config.stepId,
+                        activationId = config.activationId, composed = composedSkills,
+                    )
+                    skillsRecorded = true
+                }
+                val systemPrompt = AgentPromptBuilder.buildSystemPrompt(
+                    config, tools, loadRoster(config), composedSkills.text,
+                )
                 /* Flag off, `built.text` is byte-for-byte what buildUserPrompt has
                    always returned and `built.assembly` is null. On, the same
                    sections are assembled under a budget and every drop is named. */
@@ -1084,6 +1268,7 @@ class AgentBrainRunner(
                     enabled = contextAssemblyEnabled)
                 val userPrompt = built.text
                 built.assembly?.let { iterSpan?.contextAttributesJson = it.attributesJson() }
+                iterSpan?.skillAttributes = skillAttributes
                 built.assembly?.let { reportContextBudget(config, state, it) }
 
                 val llmResult = callLlm(config, systemPrompt, userPrompt, runtimeCtx)
@@ -1201,6 +1386,19 @@ class AgentBrainRunner(
                             toolResultRef = outcome.resultRef,
                             toolResultCached = outcome.cached)
 
+                        /* The tool started something long-running. Park the step on it
+                           for the same reason an approval parks it: an agent that keeps
+                           reasoning while a six-minute render runs spends its whole
+                           iteration budget and then reports that it could not finish. */
+                        if (outcome.wait != null) {
+                            state.stopReason = AgentLoopState.StopReason.WAITING
+                            retryable = false
+                            pendingWait = outcome.wait
+                            emitEvent(config, RunEventStore.EventType.RUN_WAIT_STARTED,
+                                "waiting_for_event",
+                                "Tool call is waiting: ${outcome.wait.label}")
+                        }
+
                         /* The tool needs a person. Park the whole step on that decision
                            rather than letting the agent reason around a locked door. */
                         if (outcome.pause != null) {
@@ -1237,7 +1435,7 @@ class AgentBrainRunner(
                            observation twice over if the agent already tried it, and without
                            this the repeat check would overwrite APPROVAL_REQUESTED with
                            ERROR and turn a waiting run back into a failed one. */
-                        if (outcome.pause == null &&
+                        if (outcome.pause == null && outcome.wait == null &&
                             !obs.success && previous != null && !previous.success &&
                             previous.actionType == "CALL_TOOL" &&
                             previous.toolId == obs.toolId &&
@@ -1357,7 +1555,15 @@ class AgentBrainRunner(
 
                     AgentAction.ActionType.FINAL -> {
                         if (validateFinalOutput(action.finalOutput, config)) {
-                            state.finalOutput = action.finalOutput
+                            /* A FINAL with an empty finalOutput still carries its answer in
+                               the one-sentence summary — "only one commit, dated in the
+                               future, so no changes in 24h". Passing on `{}` handed the
+                               next step nothing at all, which read as a broken handoff. */
+                            state.finalOutput = action.finalOutput.ifEmpty {
+                                action.reasoningSummary?.takeIf { it.isNotBlank() }
+                                    ?.let { mapOf("content" to safetyGuard.sanitizeReasoningSummary(it)) }
+                                    ?: action.finalOutput
+                            }
                             state.stopReason  = AgentLoopState.StopReason.FINAL_OUTPUT
                             emitEvent(config, RunEventStore.EventType.AGENT_FINAL_OUTPUT_CREATED, "running",
                                 "Final output ready — ${action.finalOutput.keys.take(5).joinToString()}")
@@ -1468,6 +1674,101 @@ class AgentBrainRunner(
                             "Agent reported failure: ${reason.ifBlank { "no reason given" }}")
                         persistIterationComplete(iterationId, iterSpan, "failed", action, reason, budget, budgetMark)
                     }
+
+                    AgentAction.ActionType.WAIT -> {
+                        /*
+                         * ── THE AGENT CHOOSES; THE RUNTIME VALIDATES ─────────
+                         *
+                         * Invariant 1, applied to a new action. The model names a
+                         * signal and a duration; neither is trusted. A blank name
+                         * is a malformed action and becomes a failure the model can
+                         * read, and the duration is CLAMPED by `WaitStore.open`
+                         * rather than checked — a clamp cannot be forgotten by the
+                         * next caller, and a model asking to wait a year gets the
+                         * platform maximum and is told so.
+                         *
+                         * The wait is keyed on (run, stepId, attemptGroup) like
+                         * every other durable key, so the agent gets ONE wait per
+                         * step — the same limit ASK_APPROVAL has, for the same
+                         * reason: a per-question key would need something that
+                         * survives re-execution, and iteration numbers do not.
+                         */
+                        val signalName = action.waitFor?.trim()?.take(200).orEmpty()
+                        if (!AgentPromptBuilder.agentWaitEnabled()) {
+                            /*
+                             * The flag is off, so this deployment does not offer WAIT
+                             * and the prompt never described it. A model emitting it
+                             * anyway is emitting an action the runtime will not
+                             * execute — which is the ordinary invalid-action path,
+                             * not a special case. Refusing here rather than only
+                             * omitting it from the prompt is what makes the flag a
+                             * real off switch: invariant 1 says the runtime decides,
+                             * so the runtime is where "off" has to be enforced.
+                             */
+                            state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                            retryable = false
+                            failureReason = "The agent asked to wait, but waiting is not enabled " +
+                                "for this deployment. Set AGENT_WAIT_ACTION_ENABLED=true to allow it."
+                            emitEvent(config, RunEventStore.EventType.AGENT_INVALID_ACTION, "failed",
+                                failureReason!!)
+                            persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                failureReason, budget, budgetMark)
+                        } else if (signalName.isBlank()) {
+                            state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                            retryable = false
+                            failureReason = "The agent asked to wait but named no signal to wait " +
+                                "for. A WAIT must say what would wake it."
+                            emitEvent(config, RunEventStore.EventType.AGENT_INVALID_ACTION, "failed",
+                                failureReason!!)
+                            persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                failureReason, budget, budgetMark)
+                        } else when (val opened = openAgentWait(config, runtimeCtx, signalName,
+                            action.waitSeconds, sanitizedReason)) {
+                            is AgentWaitOutcome.Parked -> {
+                                state.stopReason = AgentLoopState.StopReason.WAITING
+                                retryable = false
+                                pendingWait = opened.wait
+                                state.addObservation(AgentObservation(
+                                    state.iteration, "WAIT",
+                                    sanitizedSummary = "Waiting for '$signalName'. " +
+                                        "The run is parked and will resume when it arrives."))
+                                emitEvent(config, RunEventStore.EventType.RUN_WAIT_STARTED,
+                                    "waiting_for_event",
+                                    "Agent is waiting for '$signalName': $sanitizedReason")
+                                persistIterationComplete(iterationId, iterSpan, "completed", action,
+                                    sanitizedReason, budget, budgetMark)
+                            }
+
+                            /*
+                             * The signal already arrived — between the agent deciding
+                             * to wait and the wait being opened, or on a resume where
+                             * this step re-executes after being woken. Parking would
+                             * be a deadlock: nothing else is coming.
+                             */
+                            is AgentWaitOutcome.AlreadyArrived -> {
+                                state.addObservation(AgentObservation(
+                                    state.iteration, "WAIT",
+                                    sanitizedSummary = "Signal '$signalName' had already arrived: " +
+                                        opened.summary))
+                                state.addMemory("signal_$signalName", opened.summary)
+                                emitEvent(config, RunEventStore.EventType.SIGNAL_DELIVERED, "running",
+                                    "Signal '$signalName' delivered to the agent without parking.")
+                                persistIterationComplete(iterationId, iterSpan, "completed", action,
+                                    sanitizedReason, budget, budgetMark)
+                            }
+
+                            is AgentWaitOutcome.Unavailable -> {
+                                state.stopReason = AgentLoopState.StopReason.AGENT_FAILED
+                                retryable = false
+                                failureReason = "The agent asked to wait for '$signalName', but the " +
+                                    "wait could not be created: ${opened.why}"
+                                emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed",
+                                    failureReason!!)
+                                persistIterationComplete(iterationId, iterSpan, "failed", action,
+                                    failureReason, budget, budgetMark)
+                            }
+                        }
+                    }
                 }
 
                 /* A backstop, not the normal path: every branch above finishes its
@@ -1492,6 +1793,7 @@ class AgentBrainRunner(
             log.error("[brain] unexpected error runId={}: {}", config.runId, e.message)
             if (state.stopReason == null) state.stopReason = AgentLoopState.StopReason.ERROR
             failureReason = e.message?.take(300) ?: e.javaClass.simpleName
+            openIterationId?.let { markIterationFailed(it, failureReason) }
             emitEvent(config, RunEventStore.EventType.AGENT_FAILED, "failed", "Agent error: ${e.message?.take(200)}")
         }
 
@@ -1556,10 +1858,192 @@ class AgentBrainRunner(
                                      ?: describeStop(state.stopReason, config),
             retryable          = retryable,
             approvalId         = approvalId,
+            wait               = pendingWait,
             approvalMessage    = approvalMessage,
             handedOff          = handedOff,
             yieldedReason      = yieldedReason,
+            skillAttributes    = skillAttributes,
         )
+    }
+
+    /**
+     * Take delivery of any guidance a person has sent, and put it in context.
+     *
+     * ── A SIGNAL PLUS A CONTEXT WRITE, AND NOTHING ELSE ────────────────
+     * Everything durable here already exists: `run_signals` stores it in order,
+     * deduplicated and workspace-scoped, and the rate limit that stops an
+     * unbounded signal stream from starving one run covers this too. What is new
+     * is one read at the iteration boundary and one write into [AgentLoopState].
+     * A separate "guidance" table with its own delivery semantics would be a
+     * second signal system, and only one of them would be tested.
+     *
+     * ── WHY THE AGENT DOES NOT HAVE TO BE WAITING ───────────────────
+     * `openAgentWait` reads signals too, but only the one the model asked for,
+     * and only when it chose to stop. The case this exists for is the opposite:
+     * an agent working happily down the wrong path, and an engineer who can see
+     * it. Redirecting that agent must not require it to have predicted that it
+     * would need redirecting.
+     *
+     * Consumed as it is read, so the same instruction is never delivered twice —
+     * an agent told the same thing at four consecutive iterations reads it as
+     * four separate insistences.
+     */
+    private fun drainGuidance(
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        state: AgentLoopState,
+    ) {
+        val signals = signalStore ?: return
+        val pending = runCatching { signals.pending(runtimeCtx.runId) }.getOrElse {
+            /* Never fatal. Guidance not arriving is a degraded run; a run that
+               dies because a guidance read failed is an outage. */
+            log.warn("[brain] could not read guidance [run={}]: {}", runtimeCtx.runId, it.message)
+            return
+        }
+
+        val guidance = pending.filter { isGuidanceSignal(it.name) }
+        if (guidance.isEmpty()) return
+
+        for (signal in guidance.take(AgentLoopState.MAX_GUIDANCE)) {
+            val text = guidanceTextOf(signal) ?: continue
+            state.addGuidance(AgentLoopState.Guidance(
+                iterationNumber = state.iteration,
+                text = text,
+                from = signal.sentBy,
+            ))
+            emitEvent(config, RunEventStore.EventType.AGENT_GUIDANCE_RECEIVED, "running",
+                "Guidance received at iteration ${state.iteration}: ${text.take(160)}")
+            log.info("[brain] guidance at iteration {} [run={}, step={}, chars={}]",
+                state.iteration, runtimeCtx.runId, config.stepId, text.length)
+        }
+
+        /* Consumed even when the text was unusable, so a malformed payload is not
+           re-read at every iteration for the rest of the run. */
+        runCatching { signals.consume(guidance.map { it.id }, waitId = null) }
+            .onFailure { log.warn("[brain] guidance consume failed: {}", it.message) }
+    }
+
+    /** `guidance`, or anything under `guidance:` — so it can be addressed per agent. */
+    private fun isGuidanceSignal(name: String): Boolean =
+        name == GUIDANCE_SIGNAL || name.startsWith("$GUIDANCE_SIGNAL:")
+
+    /**
+     * The instruction inside a guidance signal, sanitized and capped.
+     *
+     * Accepts `{"text": "..."}`, `{"guidance": "..."}` or `{"message": "..."}`
+     * because all three are what somebody types first, and a signal whose
+     * payload shape was almost right is worse than one that was rejected.
+     */
+    private fun guidanceTextOf(signal: com.vectorbea.worker.durable.wait.SignalStore.Signal): String? {
+        val raw = runCatching {
+            val tree = mapper.readTree(signal.payloadJson)
+            listOf("text", "guidance", "message", "instruction")
+                .firstNotNullOfOrNull { field ->
+                    tree.get(field)?.takeIf { it.isTextual }?.asText()
+                }
+        }.getOrNull() ?: return null
+
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        return sanitizeGuidance(trimmed).take(MAX_GUIDANCE_CHARS)
+    }
+
+    /**
+     * Flatten guidance to one paragraph of plain text.
+     *
+     * Newlines and the model's own action-format markers are collapsed, because
+     * this text is concatenated into a prompt whose sections are separated by
+     * blank lines and whose contract is JSON: a caller who sends a payload
+     * containing what looks like a section heading, or a complete action object,
+     * should not be able to end the guidance section early and start something
+     * that reads as though the platform wrote it.
+     */
+    private fun sanitizeGuidance(text: String): String =
+        text.replace(Regex("[\\r\\n]+"), " ")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim()
+
+    /** What happened when the agent asked to wait. */
+    private sealed class AgentWaitOutcome {
+        data class Parked(val wait: NodeResult.Waiting) : AgentWaitOutcome()
+
+        /** The signal was already there. Parking would deadlock. */
+        data class AlreadyArrived(val summary: String) : AgentWaitOutcome()
+
+        data class Unavailable(val why: String) : AgentWaitOutcome()
+    }
+
+    /**
+     * Open — or find — this step's wait.
+     *
+     * ── THE ORDER OF THE TWO CHECKS IS THE WHOLE CORRECTNESS ────────────────
+     * Signals are read BEFORE the wait is opened, and that order is not
+     * arbitrary. A signal can arrive between the model deciding to wait and this
+     * running, and a wait opened first would park a run for a signal that has
+     * already been delivered — a deadlock lasting until the timeout, with the
+     * answer sitting unconsumed in the table the whole time.
+     *
+     * It is also what makes the resumed step correct. After the run is woken,
+     * this step re-executes from iteration 1, reaches WAIT again, finds the
+     * signal it was woken by, and carries on — rather than opening a second wait
+     * and parking again, which would be a run that never finishes however many
+     * signals it is sent.
+     */
+    private fun openAgentWait(
+        config: AgentBrainConfig,
+        runtimeCtx: RuntimeContext,
+        signalName: String,
+        requestedSeconds: Long?,
+        reason: String,
+    ): AgentWaitOutcome {
+        val waits = waitStore
+            ?: return AgentWaitOutcome.Unavailable("this worker has no database connection")
+
+        signalStore?.pending(runtimeCtx.runId)
+            ?.firstOrNull { it.name == signalName }
+            ?.let { signal ->
+                signalStore.consume(listOf(signal.id), waitId = null)
+                val payload = runCatching { mapper.writeValueAsString(signal.asObservation(mapper)) }
+                    .getOrDefault("{}")
+                return AgentWaitOutcome.AlreadyArrived(payload.take(MAX_TOOL_PAYLOAD_CHARS))
+            }
+
+        return try {
+            val opened = waits.open(
+                com.vectorbea.worker.durable.wait.WaitStore.OpenRequest(
+                    workspaceId = config.workspaceId,
+                    environmentId = config.environmentId,
+                    runId = runtimeCtx.runId,
+                    workflowId = runtimeCtx.workflowId,
+                    nodeId = config.stepId,
+                    attemptGroup = runtimeCtx.attemptGroup,
+                    kind = com.vectorbea.worker.durable.wait.WaitKind.AGENT_WAIT,
+                    label = "Agent '${config.agentName}' is waiting for '$signalName'",
+                    signalName = signalName,
+                    /* Clamped by the store. A model asking for a year gets the
+                       platform maximum; a model asking for nothing gets the
+                       default. Neither is trusted, and neither has to be checked
+                       here — which is the point of clamping at the boundary. */
+                    timeoutMs = requestedSeconds?.times(1_000),
+                    /* Sanitized: the model's own one-line reason, already through
+                       `sanitizeReasoningSummary`. Nothing else, and never a tool
+                       result — invariant 4 applies to this store like any other. */
+                    metadata = mapOf("reason" to reason.take(500), "agent" to config.agentName),
+                )
+            )
+            AgentWaitOutcome.Parked(
+                NodeResult.Waiting(
+                    waitId = opened.wait.id.toString(),
+                    kind = opened.wait.kind.wire,
+                    label = opened.wait.label ?: "Waiting for '$signalName'",
+                    timeoutAt = opened.wait.timeoutAt,
+                )
+            )
+        } catch (e: Exception) {
+            log.error("[brain] could not open agent wait [run={}, signal={}]: {}",
+                runtimeCtx.runId, signalName, e.message)
+            AgentWaitOutcome.Unavailable(e.message?.take(200) ?: e.javaClass.simpleName)
+        }
     }
 
     /** What the approval gate says about this step, right now. */
@@ -1638,6 +2122,12 @@ class AgentBrainRunner(
             "The agent reported it could not complete the task but gave no reason."
         AgentLoopState.StopReason.APPROVAL_REQUESTED ->
             "The agent asked for human approval before it could continue."
+        AgentLoopState.StopReason.WAITING ->
+            "The agent is waiting for an external event. The run is parked and will " +
+            "resume when it arrives, or when the wait's deadline passes."
+        AgentLoopState.StopReason.CANCELLED ->
+            "The run was cancelled, so the agent stopped between iterations. Work " +
+            "already committed stands; nothing further was attempted."
         AgentLoopState.StopReason.TOOL_NOT_ALLOWED ->
             "The agent tried to call a tool that is not in its allowed tool list."
         AgentLoopState.StopReason.SCHEMA_INVALID ->
@@ -2333,20 +2823,30 @@ class AgentBrainRunner(
         val cleaned = rawContent.trim()
             .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
         return try {
-            mapper.readValue(cleaned, AgentAction::class.java)
+            ActionParsing.parse(cleaned, declaredOutputFields(config))
         } catch (e: Exception) {
-            log.warn("[brain] failed to parse action iter={}: {}", state.iteration, e.message)
+            /* The field NAMES, never the values: enough to tell "it returned the
+               answer without an envelope" from "it returned prose", which is what
+               the next change to ActionParsing needs to know. */
+            log.warn("[brain] failed to parse action iter={} fields={}: {}",
+                state.iteration, ActionParsing.fieldNamesOf(cleaned), e.message?.lineSequence()?.firstOrNull())
             /* A THINK as repair, so the loop can continue or fail gracefully —
                MARKED as a repair, because an unmarked one is indistinguishable
                from the model choosing to think and sends the reader to the
                prompt when the problem is the response format. */
             AgentAction(
                 type = AgentAction.ActionType.THINK,
-                reasoningSummary = "Failed to parse action response — trying next iteration",
+                reasoningSummary = "Your last reply was not a valid action. Reply with ONE JSON object " +
+                    "whose \"type\" is CALL_TOOL, FINAL or FAIL, with the answer inside finalOutput.",
                 repaired = true,
             )
         }
     }
+
+    /** The step's declared output field names, read from its output schema. */
+    private fun declaredOutputFields(config: AgentBrainConfig): Set<String> = runCatching {
+        mapper.readTree(config.outputSchemaJson).path("properties").fieldNames().asSequence().toSet()
+    }.getOrDefault(emptySet())
 
     // ── Tool execution ────────────────────────────────────────────────────────
 
@@ -2357,6 +2857,16 @@ class AgentBrainRunner(
     private data class ToolOutcome(
         val observation: AgentObservation,
         val pause: NodeResult.ApprovalPaused? = null,
+        /**
+         * The tool parked on something that is not a person.
+         *
+         * A SEPARATE field from [pause] rather than a widened one, for the same
+         * reason `targetAgentId` is separate from `toolId`: the two are handled
+         * differently — an approval sets `waiting_for_approval` and lands on the
+         * Approvals screen, a wait sets `waiting_for_event` and does not — and one
+         * field carrying both is how a video render ends up in an approvals queue.
+         */
+        val wait: NodeResult.Waiting? = null,
         /**
          * The FULL tool result in the payload store, if it was captured.
          *
@@ -2657,6 +3167,26 @@ class AgentBrainRunner(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
                         "Tool $toolId was rate limited by ${execResult.provider}", false))
 
+                /*
+                 * ── AN ASYNC TOOL PARKS THE STEP, IT DOES NOT FAIL IT ────────
+                 *
+                 * The same shape as the approval arm above, and for the same
+                 * reason: the alternative is one unsuccessful observation and a
+                 * loop that reasons around a job which is running perfectly well.
+                 * A six-minute render would burn the agent's remaining iterations
+                 * and report that it could not proceed.
+                 *
+                 * The pause travels out of the loop and the step returns
+                 * NodeResult.Waiting, so the runtime parks the run and releases the
+                 * worker. On resume the tool re-executes, recomputes the same wait
+                 * key, finds its own RESOLVED wait, and reads the result out of it
+                 * instead of submitting the job again.
+                 */
+                is NodeResult.Waiting -> ToolOutcome(
+                    AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
+                        "Tool $toolId started work that takes a while: ${execResult.label}", false),
+                    wait = execResult)
+
                 is NodeResult.Unsupported -> ToolOutcome(
                     AgentObservation(state.iteration, "CALL_TOOL", toolId.toString(),
                         "Tool $toolId has a type this worker cannot execute", false))
@@ -2720,8 +3250,16 @@ class AgentBrainRunner(
             /* No projected form here on purpose: this is the stored raw result
                being replayed, and re-projecting it would mean loading the contract
                on a path whose whole point is not to do work again. The shape
-               summary is what the first execution's row already recorded. */
-            buildToolObservationSummary(toolId, cached), true,
+               summary is what the first execution's row already recorded.
+
+               The lead sentence is for the MODEL. Told only the shape again, an
+               agent that asked twice for a result it found incomplete asks a third
+               time and gets the same stored copy — the loop that ended a code
+               review in FAIL. It has to hear that repeating cannot help. */
+            "You already made this exact call in this run; this is the same stored result, " +
+                "and repeating it will not return anything new. Change the arguments " +
+                "(another page, fewer items) or answer with what you have. " +
+                buildToolObservationSummary(toolId, cached), true,
             payload = renderToolPayload(cached)))
     }
 
@@ -2898,16 +3436,52 @@ class AgentBrainRunner(
         @Volatile
         var contextAttributesJson: String? = null
 
+        /**
+         * Which skills this iteration's prompt carried, and what the budget did
+         * to them.
+         *
+         * Kept as a MAP beside [contextAttributesJson]'s string rather than as a
+         * second JSON string, because the span takes one attributes document and
+         * merging two JSON strings textually is the kind of thing that works
+         * until a skill slug contains a brace. Merged once, on close.
+         */
+        @Volatile
+        var skillAttributes: Map<String, Any> = emptyMap()
+
         fun close(status: String) {
             if (!closed.compareAndSet(false, true)) return
             runCatching {
                 tracer.close(
                     spanId, "iteration", "iteration $index", status,
                     stepId = stepId, iterationIndex = index,
-                    attributesJson = contextAttributesJson ?: "{}",
+                    attributesJson = mergedAttributes(),
                 )
                 tracer.bindNode(stepId, parentSpanId)
             }
+        }
+
+        /**
+         * The context bookkeeping and the skills bookkeeping, as one document.
+         *
+         * Falls back to whichever half exists. A failure to serialise yields the
+         * context half unchanged rather than nothing: losing the skills
+         * attributes degrades one answer, losing both degrades the answer this
+         * whole path exists to give.
+         */
+        private fun mergedAttributes(): String {
+            val ctx = contextAttributesJson
+            val skills = skillAttributes
+            if (skills.isEmpty()) return ctx ?: "{}"
+            return runCatching {
+                val m = jacksonObjectMapper()
+                val merged = linkedMapOf<String, Any?>()
+                if (ctx != null) {
+                    @Suppress("UNCHECKED_CAST")
+                    merged.putAll(m.readValue(ctx, Map::class.java) as Map<String, Any?>)
+                }
+                merged.putAll(skills)
+                m.writeValueAsString(merged)
+            }.getOrElse { ctx ?: "{}" }
         }
 
         companion object {
@@ -2941,6 +3515,30 @@ class AgentBrainRunner(
         companion object {
             fun of(b: AgentBudget) = BudgetMark(b.tokensUsed, b.estimatedCostCents, b.toolCallsUsed)
         }
+    }
+
+    /**
+     * Close an iteration that ended by an exception rather than by an action.
+     *
+     * Guarded on `status = 'running'`, so an iteration a branch already completed
+     * (and then something after it threw) keeps the verdict it was given.
+     */
+    private fun markIterationFailed(iterationId: UUID, reason: String?) {
+        val ds = dataSource ?: return
+        runCatching {
+            ds.connection.use { conn ->
+                conn.prepareStatement(
+                    """UPDATE agent_iterations
+                          SET status = 'failed', observation_summary_sanitized = ?, completed_at = ?
+                        WHERE id = ? AND status = 'running'"""
+                ).use { stmt ->
+                    stmt.setString(1, safetyGuard.sanitizeReasoningSummary(reason ?: "The step failed."))
+                    stmt.setTimestamp(2, Timestamp.from(Instant.now()))
+                    stmt.setObject(3, iterationId)
+                    stmt.executeUpdate()
+                }
+            }
+        }.onFailure { log.warn("[brain] could not mark iteration {} failed: {}", iterationId, it.message) }
     }
 
     private fun persistIterationComplete(

@@ -1,15 +1,30 @@
 import * as React from "react";
 import { cn } from "~/lib/cn";
-import { PROVIDER_BRAND_COLOUR } from "./provider-brand-colours";
+import { PROVIDER_BRAND_COLOUR, PROVIDER_DARK_COLOUR } from "./provider-brand-colours";
 
 /**
- * <ProviderLogo> — monochrome on a tint until the connection is live.
+ * <ProviderLogo> — the vendor's mark, in the vendor's colour.
  *
- * Design §6.3: full colour ONLY when connected. This is what stops the
- * Integrations page reading as a sticker sheet the way Zapier's directory does,
- * and it makes "connected" scannable at a glance across a 40-row list — which is
- * the actual job of that page. Colour is doing information work here, not
- * decoration, which is why it is rationed.
+ * ── WHY THIS IS NO LONGER RATIONED ──────────────────────────────────────────
+ * It used to render monochrome until a connection was live, so that "connected"
+ * was scannable down a long list. That traded the wrong thing away. The list it
+ * was optimising is a handful of rows, the health state is already carried by a
+ * dot, a label and a status token — three signals that do not need a fourth —
+ * and the cost was an Integrations page where nothing was recognisable at a
+ * glance. Recognition is what a logo is FOR; greying it out to encode something
+ * the row says twice already is the one job it cannot also do.
+ *
+ * So colour is now the default, and `connected` raises the surface rather than
+ * the hue: a solid chip and a full-strength border against a tinted chip and a
+ * subtle one. Same information, carried by weight instead of by saturation.
+ *
+ * ── AND WHY THE FALLBACK MATTERS AS MUCH AS THE MARKS ───────────────────────
+ * MCP means a customer can connect a vendor we have never heard of. An unknown
+ * provider used to render NOTHING, which on the discovery screen would be a
+ * list of tool names with a hole beside each one — indistinguishable from
+ * discovery having half-failed. [Monogram] draws a deterministic coloured chip
+ * instead, so every discovered tool is identifiable whether or not we happen to
+ * have drawn its vendor.
  *
  * TRADEMARK NOTE: these are simplified geometric marks drawn to sit on a common
  * grid, used nominatively to identify each service. They are not pixel-accurate
@@ -21,9 +36,27 @@ import { PROVIDER_BRAND_COLOUR } from "./provider-brand-colours";
 
 export type ProviderId =
   | "openai" | "anthropic" | "gemini" | "mistral"
-  | "slack" | "gmail" | "google-sheets" | "notion" | "airtable"
+  | "slack" | "teams" | "google-chat" | "discord"
+  | "gmail" | "google-sheets" | "notion" | "airtable"
   | "postgres" | "mysql" | "hubspot" | "github" | "jira"
-  | "webhook" | "http";
+  | "webhook" | "http" | "mcp"
+  /*
+   * ── VENDORS WE DO NOT SHIP AN ADAPTER FOR ─────────────────────────────────
+   *
+   * These are here to be RECOGNISED, not to be offered. They are not in
+   * `INTEGRATION_SEEDS` and there is no connect flow behind any of them —
+   * the way you reach Grafana or ServiceNow is their MCP server.
+   *
+   * Which is exactly why the marks have to exist. When somebody connects an
+   * MCP server and discovery answers, "12 tools registered" with a generic
+   * plug beside each one reads as a list of strings. The same list with the
+   * vendor's mark beside it reads as "Vectorbea found ServiceNow", which is
+   * the sentence discovery is actually trying to say.
+   */
+  | "grafana" | "servicenow" | "datadog" | "sentry" | "linear" | "stripe"
+  | "snowflake" | "pagerduty" | "zendesk" | "salesforce" | "gitlab"
+  | "confluence" | "mongodb" | "elastic" | "shopify" | "twilio"
+  | "kubernetes" | "aws";
 
 type ProviderMark = {
   label: string;
@@ -74,6 +107,37 @@ const PROVIDER_MARKS: Record<ProviderId, ProviderMark> = {
         <rect x="11.2" y="11.4" width="3.2" height="10" rx="1.6" />
         <rect x="2.8" y="9.4" width="10" height="3.2" rx="1.6" />
       </g>
+    ),
+  },
+  teams: {
+    label: "Microsoft Teams",
+    paths: (
+      <g fill="currentColor">
+        <circle cx="17.6" cy="5.6" r="2.1" />
+        <path d="M15.6 9h4.7c.6 0 1.1.5 1.1 1.1v4.6a3 3 0 0 1-3 3h-.4a4 4 0 0 1-2.4-.8Z" opacity="0.7" />
+        <path
+          d="M4 6.4h9.2a1.4 1.4 0 0 1 1.4 1.4v9.2a1.4 1.4 0 0 1-1.4 1.4H4a1.4 1.4 0 0 1-1.4-1.4V7.8A1.4 1.4 0 0 1 4 6.4ZM5.6 9.4V11h2v4.8h1.6V11h2V9.4Z"
+          fillRule="evenodd"
+        />
+      </g>
+    ),
+  },
+  "google-chat": {
+    label: "Google Chat",
+    paths: (
+      <path
+        d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9a1.5 1.5 0 0 1-1.5 1.5H10l-4 3.5V16h-.5A1.5 1.5 0 0 1 4 14.5ZM8.5 10h7"
+        fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round"
+      />
+    ),
+  },
+  discord: {
+    label: "Discord",
+    paths: (
+      <path
+        d="M6 6.5C8 5.5 10 5 12 5s4 .5 6 1.5c1.5 2.5 2.5 5.5 2.2 9.5-1.5 1.2-3 2-4.6 2.5l-1-1.6c.6-.2 1.1-.5 1.6-.8-2.8 1.3-5.6 1.3-8.4 0 .5.3 1 .6 1.6.8l-1 1.6C6.8 18 5.3 17.2 3.8 16 3.5 12 4.5 9 6 6.5ZM9 11a1.5 1.7 0 1 0 0 3.4A1.5 1.7 0 1 0 9 11Zm6 0a1.5 1.7 0 1 0 0 3.4A1.5 1.7 0 1 0 15 11Z"
+        fill="currentColor" fillRule="evenodd"
+      />
     ),
   },
   gmail: {
@@ -185,6 +249,195 @@ const PROVIDER_MARKS: Record<ProviderId, ProviderMark> = {
       </g>
     ),
   },
+  /*
+   * A socket with three leads: one server, several tools. The mark says the
+   * grant model before any copy does — what plugs in is a set of separate
+   * things, not one switch.
+   */
+  mcp: {
+    label: "MCP server",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="13" width="16" height="7" rx="2" />
+        <path d="M8 13V8.5a2 2 0 0 1 4 0V13M16 13V9.5" />
+        <circle cx="16" cy="6.5" r="2" />
+      </g>
+    ),
+  },
+
+  /* ── Recognised, not offered. See the note on ProviderId. ─────────────── */
+
+  grafana: {
+    label: "Grafana",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 18h18" />
+        <path d="M4.5 15.5 9 10l3.5 3.5L16 7.5l3.5 5" />
+        <circle cx="9" cy="10" r="1.4" fill="currentColor" stroke="none" />
+        <circle cx="16" cy="7.5" r="1.4" fill="currentColor" stroke="none" />
+      </g>
+    ),
+  },
+  servicenow: {
+    label: "ServiceNow",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="10.5" r="7" />
+        <path d="M8 18.2a7.6 7.6 0 0 0 8 0" />
+        <path d="M9.2 12.5V8.8l5.6 3.8V8.8" />
+      </g>
+    ),
+  },
+  datadog: {
+    label: "Datadog",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19.5 4.5 7.5 8 5 13.5l4 1.5 1.5 4.5 4-2.5" />
+        <path d="M9 14.5 13 11l3-4.5" />
+        <circle cx="10.5" cy="12" r="1.3" fill="currentColor" stroke="none" />
+      </g>
+    ),
+  },
+  sentry: {
+    label: "Sentry",
+    paths: (
+      <path
+        d="M12 3.4a1.6 1.6 0 0 1 1.4.8l7.2 12.5a1.6 1.6 0 0 1-1.4 2.4h-2.6a8.9 8.9 0 0 0-5-7.3l-1.5 2.6a5.9 5.9 0 0 1 3.4 4.7H4.8a1.6 1.6 0 0 1-1.4-2.4l7.2-12.5A1.6 1.6 0 0 1 12 3.4Z"
+        fill="currentColor"
+      />
+    ),
+  },
+  linear: {
+    label: "Linear",
+    paths: (
+      <g fill="currentColor">
+        <path d="M3.2 13.6 10.4 20.8a9 9 0 0 1-7.2-7.2Z" />
+        <path d="M3.05 10.6 13.4 20.95a9 9 0 0 0 2.4-.9L3.95 8.2a9 9 0 0 0-.9 2.4Z" />
+        <path d="M5.3 6.2 17.8 18.7a9.1 9.1 0 0 0 1.6-1.5L6.8 4.6a9.1 9.1 0 0 0-1.5 1.6Z" />
+        <path d="M9 3.4 20.6 15a9 9 0 0 0-11.6-11.6Z" />
+      </g>
+    ),
+  },
+  stripe: {
+    label: "Stripe",
+    paths: (
+      <path
+        d="M13.4 9.6c-1.5 0-2.4.4-2.4 1.2 0 .9 1.1 1.2 2.6 1.7 2.4.7 4 1.6 4 3.9 0 2.6-2.1 4-5.1 4a10 10 0 0 1-4.4-1v-3.2a9 9 0 0 0 4.3 1.3c1.6 0 2.3-.4 2.3-1.2 0-.9-1-1.2-2.6-1.7-2.4-.7-4-1.7-4-4 0-2.5 2-3.9 5-3.9a9.6 9.6 0 0 1 4 .9v3.1a8.7 8.7 0 0 0-3.7-1.1Z"
+        fill="currentColor"
+      />
+    ),
+  },
+  snowflake: {
+    label: "Snowflake",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+        <path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9" />
+        <path d="M12 6.5 9.8 4.8M12 6.5l2.2-1.7M12 17.5l-2.2 1.7M12 17.5l2.2 1.7" />
+      </g>
+    ),
+  },
+  pagerduty: {
+    label: "PagerDuty",
+    paths: (
+      <g fill="currentColor">
+        <path d="M5.5 3h5.9c3.6 0 6.1 1.9 6.1 5.2s-2.5 5.3-6.1 5.3H8.9V3Zm3.4 2.6v5.3h2.3c1.9 0 3-.9 3-2.6s-1.1-2.7-3-2.7Z" />
+        <rect x="5.5" y="16" width="3.4" height="5" />
+      </g>
+    ),
+  },
+  zendesk: {
+    label: "Zendesk",
+    paths: (
+      <g fill="currentColor">
+        <path d="M11 6.5v12H2.5Z" />
+        <path d="M2.5 3.5H11a4.3 4.3 0 0 1-8.5 0Z" />
+        <path d="M13 17.5v-12h8.5Z" />
+        <path d="M21.5 20.5H13a4.3 4.3 0 0 1 8.5 0Z" />
+      </g>
+    ),
+  },
+  salesforce: {
+    label: "Salesforce",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+        <path d="M6.5 17.5a3.5 3.5 0 0 1-.4-7 4.6 4.6 0 0 1 8.3-2.3 3.9 3.9 0 0 1 5.6 3.5 3.9 3.9 0 0 1-3.9 3.9Z" />
+      </g>
+    ),
+  },
+  gitlab: {
+    label: "GitLab",
+    paths: (
+      <path d="m12 21-3.4-10.4h6.8Zm0 0L4.2 10.6h4.4Zm0 0 7.8-10.4h-4.4ZM4.2 10.6 2.6 5.5c-.1-.4.3-.7.6-.5l3.6 2.6Zm15.6 0 1.6-5.1c.1-.4-.3-.7-.6-.5l-3.6 2.6Z" fill="currentColor" />
+    ),
+  },
+  confluence: {
+    label: "Confluence",
+    paths: (
+      <g fill="currentColor">
+        <path d="M3 16.3c2.6-4.3 5.6-6 8.8-5 2.4.7 4 2.6 6 6l3.2-1.9c-2.5-4.3-4.9-6.9-8.4-8-4.5-1.4-8.4 1-11.2 6.3Z" opacity="0.8" />
+        <path d="M21 7.7c-2.6 4.3-5.6 6-8.8 5-2.4-.7-4-2.6-6-6L3 8.6c2.5 4.3 4.9 6.9 8.4 8 4.5 1.4 8.4-1 11.2-6.3Z" />
+      </g>
+    ),
+  },
+  mongodb: {
+    label: "MongoDB",
+    paths: (
+      <path
+        d="M12 2.5c2.3 3 5 5.3 5 9.3 0 3.4-2.2 5.9-4.3 6.7l-.3 3h-.8l-.3-3C9.2 17.7 7 15.2 7 11.8c0-4 2.7-6.3 5-9.3Zm0 4.2v10.6c1.3-.8 2.4-2.6 2.4-5.1 0-2.4-1.1-4-2.4-5.5Z"
+        fill="currentColor"
+      />
+    ),
+  },
+  elastic: {
+    label: "Elastic",
+    paths: (
+      <g fill="currentColor">
+        <path d="M4 5h16a8.9 8.9 0 0 1-1.2 3H5.4A9.4 9.4 0 0 1 4 5Z" />
+        <path d="M6.2 10h11.6a9 9 0 0 1 0 4H6.2a9 9 0 0 1 0-4Z" opacity="0.75" />
+        <path d="M5.4 16h13.4A8.9 8.9 0 0 1 4 19Z" opacity="0.5" />
+      </g>
+    ),
+  },
+  shopify: {
+    label: "Shopify",
+    paths: (
+      <path
+        d="M14.6 4.3c.4.1.6.3.6.7l1.7 12.6-8.3 1.7L6 5.6l2.6-.8a4 4 0 0 1 3.8-3c1 0 1.7.6 2.2 1.5Zm-2.2 1.2a3.6 3.6 0 0 0-.6-1.5c-.8 0-1.6.9-2 2.3Z"
+        fill="currentColor"
+      />
+    ),
+  },
+  twilio: {
+    label: "Twilio",
+    paths: (
+      <g fill="currentColor">
+        <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 2.4a6.6 6.6 0 1 1 0 13.2 6.6 6.6 0 0 1 0-13.2Z" />
+        <circle cx="9.6" cy="9.6" r="1.8" />
+        <circle cx="14.4" cy="9.6" r="1.8" />
+        <circle cx="9.6" cy="14.4" r="1.8" />
+        <circle cx="14.4" cy="14.4" r="1.8" />
+      </g>
+    ),
+  },
+  kubernetes: {
+    label: "Kubernetes",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+        <path d="M12 2.6 20.3 6.6 18.3 16 12 21.4 5.7 16 3.7 6.6Z" />
+        <path d="M12 8.2 15.4 10.7 14.1 14.7H9.9L8.6 10.7Z" />
+      </g>
+    ),
+  },
+  aws: {
+    label: "AWS",
+    paths: (
+      <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9.5 5.2 15l2-4.2L9.2 15l2.2-5.5" />
+        <path d="M13.6 9.5 15.8 15l1.5-3.2L18.8 15 21 9.5" />
+        <path d="M3.5 18.4c5.6 2.6 11.4 2.6 17 0" />
+      </g>
+    ),
+  },
 };
 
 export const PROVIDER_IDS = Object.keys(PROVIDER_MARKS) as ProviderId[];
@@ -194,12 +447,21 @@ export function providerLabel(id: ProviderId): string {
 }
 
 export interface ProviderLogoProps {
-  provider: ProviderId;
-  /** Full colour and a solid surface. Everything else stays monochrome-on-tint. */
+  /**
+   * A drawn provider, or any free string.
+   *
+   * A string that is not a known id is resolved through [resolveProvider] and
+   * falls back to a monogram — which is what makes this usable on MCP
+   * discovery, where the vendor is whatever the customer's server is called.
+   */
+  provider: ProviderId | string;
+  /** A solid chip and a full-strength border. The MARK is in colour either way. */
   connected?: boolean;
   size?: number;
   /** Hide from assistive tech when an adjacent label already names the provider. */
   decorative?: boolean;
+  /** Used for the monogram when the provider is not one we have drawn. */
+  fallbackLabel?: string;
   className?: string;
 }
 
@@ -208,35 +470,55 @@ export function ProviderLogo({
   connected = false,
   size = 20,
   decorative = false,
+  fallbackLabel,
   className,
 }: ProviderLogoProps) {
-  const mark = PROVIDER_MARKS[provider];
+  const resolved = resolveProvider(provider);
+  const mark = resolved ? PROVIDER_MARKS[resolved] : undefined;
 
-  /* An unknown provider renders nothing rather than throwing.
-     Provider ids arrive from tool names (`contracts.getUpcomingRenewals` →
-     `contracts`), and the set of tool prefixes is open while the set of drawn
-     marks is not. Indexing without this guard took down the whole builder with
-     "Cannot read properties of undefined (reading 'label')" the first time a
-     tool from an unrepresented vendor was selected. */
-  if (!mark) return null;
+  /*
+   * An unresolved provider gets a monogram, not nothing.
+   *
+   * Provider ids arrive from tool names (`contracts.getUpcomingRenewals` →
+   * `contracts`) and now from MCP server names, so the set of inputs is open
+   * while the set of drawn marks is not. Rendering nothing used to be the
+   * guard against a crash; it is the wrong answer on any screen that is
+   * listing things, because an empty slot reads as a failure rather than as an
+   * unfamiliar vendor.
+   */
+  if (!mark) {
+    return (
+      <Monogram
+        text={fallbackLabel ?? (typeof provider === "string" ? provider : "")}
+        size={size}
+        connected={connected}
+        decorative={decorative}
+        className={className}
+      />
+    );
+  }
 
   const label = connected ? `${mark.label}, connected` : mark.label;
+  const colour = brandColour(resolved!);
 
   return (
     <span
       className={cn(
         "inline-flex items-center justify-center rounded-md border transition-colors duration-fast",
-        connected
-          ? "bg-surface-base border-default"
-          : "bg-surface-hover border-subtle text-fg-muted",
+        connected ? "border-default" : "border-subtle",
         className,
       )}
       style={{
         width: size + 12,
         height: size + 12,
-        // The brand colour is applied as currentColor, so every mark — stroked
-        // or filled — picks it up without needing a second copy of the artwork.
-        color: connected ? PROVIDER_BRAND_COLOUR[provider] : undefined,
+        /* The brand colour is applied as currentColor, so every mark — stroked
+           or filled — picks it up without needing a second copy of the artwork. */
+        color: colour,
+        /* A wash of the vendor's own colour rather than a neutral grey. Mixed
+           against the theme's surface token, so it lands correctly in both
+           themes without a second value per brand. `connected` raises the
+           surface; it no longer changes the hue. */
+        backgroundColor: `color-mix(in srgb, ${colour} ${connected ? 18 : 11}%, var(--bg-raised))`,
       }}
     >
       <svg
@@ -253,3 +535,147 @@ export function ProviderLogo({
     </span>
   );
 }
+
+/**
+ * A vendor we have not drawn, rendered as its own initial on a stable colour.
+ *
+ * Deterministic from the text, so the same server is the same colour on every
+ * screen and on every reload — a chip that changed hue between the discovery
+ * step and the Tools tab would read as two different things.
+ *
+ * The palette is the eight brand hues already sanctioned in
+ * `provider-brand-colours.ts`, reused rather than extended: this needs colours
+ * that are distinguishable and that already pass contrast against both
+ * surfaces, and inventing a ninth would mean inventing a ninth contrast check.
+ */
+function Monogram({
+  text, size, connected, decorative, className,
+}: {
+  text: string;
+  size: number;
+  connected: boolean;
+  decorative: boolean;
+  className?: string;
+}) {
+  const cleaned = text.replace(/^(mcp[-_.\s]*)/i, "").trim();
+  const initial = (cleaned.match(/[a-z0-9]/i)?.[0] ?? "?").toUpperCase();
+
+  let hash = 0;
+  for (let i = 0; i < cleaned.length; i += 1) hash = (hash * 31 + cleaned.charCodeAt(i)) >>> 0;
+  const colour = MONOGRAM_PALETTE[hash % MONOGRAM_PALETTE.length];
+
+  return (
+    <span
+      className={cn(
+        "font-ui inline-flex items-center justify-center rounded-md border font-semibold",
+        "transition-colors duration-fast",
+        connected ? "border-default" : "border-subtle",
+        className,
+      )}
+      style={{
+        width: size + 12,
+        height: size + 12,
+        fontSize: Math.round(size * 0.58),
+        color: colour,
+        backgroundColor: `color-mix(in srgb, ${colour} ${connected ? 18 : 11}%, var(--bg-raised))`,
+      }}
+      aria-hidden={decorative ? true : undefined}
+      role={decorative ? undefined : "img"}
+      aria-label={decorative ? undefined : (cleaned || "Unknown provider")}
+    >
+      {initial}
+    </span>
+  );
+}
+
+const MONOGRAM_PALETTE = [
+  PROVIDER_BRAND_COLOUR.stripe,
+  PROVIDER_BRAND_COLOUR.grafana,
+  PROVIDER_BRAND_COLOUR.snowflake,
+  PROVIDER_BRAND_COLOUR.twilio,
+  PROVIDER_BRAND_COLOUR.kubernetes,
+  PROVIDER_BRAND_COLOUR.pagerduty,
+  PROVIDER_BRAND_COLOUR.salesforce,
+  PROVIDER_BRAND_COLOUR.gitlab,
+];
+
+/** Dark-theme substitute for the marks whose brand colour is near-black. */
+function brandColour(id: ProviderId): string {
+  const override = PROVIDER_DARK_COLOUR[id];
+  if (!override) return PROVIDER_BRAND_COLOUR[id];
+  /* A CSS variable the theme flips, rather than a `useTheme()` read — this
+     renders inside tables that would otherwise re-render on every theme
+     change, and the browser can do a colour swap without React. */
+  return `light-dark(${PROVIDER_BRAND_COLOUR[id]}, ${override})`;
+}
+
+/**
+ * Map a free string onto a drawn provider.
+ *
+ * Discovery hands us a server NAME — "Acme Grafana", "servicenow-prod",
+ * "github.com/acme" — and a tool name like `mcp-1a2b3c4d.searchIncidents`.
+ * None of those is a provider id, and all of them usually contain one.
+ *
+ * Substring matching, on a deliberately short alias list. This is a
+ * RECOGNITION aid: a wrong guess shows the wrong logo beside a correctly-named
+ * tool, which is a cosmetic error, while being too strict shows a monogram for
+ * a vendor we drew. Neither is expensive, so it errs toward matching.
+ */
+export function resolveProvider(raw: string | ProviderId | null | undefined): ProviderId | null {
+  if (!raw) return null;
+  if (raw in PROVIDER_MARKS) return raw as ProviderId;
+
+  const text = String(raw).toLowerCase();
+  for (const [alias, id] of PROVIDER_ALIASES) {
+    if (text.includes(alias)) return id;
+  }
+  return null;
+}
+
+/**
+ * Longest alias first, so `google-sheets` is not eaten by `google`.
+ *
+ * Order is the whole correctness story here — a Map iterates in insertion
+ * order, and the first hit wins.
+ */
+const PROVIDER_ALIASES: [string, ProviderId][] = ([
+  ["google-sheets", "google-sheets"], ["googlesheets", "google-sheets"], ["sheets", "google-sheets"],
+  /* Before the bare "google" alias below, which would otherwise claim it. */
+  ["google-chat", "google-chat"], ["googlechat", "google-chat"], ["google_chat", "google-chat"],
+  ["servicenow", "servicenow"], ["service-now", "servicenow"], ["snow", "servicenow"],
+  ["salesforce", "salesforce"], ["sfdc", "salesforce"],
+  ["kubernetes", "kubernetes"], ["k8s", "kubernetes"],
+  ["confluence", "confluence"],
+  ["pagerduty", "pagerduty"], ["pager-duty", "pagerduty"],
+  ["postgresql", "postgres"], ["postgres", "postgres"], ["pgvector", "postgres"],
+  ["anthropic", "anthropic"], ["claude", "anthropic"],
+  ["snowflake", "snowflake"],
+  ["kubernetes", "kubernetes"],
+  ["grafana", "grafana"], ["loki", "grafana"], ["prometheus", "grafana"],
+  ["datadog", "datadog"], ["dd-agent", "datadog"],
+  ["mongodb", "mongodb"], ["mongo", "mongodb"],
+  ["elasticsearch", "elastic"], ["elastic", "elastic"], ["opensearch", "elastic"],
+  ["shopify", "shopify"],
+  ["zendesk", "zendesk"],
+  ["airtable", "airtable"],
+  ["hubspot", "hubspot"],
+  ["gitlab", "gitlab"],
+  ["github", "github"],
+  ["sentry", "sentry"],
+  ["stripe", "stripe"],
+  ["twilio", "twilio"],
+  ["linear", "linear"],
+  ["notion", "notion"],
+  ["openai", "openai"], ["gpt", "openai"],
+  ["gemini", "gemini"], ["google", "gemini"],
+  ["mistral", "mistral"],
+  ["slack", "slack"],
+  /* Not a bare "teams": a server called "platform-teams" is not Microsoft's. */
+  ["microsoft-teams", "teams"], ["msteams", "teams"], ["ms-teams", "teams"],
+  ["discord", "discord"],
+  ["gmail", "gmail"],
+  ["mysql", "mysql"], ["mariadb", "mysql"],
+  ["jira", "jira"], ["atlassian", "jira"],
+  ["aws", "aws"], ["amazon", "aws"],
+  ["webhook", "webhook"],
+] as [string, ProviderId][]);

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Pool, type QueryResultRow } from "pg";
+import { appDatabaseConnectionOptions } from "./app-db-tls";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE APPLICATION DATABASE
@@ -49,7 +50,7 @@ function getPool(): Pool {
   }
   if (!pool) {
     pool = new Pool({
-      connectionString,
+      ...appDatabaseConnectionOptions(connectionString),
       // Small: a serverless instance handles one request at a time, and Neon's
       // pooled endpoint is the thing doing the real pooling.
       max: 3,

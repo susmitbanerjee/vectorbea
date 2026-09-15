@@ -1,6 +1,7 @@
 import {
-  resolveTool, resolveConnection, type BuilderRegistry,
+  resolveTool, resolveConnection, isUsableConnection, type BuilderRegistry,
 } from "./use-builder-registry";
+import { readInputMapping, stepInputs } from "./step-io";
 import { downstreamOf } from "./store";
 import { validateTeams } from "./team-validation";
 import type { Entitlements } from "~/lib/entitlements/use-entitlements";
@@ -192,6 +193,21 @@ export function validateGraph(
         fix: "Pick a tool on the node's Configure tab.",
       });
     }
+    /* A tool input the tool requires and nothing fills: the call fails on every
+       run. Checked against the tool's own schema, so it is skipped while the
+       registry is loading rather than reported for every tool at once. */
+    if (kind === "tool" && registry && !registry.loading) {
+      const mapping = readInputMapping(config);
+      const missing = stepInputs(n.node, registry).filter((input) => input.required && !mapping[input.id]?.trim());
+      if (missing.length > 0) {
+        issues.push({
+          id: `unfilled-inputs-${id}`, category: "binding", severity: "error", nodeId: id,
+          title: `‘${name}’ is missing ${missing.map((m) => m.label.toLowerCase()).join(", ")}`,
+          detail: "The tool needs this on every call.",
+          fix: "Open the step's Inputs tab and type a value or pick one from an earlier step.",
+        });
+      }
+    }
     if (kind === "branch" && !config.condition) {
       issues.push({
         id: `unbound-condition-${id}`, category: "binding", severity: "error", nodeId: id,
@@ -274,7 +290,7 @@ export function validateGraph(
         detail: `‘${name}’ binds credentials this workspace does not have.`,
         fix: `Create it under Connections, or bind a different one.`,
       });
-    } else if (registry && boundConnection && boundConnection.status !== "active") {
+    } else if (registry && boundConnection && !isUsableConnection(boundConnection.status)) {
       issues.push({
         id: `unhealthy-conn-${id}`, category: "resource", severity: "warning", nodeId: id,
         title: `Connection ‘${boundConnection.name}’ is ${boundConnection.status}`,

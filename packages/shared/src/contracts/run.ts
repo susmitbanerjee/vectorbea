@@ -43,6 +43,14 @@ export const runStatus = z.enum([
   "cancelled",
   "awaiting_approval",
   "waiting_for_approval",
+  /*
+   * Parked on something that is not a person and not a clock: an async tool
+   * still working, or a signal that has not arrived. Distinct from
+   * `waiting_for_approval` because nobody is being asked to do anything, and
+   * distinct from `queued` because the run HAS started — it is holding no
+   * worker while it waits. See docs/WAITS-AND-SIGNALS.md.
+   */
+  "waiting_for_event",
   "waiting_for_timer",
   "recovering",
   "yielded",
@@ -54,7 +62,17 @@ export const runStatus = z.enum([
 ]);
 export type RunStatus = z.infer<typeof runStatus>;
 
-export const triggerType = z.enum(["schedule", "webhook", "manual", "api"]);
+/**
+ * How a run was started.
+ *
+ * Mirrors `TriggerSource` in the API. `event` and `mcp` joined the four
+ * originals when ingress grew those doors — and this enum is not decorative:
+ * a run whose `triggerType` is missing here fails response validation, so the
+ * Runs page would break for exactly the runs a new integration produces.
+ */
+export const triggerType = z.enum([
+  "schedule", "webhook", "manual", "api", "event", "mcp",
+]);
 export type TriggerType = z.infer<typeof triggerType>;
 
 /**
@@ -76,6 +94,23 @@ export const runSummary = z.object({
   currentStepId: z.string().nullish(),
   currentAgentId: uuid.nullish(),
   idempotencyKey: z.string().nullish(),
+  /**
+   * The live-singleton key this run holds, if any.
+   *
+   * A DIFFERENT question from `idempotencyKey`, and the difference is at the
+   * boundary: an idempotency key asks "is this the same request" and expires on
+   * a 24-hour clock, while a dedup key asks "is something already working on
+   * this thing" and is freed the moment the run ends — because a new alert for
+   * a service whose incident just closed should open a new incident.
+   */
+  dedupKey: z.string().nullish(),
+  /**
+   * 0–100. Orders the claim, and discounts the fair-queue clock.
+   *
+   * Both halves matter: `priority DESC` alone is a strict lane that a trickle of
+   * Sev1s would use to starve batch work completely.
+   */
+  priority: z.number().int().min(0).max(100).nullish(),
   startedAt: isoDateTime.nullish(),
   completedAt: isoDateTime.nullish(),
   durationMs: z.number().nullish(),
@@ -91,7 +126,39 @@ export const runSummary = z.object({
   nodeCommitted: z.number().int().nonnegative(),
   /** Compact worker-maintained JSON: [{n,s,ms}]. */
   ribbonJson: z.string(),
+  /**
+   * Whether the run's result reached where it was meant to go.
+   *
+   * Separate from `status`, and that separation is the point: a run that
+   * produced the right answer and could not deliver it is not a failed run —
+   * its output is correct, its cost was real, and retrying the RUN would
+   * re-execute every side effect. It is a successful run with an undelivered
+   * result, and the two facts need two fields to stay distinguishable.
+   *
+   * `.catch()` because the API and the web deploy separately: a browser a
+   * deploy ahead reading a response without the field must not fail validation
+   * for the whole runs list.
+   */
+  deliveryStatus: z
+    .enum(["none", "pending", "delivered", "partial", "failed"])
+    .catch("none")
+    .default("none"),
   incidentId: uuid.nullish(),
+  /**
+   * True when this run executed on a self-hosted runner and its payloads never
+   * left the customer's network.
+   *
+   * On the SUMMARY, not only the detail: somebody scanning a list of runs needs
+   * to know which of them they can expect to inspect. Finding out only after
+   * opening one, and finding an empty panel, is the experience this flag exists
+   * to replace.
+   *
+   * `.catch(false)` for the same reason `deliveryStatus` has one — a browser a
+   * deploy ahead of the API must not fail validation for the whole list.
+   */
+  payloadsWithheld: z.boolean().catch(false).default(false),
+  /** Which self-hosted pool executed it, when one did. */
+  runnerPoolId: uuid.nullish(),
 });
 export type RunSummary = z.infer<typeof runSummary>;
 
@@ -114,6 +181,104 @@ export const runDetail = runSummary.extend({
 export type RunDetail = z.infer<typeof runDetail>;
 
 export const runPage = page(runSummary);
+
+/**
+ * `GET /api/runs/:id/deliveries` (`routes/DeliveryRoutes.kt`).
+ *
+ * Where a run's result went, and whether it got there. The rows a customer
+ * reads when asking "my workflow ran, so where is the output" — which is a
+ * different question from "did my workflow run", and the reason delivery has
+ * its own status rather than being folded into the run's.
+ */
+export const runDelivery = z.object({
+  id: uuid,
+  runId: uuid,
+  targetId: uuid,
+  targetName: maybe(z.string()),
+  /**
+   * The key the receiver deduplicates on.
+   *
+   * Identical on every retry and on an operator's redelivery, because it is
+   * derived from (run, target, sequence). Shown in the UI so a support
+   * conversation can match our row to their log line.
+   */
+  idempotencyKey: z.string(),
+  status: z.enum([
+    "pending", "delivering", "delivered", "retrying", "dead", "cancelled", "skipped",
+  ]).catch("pending"),
+  /** True for a streamed partial; the final result is false. */
+  partial: z.boolean().default(false),
+  /** 0 for the final result; 1..n for partials, in order. */
+  sequence: z.number().default(0),
+  attempts: z.number(),
+  maxAttempts: z.number(),
+  /** Only while retrying. Null once it has landed or died. */
+  nextAttemptAt: maybe(isoDateTime),
+  /**
+   * Which shape actually went out.
+   *
+   * Null before the first attempt. `url` means the result was over the
+   * target's size limit and travelled as a signed link — said explicitly,
+   * because a receiver that got a link where it expected a body needs to know
+   * it was a size decision and not a missing field.
+   */
+  payloadMode: maybe(z.enum(["full", "url"])),
+  payloadBytes: z.number().nullish(),
+  payloadUrl: maybe(z.string()),
+  lastError: maybe(z.string()),
+  deliveredAt: maybe(isoDateTime),
+  createdAt: isoDateTime,
+  /** Whether the UI should offer a redelivery button. */
+  redeliverable: z.boolean().default(false),
+});
+export type RunDelivery = z.infer<typeof runDelivery>;
+
+/** `GET /api/runs/:id/deliveries` — the rows plus the run's roll-up. */
+export const runDeliveryList = z.object({
+  items: z.array(runDelivery),
+  total: z.number(),
+  deliveryStatus: z
+    .enum(["none", "pending", "delivered", "partial", "failed"])
+    .catch("none"),
+});
+
+/**
+ * `GET /api/runs/:id/waits` (`routes/SignalRoutes.kt`, reading the
+ * `run_active_waits` view).
+ *
+ * WHAT A RUN IS PARKED ON, which is the question a parked run raises and
+ * nothing else on the page answers. A run holding no worker for six minutes
+ * looks identical to a hung one; this is the difference between the two.
+ *
+ * ACTIVE WAITS ONLY. A resolved wait is history, and history is the event log —
+ * `RUN_WAIT_STARTED` / `RUN_WAIT_RESOLVED` bracket it there with real
+ * timestamps. Serving resolved waits here too would give the timeline two
+ * sources for the same span that could disagree.
+ *
+ * `expiresInMs` is null when the wait has no deadline, and goes NEGATIVE once
+ * the deadline has passed but the sweeper has not yet run — which is a real
+ * state worth showing rather than clamping, because "overdue" is exactly when
+ * somebody is looking.
+ */
+export const runWait = z.object({
+  waitId: uuid,
+  /** `approval` | `async_tool` | `signal` | `agent_wait` — the wire names of `WaitKind`. */
+  kind: z.string(),
+  /** Written for a person: "waiting for render_video to finish". */
+  label: maybe(z.string()),
+  nodeId: maybe(z.string()),
+  /** Set for signal waits: the signal name that will resolve this. */
+  signalName: maybe(z.string()),
+  /** The provider's handle for the work, when the tool returned one. */
+  externalRef: maybe(z.string()),
+  createdAt: isoDateTime,
+  timeoutAt: maybe(isoDateTime),
+  waitingMs: z.number(),
+  expiresInMs: z.number().nullish(),
+  pollAttempts: z.number(),
+});
+export type RunWait = z.infer<typeof runWait>;
+export const runWaitPage = page(runWait);
 
 /** `routes/RunRoutes.kt` — `RunEvent.toResponse()`. */
 export const runEvent = z.object({
@@ -197,6 +362,7 @@ export type UiRunStatus =
   | "running"
   | "queued"
   | "awaiting-approval"
+  | "waiting"
   | "cancelled";
 
 export function toUiRunStatus(status: RunStatus): UiRunStatus {
@@ -210,10 +376,19 @@ export function toUiRunStatus(status: RunStatus): UiRunStatus {
     case "timed_out":
     case "enqueue_failed":
       return "failed";
-    case "paused":
+    /*
+     * Parked, not pending. `queued` says the platform has not started this run;
+     * for a six-minute render, a timer, or a cooperative yield that is false and
+     * reads to an operator as a backed-up queue. `awaiting-approval` is equally
+     * wrong — it says a person must act. `waiting` says the true thing: the run
+     * is fine, it is holding nothing, and it will resume on its own.
+     */
+    case "waiting_for_event":
     case "waiting_for_timer":
-    case "recovering":
     case "yielded":
+      return "waiting";
+    case "paused":
+    case "recovering":
       return "queued";
     case "cancellation_requested":
     case "continued_as_new":

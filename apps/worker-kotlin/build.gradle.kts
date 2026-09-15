@@ -28,6 +28,8 @@ dependencies {
     // (nodes, edges) on their own APIs, and a consumer that cannot name the
     // type it is handed has to re-declare it.
     api("com.vectorbea:graph-kotlin:0.1.0")
+    api("com.vectorbea:skills-kotlin:0.1.0")
+    api("com.vectorbea:mcp-kotlin:0.1.0")
 
     /*
      * BPE tokenizer, for the capacity bucket's input-token estimate.
@@ -56,6 +58,35 @@ dependencies {
     // Note: recovery-kotlin is vendored into src/main/kotlin/com/vectorbea/recovery/
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.17.2")
+
+    /*
+     * ── RESPONSE EXTRACTION, IN THE TWO LANGUAGES PEOPLE ACTUALLY PASTE ─────
+     *
+     * An HTTP tool declares how to cut the agent-visible document out of the
+     * response (`HttpToolSpec.Extraction`). Two engines, because the two
+     * communities do not overlap and neither expression translates: an API's own
+     * documentation quotes JSONPath, the AWS ecosystem speaks JMESPath, and
+     * supporting one would make half of all copied expressions silently wrong
+     * rather than rejected.
+     *
+     * Both are configured for the JACKSON node model in `ResponseExtractor`, not
+     * the default one:
+     *
+     *   · json-path's default provider is `JsonSmartJsonProvider`, which parses
+     *     into net.minidev maps. Every extraction would then be a second parse of
+     *     a document Jackson has already parsed, and the result would have to be
+     *     converted back before the projection layer could read it.
+     *   · Configuration.setDefaults is process-wide and set ONCE, at class init,
+     *     rather than per call. Two call sites setting different defaults is a
+     *     race whose symptom is an extraction returning the wrong node type
+     *     intermittently.
+     *
+     * Neither library evaluates arbitrary code: json-path's filter syntax is a
+     * closed predicate grammar, and it is fed expressions from a tool's stored
+     * spec, never from a model's arguments.
+     */
+    implementation("com.jayway.jsonpath:json-path:2.9.0")
+    implementation("io.burt:jmespath-jackson:0.6.0")
 
     // Logging — SLF4J + Logback
     implementation("org.slf4j:slf4j-api:2.0.13")
@@ -183,6 +214,47 @@ tasks.withType<Test>().configureEach {
 
 tasks.test {
     useJUnitPlatform { excludeTags("integration", "benchmark") }
+
+    /*
+     * ── THE UNIT TIER MAY REACH ITS OWN LOOPBACK SERVERS ────────────────────
+     *
+     * `HttpToolResolverTest` asserts what goes ON THE WIRE — the body encoding,
+     * the auth header name, how many pages were fetched — against a real
+     * `com.sun.net.httpserver` on 127.0.0.1. A stubbed HttpClient would only
+     * assert that the code restates its own intent.
+     *
+     * `SsrfGuard` blocks loopback, which is correct, and
+     * `SSRF_ALLOWED_TEST_HOSTS` is its own documented exemption: exact host
+     * matches only, applied after the name block and the per-connection
+     * allow-list, and IGNORED ENTIRELY when APP_ENV=production. Setting it here
+     * cannot weaken a deployed worker — this is a Gradle test task.
+     *
+     * ── AND IT IS 127.0.0.2, NOT 127.0.0.1, ON PURPOSE ─────────────────────
+     * `SsrfGuardTest` and `HttpNodeExecutorTest` both assert that
+     * `http://127.0.0.1` IS blocked. Exempting that exact address here made the
+     * guard's own tests pass vacuously — the suite went green while proving
+     * nothing about the thing it exists to prove. The whole of 127/8 is loopback
+     * and binds identically, so the server moves and the assertions stay real.
+     *
+     * Set through the environment rather than by reflecting on `System.getenv()`
+     * from the test: JDK 17's strong encapsulation makes that silently fail,
+     * which is how a suite passes while never reaching its server at all.
+     */
+    environment("SSRF_ALLOWED_TEST_HOSTS", "127.0.0.2")
+
+    /*
+     * ── THE TEST JVM RUNS IN UTC ────────────────────────────────────────────
+     * The Postgres JDBC driver sends the JVM's timezone id at connection time,
+     * and a developer machine set to `Asia/Calcutta` — the legacy alias for
+     * Asia/Kolkata — is rejected outright by a Postgres image with current
+     * tzdata: `FATAL: invalid value for parameter "TimeZone"`. Every
+     * container-backed test then fails to connect, which reads as a broken
+     * database rather than a locale.
+     *
+     * UTC rather than any other zone because a test asserting on a timestamp
+     * should not produce different answers in different offices.
+     */
+    systemProperty("user.timezone", "UTC")
 }
 
 val integrationTest by tasks.registering(Test::class) {
@@ -214,6 +286,52 @@ val integrationTest by tasks.registering(Test::class) {
     if (System.getProperty("os.name").startsWith("Windows") && System.getenv("DOCKER_HOST") == null) {
         environment("DOCKER_HOST", "npipe:////./pipe/dockerDesktopLinuxEngine")
     }
+
+    /*
+     * ── A CALLBACK SECRET, SO THE CALLBACK PATH IS ACTUALLY EXERCISED ───────
+     *
+     * `RunWait.callbackTokenFor` returns NULL when no secret is configured, and
+     * the resolver then refuses to offer a callback — correct behaviour, and it
+     * meant `withCallback = true` in a test silently produced a wait with no
+     * token and no callback path. The suite went green while testing the
+     * fallback.
+     *
+     * A fixed value here rather than a random one: a token is an HMAC over the
+     * wait key, and a test that asserts two computations agree needs the key to
+     * be the same on both. Test-only, and never a production default — a worker
+     * with neither variable set refuses to publish a callback URL at all.
+     */
+    environment("WAIT_CALLBACK_SECRET", "integration-test-callback-secret")
+
+    /*
+     * The same loopback exemption `test` grants, for the same reason.
+     *
+     * `integrationTest` runs BOTH tiers, so it runs `HttpToolResolverTest` — and
+     * that suite talks to a real socket on 127.0.0.2, which `SsrfGuard` blocks by
+     * design. Without this the integration tier failed every HTTP tool test on a
+     * guard doing its job, which reads as a broken resolver rather than a missing
+     * variable. Ignored entirely when APP_ENV=production; this is a test task.
+     */
+    environment("SSRF_ALLOWED_TEST_HOSTS", "127.0.0.2")
+
+    /* The public origin a provider would call back on. Nothing dials it — the
+       tests assert the URL the resolver hands out and then resolve the wait
+       directly — but the resolver refuses to offer a callback without it. */
+    environment("PUBLIC_API_BASE_URL", "http://127.0.0.2:9")
+
+    /*
+     * ── THE TEST JVM RUNS IN UTC ────────────────────────────────────────────
+     * The Postgres JDBC driver sends the JVM's timezone id at connection time,
+     * and a developer machine set to `Asia/Calcutta` — the legacy alias for
+     * Asia/Kolkata — is rejected outright by a Postgres image with current
+     * tzdata: `FATAL: invalid value for parameter "TimeZone"`. Every
+     * container-backed test then fails to connect, which reads as a broken
+     * database rather than a locale.
+     *
+     * UTC rather than any other zone because a test asserting on a timestamp
+     * should not produce different answers in different offices.
+     */
+    systemProperty("user.timezone", "UTC")
 }
 
 // ── Fat jar via Shadow — merges service files correctly ───────────────────────

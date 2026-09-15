@@ -6,7 +6,6 @@ import type { Route } from "next";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
-import { Input } from "~/components/ui/input";
 import { Switch } from "~/components/ui/choice";
 import { formatDuration } from "~/lib/format";
 import { DetailSheet, Section, Facts } from "./detail-sheet";
@@ -494,23 +493,25 @@ function Versions({ tool }: { tool: ToolRecord }) {
 function TestConsole({ tool }: { tool: ToolRecord }) {
   const api = useApi();
   const { workspaceId } = useScope();
-  const [values, setValues] = React.useState<Record<string, string>>(
-    Object.fromEntries(tool.parameters.map((p) => [p.name, p.defaultValue ?? ""])),
-  );
   const [result, setResult] = React.useState<{ ms: number; body: string } | null>(null);
   const [running, setRunning] = React.useState(false);
-  const [copied, setCopied] = React.useState(false);
+  React.useEffect(() => { setResult(null); }, [tool.id]);
 
-  const curl = React.useMemo(() => {
-    const body = JSON.stringify(values, null, 2);
-    return `curl -X POST '${tool.endpoint.replace(/^POST\s+/, "")}' \\\n  -H 'Authorization: Bearer $VECTORBEA_TOKEN' \\\n  -H 'Content-Type: application/json' \\\n  -d '${body}'`;
-  }, [tool.endpoint, values]);
-
-  const run = async () => {
+  const run = async (connectionTest = false) => {
     setRunning(true);
     const started = performance.now();
     try {
-      const response = await api.tools.test(tool.id, { workspaceId, environmentId: null });
+      setResult(null);
+      const scope = { workspaceId, environmentId: null };
+      const saved = await api.tools.get(tool.id, scope);
+      if (connectionTest && !saved.connectionId) throw new Error("This tool has no connection to test.");
+      const response = connectionTest
+        ? await api.connections.test(saved.connectionId!, scope)
+        : saved.type !== "http" ? await api.tools.test(tool.id, scope) : await api.tools.testDraft({
+            type: saved.type, connectionId: saved.connectionId,
+            config: saved.config, inputSchema: saved.inputSchema, outputSchema: saved.outputSchema,
+            ...(saved.httpSpec ? { httpSpec: saved.httpSpec } : {}),
+          }, scope);
       setResult({
         ms: Math.round(performance.now() - started),
         body: JSON.stringify(response, null, 2),
@@ -525,7 +526,7 @@ function TestConsole({ tool }: { tool: ToolRecord }) {
   return (
     <>
       <Section
-        title="Parameters"
+        title="Validate and test"
         help="Validates the persisted adapter, schemas, and connection binding through the API. It never executes side effects."
         tone={tool.risk === "critical" || tool.risk === "high" ? "warning" : undefined}
       >
@@ -535,47 +536,18 @@ function TestConsole({ tool }: { tool: ToolRecord }) {
           </Text>
         ) : null}
 
-        <div className="grid gap-2">
-          {tool.parameters.map((p) => (
-            <label key={p.name} className="grid gap-1">
-              <span className="flex items-baseline gap-1.5">
-                <Text variant="caption" tone="secondary">{p.name}</Text>
-                {p.required ? <Text variant="caption" tone="inherit" className="text-status-failed">required</Text> : null}
-              </span>
-              <Input
-                value={values[p.name] ?? ""}
-                onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                placeholder={p.type}
-                className="h-7 font-code text-mono-sm"
-              />
-            </label>
-          ))}
-        </div>
-
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <Button size="sm" variant="primary" onClick={() => void run()} loading={running}>
-            {running ? "Validating" : "Validate tool"}
+            Validate tool
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(curl);
-                setCopied(true);
-                window.setTimeout(() => setCopied(false), 1600);
-              } catch {}
-            }}
-          >
-            {copied ? "Copied" : "Copy as cURL"}
+          <Button size="sm" variant="secondary" disabled={running} onClick={() => void run(true)}>
+            Test saved connection
           </Button>
         </div>
-      </Section>
-
-      <Section title="Request" help="Exactly what would be sent.">
-        <pre className="border-subtle bg-surface-sunken font-code text-mono-sm text-fg-secondary max-h-48 overflow-auto rounded-sm border p-2">
-          {curl}
-        </pre>
+        <Text variant="caption" tone="muted" className="mt-3 block">
+          Connection testing checks the saved endpoint and credentials. To test the full HTTP request,
+          including inputs, response extraction and pagination, run the tool in a workflow.
+        </Text>
       </Section>
 
       {result ? (

@@ -51,6 +51,21 @@ import javax.sql.DataSource
  * statement must stay ONE statement: reading the weight in Kotlin first would
  * put a round trip between reading the clock and advancing it, which is the race
  * the single `UPDATE ... RETURNING` exists to close.
+ *
+ * ── AND WHERE THE RUN'S OWN PRIORITY COMES IN (T5) ────────────────────
+ * The plan weight answers "which TENANT goes first". It cannot answer "which of
+ * this tenant's runs goes first", and an SRE team's Sev1 and their nightly batch
+ * job live in the same workspace — so a second divisor, `run_priority_weight`
+ * (V068), discounts the clock cost by the run's own priority.
+ *
+ * Weighting rather than a strict lane, deliberately. `priority DESC` in the
+ * claim is already a strict ordering, and a strict ordering ALONE starves: a
+ * service producing one Sev1 a minute would stop batch work entirely and nobody
+ * would notice until a nightly job had not run for a week. A discount makes a
+ * Sev1 jump the queue repeatedly and cheaply while a batch run that has been
+ * waiting still eventually holds the lowest vtime and is served. Both are kept:
+ * `priority DESC` gives an unambiguous answer for a genuine emergency, and the
+ * weight is what makes the ordinary spread of priorities behave.
  */
 object FairOrdering {
 
@@ -108,6 +123,13 @@ object FairOrdering {
         dataSource: DataSource,
         workspaceId: UUID,
         executionClass: ExecutionClass,
+        /**
+         * The run's own priority, 0–100, already clamped to what the workspace
+         * may ask for — see `RunIngress.priorityFor`. Defaults to 0, which
+         * reproduces the pre-T5 behaviour exactly: the divisor is 1.0 and the
+         * priority stamped on the row is the workspace lane's, as before.
+         */
+        priority: Short = 0,
     ): Placement {
         val cost = estimatedCost(executionClass)
         return try {
@@ -122,7 +144,8 @@ object FairOrdering {
                     )
                     UPDATE workspaces w
                        SET vclock = GREATEST(w.vclock, EXTRACT(EPOCH FROM now()))
-                                    + (? / GREATEST((SELECT weight FROM policy), 0.01))
+                                    + (? / (GREATEST((SELECT weight FROM policy), 0.01)
+                                            * run_priority_weight(?)))
                      WHERE w.id = ?
                     RETURNING w.vclock, (SELECT priority_lane FROM policy) AS priority_lane
                     """.trimIndent()
@@ -130,16 +153,24 @@ object FairOrdering {
                     stmt.setObject(1, workspaceId)
                     stmt.setObject(2, workspaceId)
                     stmt.setDouble(3, cost)
-                    stmt.setObject(4, workspaceId)
+                    stmt.setShort(4, priority)
+                    stmt.setObject(5, workspaceId)
                     stmt.executeQuery().use { rs ->
                         if (rs.next()) {
                             val vtime = rs.getDouble("vclock")
                             // The demo lane: runtime-configurable, no deploy.
-                            val priority: Short = if (rs.getBoolean("priority_lane")) PRIORITY_LANE_VALUE else 0
-                            Placement(vtime, priority)
+                            val lane: Short = if (rs.getBoolean("priority_lane")) PRIORITY_LANE_VALUE else 0
+                            /*
+                             * The higher of the two. A priority-lane workspace
+                             * keeps stamping 100 on everything, which is what it
+                             * pays for and what the lane test asserts; a run that
+                             * asked for more than its workspace's floor keeps what
+                             * it asked for. Neither can lower the other.
+                             */
+                            Placement(vtime, maxOf(lane, priority))
                         } else {
                             log.warn("[fair] workspace {} not found — falling back to now", workspaceId)
-                            Placement(nowEpoch(), 0)
+                            Placement(nowEpoch(), priority)
                         }
                     }
                 }
@@ -147,7 +178,10 @@ object FairOrdering {
         } catch (e: Exception) {
             log.warn("[fair] could not place run for workspace {} — falling back to FIFO: {}",
                 workspaceId, e.message)
-            Placement(nowEpoch(), 0)
+            /* FIFO for this one run, but it keeps its priority: `priority DESC`
+               still orders the claim, so a Sev1 placed during a database blip is
+               delayed rather than demoted. */
+            Placement(nowEpoch(), priority)
         }
     }
 

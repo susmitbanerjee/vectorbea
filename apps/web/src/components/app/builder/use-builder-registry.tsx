@@ -119,6 +119,19 @@ export function useBuilderRegistry(): BuilderRegistry {
   return React.useContext(RegistryContext);
 }
 
+/**
+ * Whether a connection can be used, by the worker's rule.
+ *
+ * A passing test stores `connected`; `active` is the older value; a never-tested
+ * connection is `not_tested` and the worker proceeds with it (see
+ * `ConnectionResolver.resolve`). Checking for `active` alone made the canvas warn
+ * "Connection 'Slack' is connected — 'Post to Slack' will fail here" about a
+ * connection whose test had just passed.
+ */
+export function isUsableConnection(status: string | null | undefined): boolean {
+  return status === "active" || status === "connected" || status === "ok" || status === "not_tested";
+}
+
 /* ── Resolution ─────────────────────────────────────────────────────────────
    Pure, and exported for tests. A node's binding is whatever the graph happens
    to carry, which after several generations of this builder is not one thing. */
@@ -226,7 +239,7 @@ export function boundResourceFor(
       return {
         label: tool.name,
         provider: providerOf(connection, tool.type),
-        connected: connection ? connection.status === "active" : false,
+        connected: connection ? isUsableConnection(connection.status) : false,
         detail: connection?.name ?? `${tool.riskLevel} risk`,
         missing: false,
       };
@@ -253,7 +266,7 @@ export function boundResourceFor(
       return {
         label: agent.name,
         provider: providerOf(connection, agent.type),
-        connected: connection ? connection.status === "active" : false,
+        connected: connection ? isUsableConnection(connection.status) : false,
         detail: agent.modelName ?? null,
         missing: false,
       };

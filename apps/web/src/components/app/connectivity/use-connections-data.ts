@@ -37,7 +37,17 @@ export function useConnectionsData() {
 }
 
 function toRecord(connection: contracts.Connection, tools: contracts.Tool[], agents: contracts.Agent[]): ConnectionRecord {
-  const linkedTools = tools.filter((tool) => tool.connectionId === connection.id);
+  /*
+   * BOTH LINKS, not just `connectionId`.
+   *
+   * A discovered MCP tool's `connectionId` is null — its server lives in
+   * `mcpServerConnectionId`, behind its own FK. Matching only the first field
+   * made an MCP server's blast radius read "nothing directly depends on this",
+   * which is the exact opposite of true: deleting it revokes every tool
+   * discovered through it.
+   */
+  const linkedTools = tools.filter((tool) =>
+    tool.connectionId === connection.id || tool.mcpServerConnectionId === connection.id);
   const toolIds = new Set(linkedTools.map((tool) => tool.id));
   const linkedAgents = agents.filter((agent) => agent.llmConnectionId === connection.id || agent.allowedToolIds.some((id) => toolIds.has(id)));
   const status = toHealth(connection.lastTestStatus ?? connection.status);
@@ -62,7 +72,22 @@ function toRecord(connection: contracts.Connection, tools: contracts.Tool[], age
     needsPrivateRunner: connection.networkStatus === "private" || connection.config.privateNetwork === true,
     tools: linkedTools.map((tool) => tool.name),
     agents: linkedAgents.map((agent) => agent.name),
+    isMcp: isMcpConnection(connection),
   };
+}
+
+/**
+ * Whether a connection is an MCP server.
+ *
+ * Three spellings, all of them real. `tool` is what every MCP connection made
+ * before the vocabulary was widened is stored as — `ConnectionTester` has
+ * treated the three as one case since it was written — so a check for `mcp`
+ * alone would hide the Tools tab from exactly the connections that have tools.
+ */
+function isMcpConnection(connection: contracts.Connection): boolean {
+  const type = connection.type.toLowerCase();
+  return type === "mcp" || type === "mcp_server" || type === "tool"
+    || connection.provider.toLowerCase() === "mcp";
 }
 
 function toHealth(value: string): ConnectionHealth {

@@ -92,6 +92,15 @@ object SsrfGuard {
         false
     }
 
+    /** Used by clients at connection time so the checked DNS answer is the one dialled. */
+    fun resolvePublic(host: String): List<InetAddress> {
+        checkHostname(host)
+        val addresses = InetAddress.getAllByName(host).toList()
+        require(addresses.isNotEmpty()) { "No addresses resolved" }
+        addresses.forEach { checkAddress(it) }
+        return addresses
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
 
     private fun checkHostname(host: String) {
@@ -110,6 +119,16 @@ object SsrfGuard {
 
     private fun checkAddress(addr: InetAddress) {
         val raw = addr.address
+        if (raw.size == 16 && (raw[0].toInt() and 0xfe) == 0xfc) {
+            throw SsrfBlockedException("PRIVATE_HOST", "Requests to unique-local addresses are not allowed")
+        }
+        if (raw.size == 4) {
+            val a = raw[0].toInt() and 255
+            val b = raw[1].toInt() and 255
+            if (a == 0 || (a == 100 && b in 64..127) || (a == 198 && b in 18..19) || (a == 192 && b == 0)) {
+                throw SsrfBlockedException("PRIVATE_HOST", "Requests to reserved network addresses are not allowed")
+            }
+        }
 
         if (addr.isLoopbackAddress) {
             throw SsrfBlockedException("PRIVATE_HOST", "Requests to loopback addresses are not allowed")

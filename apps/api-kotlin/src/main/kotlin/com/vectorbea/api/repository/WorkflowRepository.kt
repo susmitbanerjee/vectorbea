@@ -21,6 +21,29 @@ data class Workflow(
     val currentVersionId: UUID?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /**
+     * What a second start does when this workflow's dedup key is already held by
+     * a live run: `reject` | `join` | `supersede`.
+     *
+     * The customer's choice, because only they know whether a second alert for a
+     * service is more information about the same incident or a reason to start
+     * again. Defaults to `reject` — the one that cannot silently do the wrong
+     * thing, since the caller always learns what happened.
+     */
+    /**
+     * The self-hosted runner pool this workflow executes in, if any.
+     *
+     * Declared on the WORKFLOW rather than on the run, because "this workflow
+     * touches customer data and must execute inside our network" is a property
+     * of the work. A trigger cannot move a run out of the customer's perimeter
+     * by asking nicely.
+     */
+    val runnerPoolId: UUID? = null,
+    val dedupPolicy: String = "reject",
+    /** The signal name a joined input arrives under. The run has to be listening for it. */
+    val dedupJoinSignal: String = "dedup_join",
+    /** 0 = batch, 50 = normal, 100 = the priority lane. */
+    val defaultPriority: Short = 0,
 )
 
 data class CreateWorkflowRequest(
@@ -37,6 +60,17 @@ data class UpdateWorkflowRequest(
     val name: String? = null,
     val description: String? = null,
     val status: String? = null,
+    /**
+     * What a second start does when the run's deduplication key is taken:
+     * `reject`, `join` or `supersede`. The WORKFLOW's choice, not the caller's —
+     * only the person who wrote the workflow knows whether a second alert is
+     * more information about the same incident or a reason to start again.
+     */
+    val dedupPolicy: String? = null,
+    /** The signal name a `join` arrives under. The run has to be listening for it. */
+    val dedupJoinSignal: String? = null,
+    /** 0–100. Every run of this workflow starts here unless a trigger raises it. */
+    val defaultPriority: Short? = null,
 )
 
 // ── WorkflowVersion ───────────────────────────────────────────────────────────
@@ -80,7 +114,8 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
 
     private val cols = """
         id, workspace_id, environment_id, name, slug, description, creation_mode,
-        status, current_version_id, created_at, updated_at
+        status, current_version_id, created_at, updated_at,
+        dedup_policy, dedup_join_signal, default_priority, runner_pool_id
     """.trimIndent()
 
     private val vCols = """
@@ -201,6 +236,9 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
             if (req.name != null) add("name = ?")
             if (req.description != null) add("description = ?")
             if (req.status != null) add("status = ?")
+            if (req.dedupPolicy != null) add("dedup_policy = ?")
+            if (req.dedupJoinSignal != null) add("dedup_join_signal = ?")
+            if (req.defaultPriority != null) add("default_priority = ?")
             add("updated_at = now()")
         }
         if (setClauses.size == 1) return findById(id, workspaceId) // nothing to update
@@ -211,6 +249,9 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
                 if (req.name != null) setString(i++, req.name)
                 if (req.description != null) setString(i++, req.description)
                 if (req.status != null) setString(i++, req.status)
+                if (req.dedupPolicy != null) setString(i++, req.dedupPolicy)
+                if (req.dedupJoinSignal != null) setString(i++, req.dedupJoinSignal)
+                if (req.defaultPriority != null) setShort(i++, req.defaultPriority)
                 setUuid(i++, id)
                 setUuid(i, workspaceId)
             },
@@ -320,6 +361,14 @@ open class WorkflowRepository(dataSource: DataSource) : BaseRepository(dataSourc
         currentVersionId = rs.uuidOrNull("current_version_id"),
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
+        /* `runCatching` like the other optional columns: several queries in this
+           repository project a narrower list and share this mapper, where a
+           missing column means "not selected" rather than "not present". */
+        dedupPolicy = runCatching { rs.getString("dedup_policy") }.getOrNull() ?: "reject",
+        dedupJoinSignal = runCatching { rs.getString("dedup_join_signal") }.getOrNull()
+            ?: "dedup_join",
+        defaultPriority = runCatching { rs.getShort("default_priority") }.getOrDefault(0),
+        runnerPoolId = runCatching { rs.getObject("runner_pool_id", UUID::class.java) }.getOrNull(),
     )
 
     private fun mapVersionRow(rs: java.sql.ResultSet) = WorkflowVersion(

@@ -127,7 +127,7 @@ class AgentSafetyGuard {
         val redacted = raw
             .replace(Regex("""sk-[A-Za-z0-9]+"""), "[REDACTED-KEY]")
             .replace(Regex("""eyJ[A-Za-z0-9._-]{50,}"""), "[REDACTED-JWT]")
-            .replace(Regex("""[A-Za-z0-9+/]{40,}={0,2}"""), "[REDACTED]")
+            .let { redactOpaque(it) }
         return if (redacted.length <= maxChars) redacted
         else redacted.take(maxChars) +
             "… [truncated — ${redacted.length} characters total. Narrow the tool's " +
@@ -137,9 +137,76 @@ class AgentSafetyGuard {
     fun sanitizeReasoningSummary(summary: String?): String {
         if (summary.isNullOrBlank()) return ""
         return summary.take(500)
-            .replace(Regex("""[A-Za-z0-9+/]{40,}"""), "[REDACTED]")
+            .let { redactOpaque(it) }
             .replace(Regex("""sk-[A-Za-z0-9]+"""), "[REDACTED-KEY]")
             .replace(Regex("""eyJ[A-Za-z0-9._-]{50,}"""), "[REDACTED-JWT]")
+    }
+
+    private companion object {
+        /** A long run of base64 alphabet — what an unlabelled secret usually looks like. */
+        val LONG_OPAQUE = Regex("""[A-Za-z0-9+/]{40,}={0,2}""")
+
+        /** [LONG_OPAQUE] matches, minus the ones that are identifiers rather than secrets. */
+        fun redactOpaque(text: String): String = LONG_OPAQUE.replace(text) { m ->
+            if (isHexDigest(m.value) || isFilePath(m.value, text, m.range.last + 1)) m.value else "[REDACTED]"
+        }
+
+        /**
+         * A source path such as `src/main/java/com/acme/billing/InvoiceService`.
+         *
+         * ── WHY PATHS ARE LEFT ALONE ────────────────────────────────────────
+         * Letters and slashes are base64 alphabet, so every Java or Kotlin path of
+         * forty characters matched, and a code-review agent was handed
+         * `[REDACTED].java` for every changed file — it could name no file and cite
+         * no line, and failed saying exactly that.
+         *
+         * A path is told apart from a token by how it reads, not by its alphabet:
+         * slash-separated segments, no `+` or `=` padding, few digits, mostly lower
+         * case (base64 is half capitals), and the vowel share of words (a random
+         * base64 string has about one vowel in five letters; identifiers have one in
+         * three). A file extension straight after the match counts as a second
+         * signal and relaxes the vowel bar.
+         */
+        fun isFilePath(value: String, text: String, end: Int): Boolean {
+            if ('/' !in value || '+' in value || value.endsWith('=')) return false
+            val segments = value.split('/').filter { it.isNotEmpty() }
+            if (segments.size < 2 || segments.any { it.length > 60 }) return false
+            /* A commit SHA as one segment (`…/commit/43ef28…`) is exempt on its own
+               terms, so it is left out of the word statistics rather than failing
+               the digit test for the whole URL path. */
+            val words = segments.filterNot { isHexDigest(it) }.joinToString("")
+            val letters = words.count { it.isLetter() }
+            if (letters == 0) return false
+            val vowels = words.count { it.lowercaseChar() in "aeiou" }
+            val digits = words.count { it.isDigit() }
+            val capitals = words.count { it.isUpperCase() }
+            if (digits * 5 > words.length || capitals * 3 > letters) return false
+            return if (hasExtensionAt(text, end)) vowels * 5 >= letters
+            else segments.size >= 3 && vowels * 4 >= letters
+        }
+
+        /** `.java`, `.kt`, `.tsx` … immediately at [index]. */
+        private fun hasExtensionAt(text: String, index: Int): Boolean {
+            if (index >= text.length || text[index] != '.') return false
+            var i = index + 1
+            if (i >= text.length || !text[i].isLetter()) return false
+            while (i < text.length && text[i].isLetterOrDigit() && i - index <= 8) i++
+            return i - index in 2..9 && (i == text.length || !text[i].isLetterOrDigit())
+        }
+
+        /**
+         * A git commit SHA (40 hex) or a SHA-256 digest (64 hex).
+         *
+         * ── WHY THESE ARE LEFT ALONE ────────────────────────────────────────
+         * The base64 rule matched every commit SHA a GitHub tool returned, so the
+         * agent was handed `"sha": "[REDACTED]"`, passed that literal string to
+         * `get_commit`, and every code-review workflow failed at its second tool
+         * call. A digest identifies content; it is the handle a later call needs,
+         * not a credential. Exactly 40 or 64 characters of hex only — a mixed-case
+         * base64 token still contains non-hex letters and is still redacted.
+         */
+        fun isHexDigest(value: String): Boolean =
+            (value.length == 40 || value.length == 64) && value.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
     }
 }
 

@@ -11,9 +11,45 @@
  *
  * ~/mocks/connectivity re-exports these and layers the fabricated per-tenant
  * parts (which connections exist, blast radius) on top.
+ *
+ * ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────
+ * Slack, HubSpot, Gmail, GitHub, Notion, Airtable, Jira and Google Sheets were
+ * all first-class entries and have been removed. Every one of them is reached
+ * through its own MCP server now, and that is the better answer for all of
+ * them: the vendor maintains the tool list, it stays current without a release
+ * from us, and the customer's own credential and scopes apply.
+ *
+ * Keeping both would have been worse than picking either. Two doors to GitHub —
+ * one an adapter with the six operations we happened to implement, the other a
+ * server with everything GitHub ships — is a choice a person has to make
+ * without the information needed to make it, and the adapter is the wrong
+ * answer almost every time it is chosen.
+ *
+ * WHAT STAYS, and why each is not an MCP case:
+ *   · LLM providers — a model connection is billing and capacity, not a tool
+ *     list. There is nothing to discover.
+ *   · Postgres and MySQL — the runtime speaks the wire protocol directly,
+ *     with parameters bound rather than interpolated and a read-only guard the
+ *     engine enforces. Going through a server would lose both.
+ *   · Generic HTTP and outbound webhook — the escape hatch for an endpoint
+ *     nobody has wrapped in anything. MCP-only would mean a customer with a
+ *     plain REST API has to build a server first, which is a worse product for
+ *     a protocol preference (MCP.md §1).
+ *   · MCP itself — the door to all of the above.
+ *
+ * The removed vendors keep their MARKS in `provider-logo.tsx`. A logo is for
+ * recognition, and recognising GitHub on a discovered tool list is exactly what
+ * this change makes more likely, not less.
  */
 import type { ProviderId } from "~/components/ui/provider-logo";
 
+/**
+ * `messaging`, `crm`, `productivity` and `developer` are retained with no
+ * members. They are the shape of the removed entries, and a catalogue that
+ * grows a first-class adapter again — for something genuinely not MCP-shaped —
+ * should not have to re-litigate the taxonomy to add it. Empty groups are
+ * filtered out at render.
+ */
 export type IntegrationCategory =
   | "ai" | "database" | "messaging" | "crm" | "productivity" | "developer" | "generic";
 
@@ -27,12 +63,19 @@ export const INTEGRATION_CATEGORY_LABEL: Record<IntegrationCategory, string> = {
   generic: "Generic",
 };
 
-export type AuthMethod = "oauth" | "api-key" | "connection-string" | "none";
+/**
+ * `webhook-url` is a channel's incoming webhook — Microsoft Teams, Google Chat,
+ * Discord. The URL is the credential: anyone holding it can post to the channel,
+ * so it is stored encrypted as the connection's secret (`auth_type =
+ * 'webhook_url'`) and never in config. See `WebhookUrlTester.kt`.
+ */
+export type AuthMethod = "oauth" | "api-key" | "connection-string" | "webhook-url" | "none";
 
 export const AUTH_LABEL: Record<AuthMethod, string> = {
   oauth: "OAuth 2.0",
   "api-key": "API key",
   "connection-string": "Connection string",
+  "webhook-url": "Webhook URL",
   none: "No credentials",
 };
 
@@ -56,6 +99,8 @@ export const INTEGRATION_SEEDS: {
   category: IntegrationCategory;
   description: string;
   auth: AuthMethod[];
+  /** What the credential is called for this provider, when "API key" is the wrong word. */
+  credentialLabel?: string;
   scopes: { name: string; description: string; required: boolean }[];
   setup: string[];
 }[] = [
@@ -75,85 +120,91 @@ export const INTEGRATION_SEEDS: {
     ],
   },
   {
+    /*
+     * ── SLACK IS BACK, AND THE REMOVAL WAS WRONG ────────────────────────────
+     *
+     * It went out with GitHub and HubSpot under "reachable through MCP". That
+     * is TRUE of Slack and it is not the whole story: a bot token in a Slack
+     * app is the thing most teams already have, the bot is how a workflow gets
+     * TRIGGERED (a mention in a channel) as well as how it reports back, and
+     * requiring somebody to stand up an MCP server before an agent can post a
+     * message is the "wrap your REST endpoint first" failure that MCP.md §1
+     * names as a worse product for a protocol preference.
+     *
+     * The rule the catalogue actually wants is narrower than the one applied:
+     * remove an adapter when the MCP server is STRICTLY BETTER — richer, and
+     * maintained by the vendor. For GitHub and HubSpot it is. For Slack, the
+     * two operations below plus the message read are what a workflow needs, a
+     * bot token is five minutes of setup, and the connection doubles as the
+     * identity a trigger listens on.
+     */
     id: "slack", name: "Slack", category: "messaging",
-    description: "Post messages, reply in threads and look up users in a Slack workspace.",
-    auth: ["oauth"],
-    scopes: [
-      { name: "chat:write", description: "Post messages as the app.", required: true },
-      { name: "channels:read", description: "Resolve channel names to ids.", required: true },
-      { name: "users:read", description: "Look up a user by email.", required: false },
-    ],
-    setup: [
-      "Authorise the Vectorbea app in your Slack workspace.",
-      "Choose the channels it may post to — the grant is per channel, not workspace-wide.",
-      "Send a test message before saving.",
-    ],
-  },
-  {
-    id: "hubspot", name: "HubSpot", category: "crm",
-    description: "Read contacts, companies and deals, and write back deal stages.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "crm.objects.contacts.read", description: "Read contacts and their companies.", required: true },
-      { name: "crm.objects.deals.write", description: "Update deal stages and properties.", required: false },
-    ],
-    setup: [
-      "Authorise through HubSpot's OAuth flow, or paste a private app token.",
-      "Select the object types the workflows need.",
-      "Test against a known contact id.",
-    ],
-  },
-  {
-    id: "gmail", name: "Gmail", category: "productivity",
-    description: "Send mail from a workspace mailbox and search existing threads.",
-    auth: ["oauth"],
-    scopes: [
-      { name: "gmail.send", description: "Send mail as the connected mailbox.", required: true },
-      { name: "gmail.readonly", description: "Search and read threads.", required: false },
-    ],
-    setup: [
-      "Authorise a shared mailbox rather than a personal one — a personal account leaves with the person.",
-      "Grant send, and read only if a workflow needs to search.",
-      "Send a test message to yourself before saving.",
-    ],
-  },
-  {
-    id: "github", name: "GitHub", category: "developer",
-    description: "Open issues, read pull requests and comment on both.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "repo", description: "Read and write issues and pull requests.", required: true },
-      { name: "read:org", description: "Resolve team names.", required: false },
-    ],
-    setup: [
-      "Install the Vectorbea GitHub app on the organisation.",
-      "Choose the repositories it may act on.",
-      "Test by reading a pull request.",
-    ],
-  },
-  {
-    id: "notion", name: "Notion", category: "productivity",
-    description: "Create pages and query databases in a Notion workspace.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "content.read", description: "Query databases and read pages.", required: true },
-      { name: "content.write", description: "Create and update pages.", required: false },
-    ],
-    setup: [
-      "Create an internal integration in Notion.",
-      "Share the specific databases with it — Notion grants access per page, not per workspace.",
-      "Paste the integration token.",
-    ],
-  },
-  {
-    id: "airtable", name: "Airtable", category: "productivity",
-    description: "Read and upsert records in an Airtable base.",
+    description: "Post messages, read a channel or thread, and look up users — as a bot in your workspace.",
+    /* One method. Slack's "Bot User OAuth Token" is what both of the old
+       choices ended up asking for, and offering "API key" and "OAuth 2.0" side
+       by side sent people looking for two different credentials. */
     auth: ["api-key"],
+    credentialLabel: "Bot token",
     scopes: [
-      { name: "data.records:read", description: "Read records.", required: true },
-      { name: "data.records:write", description: "Create and update records.", required: false },
+      { name: "chat:write", description: "Post messages as the bot.", required: true },
+      { name: "channels:history", description: "Read messages in channels the bot is in.", required: false },
+      { name: "app_mentions:read", description: "Receive the mention events that can trigger a workflow.", required: false },
+      { name: "users:read.email", description: "Resolve an email address to a Slack user.", required: false },
     ],
-    setup: ["Create a personal access token scoped to one base.", "Paste it and pick the base."],
+    setup: [
+      "Create a Slack app in your workspace and add a bot user.",
+      "Give it chat:write, plus channels:history if an agent needs to READ messages and app_mentions:read if a mention should start a workflow.",
+      "Install it and paste the Bot User OAuth token — it starts xoxb-.",
+      "Invite the bot to each channel it works in. Slack grants per channel, not per workspace.",
+    ],
+  },
+  {
+    /*
+     * ── TEAMS, GOOGLE CHAT AND DISCORD CONNECT BY WEBHOOK URL ───────────────
+     *
+     * Each of them offers a bot API, and each bot API is an afternoon: an Azure
+     * app registration and Graph permissions an admin must consent to, a Google
+     * Cloud project with a Chat app, a Discord application with a gateway. What a
+     * workflow actually needs from them is "post this into that channel", and all
+     * three hand that out as one URL, per channel, from the channel's own
+     * settings — two minutes, no admin. Reading and replying is out of reach by
+     * this route, and the descriptions say so rather than letting somebody find
+     * out after connecting.
+     */
+    id: "teams", name: "Microsoft Teams", category: "messaging",
+    description: "Post messages into one Teams channel through the channel's Workflows webhook. Posting only.",
+    auth: ["webhook-url"],
+    scopes: [],
+    setup: [
+      "In Teams, open the channel, choose the three dots next to its name, then Workflows.",
+      "Pick \"Post to a channel when a webhook request is received\" and finish the template.",
+      "Copy the URL it gives you and paste it here. Anyone with that URL can post to the channel, so it is stored encrypted and never shown again.",
+      "One URL posts to one channel. Connect Teams again for each channel an agent should reach.",
+    ],
+  },
+  {
+    id: "google-chat", name: "Google Chat", category: "messaging",
+    description: "Post messages into one Google Chat space through the space's incoming webhook. Posting only.",
+    auth: ["webhook-url"],
+    scopes: [],
+    setup: [
+      "In Google Chat, open the space, choose its name at the top, then Apps & integrations.",
+      "Choose Add webhooks, give it a name such as Vectorbea, and save.",
+      "Copy the webhook URL and paste it here. It is stored encrypted and never shown again.",
+      "One URL posts to one space. Connect Google Chat again for each space an agent should reach.",
+    ],
+  },
+  {
+    id: "discord", name: "Discord", category: "messaging",
+    description: "Post messages into one Discord channel through the channel's webhook. Posting only.",
+    auth: ["webhook-url"],
+    scopes: [],
+    setup: [
+      "In Discord, open the channel's settings (Edit Channel), then Integrations, then Webhooks.",
+      "Choose New Webhook, name it, and choose Copy Webhook URL.",
+      "Paste it here. Vectorbea checks it with Discord without posting anything.",
+      "One URL posts to one channel. Connect Discord again for each channel an agent should reach.",
+    ],
   },
   {
     id: "openai", name: "OpenAI", category: "ai",
@@ -198,25 +249,6 @@ export const INTEGRATION_SEEDS: {
     setup: ["Create a dedicated role.", "Grant only the needed tables.", "Paste the connection string."],
   },
   {
-    id: "jira", name: "Jira", category: "developer",
-    description: "Create tickets and move them through a workflow.",
-    auth: ["oauth", "api-key"],
-    scopes: [
-      { name: "write:jira-work", description: "Create and transition issues.", required: true },
-      { name: "read:jira-work", description: "Read issues and projects.", required: true },
-    ],
-    setup: ["Authorise the Atlassian app.", "Pick the projects it may write to.", "Test by reading a project."],
-  },
-  {
-    id: "google-sheets", name: "Google Sheets", category: "productivity",
-    description: "Read ranges and append rows to a spreadsheet.",
-    auth: ["oauth"],
-    scopes: [
-      { name: "spreadsheets", description: "Read and write the sheets you share with it.", required: true },
-    ],
-    setup: ["Authorise with Google.", "Share the specific spreadsheets with the service account.", "Test a read."],
-  },
-  {
     id: "webhook", name: "Outbound webhook", category: "generic",
     description: "Send a signed POST to any HTTPS endpoint you control.",
     auth: ["none", "api-key"],
@@ -234,6 +266,24 @@ export const INTEGRATION_SEEDS: {
     setup: [
       "Define the base URL and any static headers.",
       "Store the credential as a workspace secret rather than inlining it in the header.",
+    ],
+  },
+  {
+    id: "mcp", name: "MCP server", category: "generic",
+    /*
+     * The second sentence is doing work. It is the first place anybody meets
+     * the grant model, and it is far cheaper to say here than to explain after
+     * somebody expected a single switch and found twelve checkboxes.
+     */
+    description:
+      "Paste a Model Context Protocol server's URL, sign in if it asks, and its tools " +
+      "are ready to hand to your agents.",
+    auth: ["oauth", "none", "api-key"],
+    scopes: [],
+    setup: [
+      "Paste the server's URL — the streamable-HTTP endpoint, usually ending in /mcp.",
+      "Sign in if the server uses sign-in. Vectorbea registers itself with the server, so there is no OAuth app to create and no token to copy.",
+      "Its tools are discovered as soon as it is connected. Pick the agents that should use them.",
     ],
   },
 ];
@@ -648,6 +698,21 @@ export interface ProviderOperation {
   params: OperationParam[];
   /** Concrete: what somebody actually builds with this. Shown after connecting. */
   useCase: string;
+  /**
+   * The request body, with `{{param}}` where each parameter goes.
+   *
+   * Only for operations whose body is not simply the parameters by name — a
+   * Teams message is an Adaptive Card with the text four levels down. Filled at
+   * any depth by the worker (`ToolNodeExecutor.resolveTemplateValue`); a key whose
+   * whole value is a template the caller left empty is dropped.
+   */
+  bodyTemplate?: Record<string, unknown>;
+  /**
+   * Offers "Send test message" when registering the tool. Only operations the
+   * API's `TestMessageSender` knows how to post — it builds the request itself
+   * rather than taking one from the browser.
+   */
+  sendsTestMessage?: boolean;
 }
 
 const RECIPIENT: OperationParam = {
@@ -721,9 +786,110 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
     ],
   },
 
+  /* ── Microsoft Teams, Google Chat, Discord ──────────────────────────────────
+     Posting through a channel webhook. The path is empty because the
+     connection's URL IS the destination, and the worker refuses to let a tool
+     or an agent send it anywhere else. There is no channel parameter for the
+     same reason: the URL was issued for one channel. */
+  {
+    id: "teams.post",
+    sendsTestMessage: true,
+    provider: "teams",
+    label: "Post a message",
+    description: "Posts a card with your message into the connected Teams channel.",
+    method: "POST",
+    path: "",
+    writes: true,
+    risk: "medium",
+    useCase: "Post a daily summary into the team's channel, or tell a channel a run needs someone to look at it.",
+    params: [
+      {
+        name: "text",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Markdown works: **bold**, _italic_, lists and [links](https://example.com).",
+      },
+    ],
+    bodyTemplate: {
+      type: "message",
+      attachments: [
+        {
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: {
+            $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+            type: "AdaptiveCard",
+            version: "1.4",
+            body: [
+              { type: "TextBlock", text: "{{text}}", wrap: true },
+            ],
+          },
+        },
+      ],
+    },
+  },
+  {
+    id: "google-chat.post",
+    sendsTestMessage: true,
+    provider: "google-chat",
+    label: "Post a message",
+    description: "Posts your message into the connected Google Chat space.",
+    method: "POST",
+    path: "",
+    writes: true,
+    risk: "medium",
+    useCase: "Drop a run's findings into the space the team already reads.",
+    params: [
+      {
+        name: "text",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Google Chat formatting works: *bold*, _italic_, ~strike~ and <https://example.com|links>.",
+      },
+    ],
+    bodyTemplate: { text: "{{text}}" },
+  },
+  {
+    id: "discord.post",
+    sendsTestMessage: true,
+    provider: "discord",
+    label: "Post a message",
+    description: "Posts your message into the connected Discord channel.",
+    method: "POST",
+    path: "",
+    writes: true,
+    risk: "medium",
+    useCase: "Announce a release or an incident update in the community's channel.",
+    params: [
+      {
+        name: "content",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Up to 2,000 characters. Markdown works: **bold**, *italic*, `code` and lists.",
+      },
+      {
+        name: "username",
+        label: "Post as",
+        type: "string",
+        required: false,
+        binding: "config",
+        bindable: true,
+        placeholder: "Vectorbea",
+        help: "The name shown on the message. Leave empty to use the webhook's own name.",
+      },
+    ],
+    bodyTemplate: { content: "{{content}}", username: "{{username}}" },
+  },
+
   /* ── Slack ──────────────────────────────────────────────────────────────── */
   {
     id: "slack.post",
+    sendsTestMessage: true,
     provider: "slack",
     label: "Post a message",
     description: "Posts to a channel as the Vectorbea app.",
@@ -740,10 +906,17 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
         required: true,
         binding: "config",
         bindable: true,
-        placeholder: "#ops-alerts",
-        help: "Fixed here, the agent can only post to this channel. Slack grants access per channel, so this should match what you authorised.",
+        placeholder: "C0123456789 or #ops-alerts",
+        help: "The channel ID (in Slack, open the channel details — it's at the bottom) or the #channel-name. Invite the bot first by typing /invite @your-bot in the channel.",
       },
-      { name: "text", label: "Message", type: "text", required: true, binding: "input" },
+      {
+        name: "text",
+        label: "Message",
+        type: "text",
+        required: true,
+        binding: "input",
+        help: "Slack formatting works: *bold*, _italic_, <https://example.com|links> and <@U0123> mentions.",
+      },
       {
         name: "thread_ts",
         label: "Reply in thread",
@@ -752,6 +925,82 @@ export const PROVIDER_OPERATIONS: ProviderOperation[] = [
         binding: "input",
         help: "The parent message timestamp. Leave empty to post at top level.",
       },
+    ],
+  },
+  {
+    /*
+     * Reading was missing, and it is half of what a Slack bot is for.
+     *
+     * The catalogue had post and user-lookup, so an agent could announce and
+     * mention and could not read a word — which makes "an agent that answers
+     * the question somebody asked in #support" unbuildable, and that is the
+     * first thing anybody tries.
+     *
+     * `conversations.history` needs `channels:history` (and `groups:history`
+     * for private channels), which is why the seed above asks for it
+     * separately: it is a materially larger grant than posting and should be a
+     * separate decision.
+     */
+    id: "slack.read",
+    provider: "slack",
+    label: "Read recent messages",
+    description: "Reads the most recent messages in one channel.",
+    method: "GET",
+    path: "/conversations.history",
+    writes: false,
+    risk: "medium",
+    useCase: "Let an agent answer from what was already said in the channel, rather than asking the question again.",
+    params: [
+      {
+        name: "channel",
+        label: "Channel",
+        type: "string",
+        required: true,
+        binding: "config",
+        bindable: true,
+        placeholder: "C0123456789",
+        help: "The channel ID, not the #name — conversations.history takes an id. Fixed here, so the tool can only ever read this one channel.",
+      },
+      {
+        name: "limit",
+        label: "How many messages",
+        type: "number",
+        required: false,
+        binding: "config",
+        bindable: true,
+        placeholder: "20",
+        help: "Bound it. A channel's whole history in a prompt is the observation-size problem, and the agent reads the newest first anyway.",
+      },
+      {
+        name: "oldest",
+        label: "Since",
+        type: "string",
+        required: false,
+        binding: "input",
+        help: "A Slack timestamp. Leave empty for the most recent messages.",
+      },
+    ],
+  },
+  {
+    /*
+     * A thread, rather than a channel. Separate from `slack.read` because the
+     * common shape — a mention starts a workflow, the agent reads the thread it
+     * was mentioned in — needs the parent timestamp and nothing else, and
+     * making somebody configure a channel filter for that is asking the wrong
+     * question.
+     */
+    id: "slack.thread",
+    provider: "slack",
+    label: "Read a thread",
+    description: "Reads every reply under one message.",
+    method: "GET",
+    path: "/conversations.replies",
+    writes: false,
+    risk: "medium",
+    useCase: "The bot is mentioned in a thread. This is how the agent reads what was said before it was called in.",
+    params: [
+      { name: "channel", label: "Channel", type: "string", required: true, binding: "input", help: "The channel id from the event that started the run." },
+      { name: "ts", label: "Parent message", type: "string", required: true, binding: "input", help: "The thread's parent timestamp, from the triggering event." },
     ],
   },
   {

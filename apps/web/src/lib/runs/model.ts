@@ -14,6 +14,14 @@ export type RunStatus =
   | "running"
   | "queued"
   | "awaiting-approval"
+  /*
+   * Parked on something outside the run — an async tool still working, a
+   * signal that has not arrived, a timer. Not `queued`, which claims the run
+   * has not started; not `awaiting-approval`, which claims a person must act.
+   * The distinction is what stops a healthy six-minute render from reading as
+   * a backed-up queue. See docs/WAITS-AND-SIGNALS.md.
+   */
+  | "waiting"
   | "cancelled";
 
 export type NodeKind =
@@ -39,7 +47,8 @@ export interface Run {
   workflowName: string;
   status: RunStatus;
   environment: "production" | "staging" | "development" | "unknown";
-  trigger: "schedule" | "webhook" | "manual" | "api";
+  /** Mirrors `contracts.TriggerType` — the door this run came in by. */
+  trigger: "schedule" | "webhook" | "manual" | "api" | "event" | "mcp";
   startedAt: string;
   finishedAt: string | null;
   durationMs: number | null;
@@ -47,4 +56,23 @@ export interface Run {
   tokens: number;
   nodes: RunNode[];
   incidentId?: string;
+  /**
+   * Whether the result reached where it was meant to go.
+   *
+   * A SECOND axis, not a status value. A run that produced the right answer and
+   * could not deliver it is `succeeded` with `delivery: "failed"` — folding it
+   * into `status` would either paint a correct run red or hide the failure
+   * entirely, and both are wrong for the person looking at the list.
+   */
+  delivery?: "none" | "pending" | "delivered" | "partial" | "failed";
 }
+
+/**
+ * A log line's severity.
+ *
+ * Here rather than in `~/mocks/run-detail` because it is a TYPE, not fabricated
+ * data — and the fixtures module is a restricted import, so leaving it there
+ * forced anything that classifies a real run's events to import from the mocks.
+ * `log-vocabulary.ts` is the thing that needed it.
+ */
+export type LogLevel = "debug" | "info" | "warn" | "error";

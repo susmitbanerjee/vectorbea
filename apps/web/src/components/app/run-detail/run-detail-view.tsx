@@ -11,12 +11,15 @@ import { Button } from "~/components/ui/button";
 import { ReplayProvider, useReplay } from "./replay";
 import { RunHeader } from "./run-header";
 import { RecoveryCard } from "./recovery-card";
+import { WaitBanner } from "./wait-banner";
+import { ResultPanel } from "./result-panel";
+import { DeliveryPanel } from "./delivery-panel";
 import { StepTimeline } from "./step-timeline";
 import { CanvasMirror } from "./canvas-mirror";
 import { Inspector } from "./inspector";
 import { LogStream } from "./log-stream";
 import type { RunStreamState } from "~/lib/api/run-stream";
-import { CompareView, EventHistory } from "./compare-and-events";
+import { CompareView } from "./compare";
 import { diagnoseRun } from "./diagnose-run";
 import { ApprovalGateIcon } from "~/components/icons/domain";
 import type { contracts } from "@vectorbea/shared";
@@ -61,6 +64,15 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
   const run = React.useMemo(
     () => (data.run ? applyDemoState(data.run, demo) : null),
     [data.run, demo],
+  );
+
+  /* `?demo=waiting` has to fabricate the wait as well as the status: the real
+     waits come from the API and are keyed on the REAL run's status, so a demo
+     recast alone would show a parked run with nothing to be parked on — the
+     exact confusion the banner exists to remove. */
+  const waits = React.useMemo(
+    () => (demo === "waiting" ? DEMO_WAITS : demo ? [] : data.waits),
+    [demo, data.waits],
   );
 
   if (data.loading) {
@@ -113,6 +125,9 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
         run={run}
         frozen={frozen}
         incident={data.incident}
+        waits={waits}
+        deliveries={data.deliveries}
+        onRedeliver={data.redeliver}
         onCancel={data.cancel}
         onRetryStep={data.retryStep}
         onRetryRun={data.retryRun}
@@ -123,11 +138,15 @@ export function RunDetailView({ runId, frozen: frozenProp }: RunDetailViewProps)
 }
 
 function RunDetailBody({
-  run, frozen, incident, onCancel, onRetryStep, onRetryRun, stream,
+  run, frozen, incident, waits, deliveries, onRedeliver,
+  onCancel, onRetryStep, onRetryRun, stream,
 }: {
   run: Run;
   frozen: boolean;
   incident: contracts.FailureIncident | null;
+  waits: contracts.RunWait[];
+  deliveries: contracts.RunDelivery[];
+  onRedeliver: (deliveryId: string) => Promise<void>;
   onCancel: () => Promise<void>;
   onRetryStep: (nodeId: string) => Promise<void>;
   onRetryRun: () => Promise<void>;
@@ -140,7 +159,6 @@ function RunDetailBody({
   );
 
   const [comparing, setComparing] = React.useState(false);
-  const [showEvents, setShowEvents] = React.useState(false);
   const [logFullscreen, setLogFullscreen] = React.useState(false);
   const [logHeight, setLogHeight] = React.useState(220);
   const [leftWidth, setLeftWidth] = React.useState(272);
@@ -232,6 +250,21 @@ function RunDetailBody({
 
       {run.status === "awaiting-approval" ? <GateBanner run={run} /> : null}
 
+      {/* Above the panes for the same reason the recovery card is: on a parked
+          run this is the only thing on the page that has changed, and it is the
+          answer to the question that brought the operator here. */}
+      <WaitBanner waits={waits} />
+
+      {/* Under the header for the same reason the recovery card is: a run that
+          produced the right answer and failed to deliver it is not a success,
+          and putting that on a tab means the person closes the page first. */}
+      <DeliveryPanel deliveries={deliveries} onRedeliver={onRedeliver} />
+
+      {/* The answer, where somebody looking for the answer will find it. It was
+          already on this page — behind the last node of the timeline — which is
+          a thing you learn by being told rather than by looking. */}
+      <ResultPanel detail={detail} runId={run.id} />
+
       {comparing ? <CompareView run={run} onClose={() => setComparing(false)} /> : null}
 
       {/* ── Panes ──────────────────────────────────────────────────────────── */}
@@ -305,23 +338,6 @@ function RunDetailBody({
         </div>
       )}
 
-      {/* ── Event history ──────────────────────────────────────────────────── */}
-      {showEvents ? (
-        <EventHistory run={run} />
-      ) : (
-        <button
-          onClick={() => setShowEvents(true)}
-          className={cn(
-            "border-subtle bg-surface-raised hover:bg-surface-hover w-full rounded-lg border px-3 py-2 text-left",
-            "transition-colors duration-fast outline-none focus-visible:focus-ring",
-          )}
-        >
-          <Text variant="body-sm" tone="primary" className="font-medium">Event history</Text>
-          <Text variant="caption" tone="muted" className="ml-2">
-            the raw event-sourced log every view on this page is derived from
-          </Text>
-        </button>
-      )}
     </PageContainer>
   );
 }
@@ -402,6 +418,31 @@ function CollapsedRail({ label, onExpand }: { label: string; onExpand: () => voi
 
 /* ── Demo states ──────────────────────────────────────────────────────────── */
 
+/** Pinned so the demo URL screenshots identically every time. */
+const FROZEN_DEMO_NOW = new Date("2026-08-11T14:20:00Z").getTime();
+
+/**
+ * One async-tool wait, for `?demo=waiting`.
+ *
+ * Deliberately a six-minute render six minutes in with four minutes left: the
+ * case the wait primitive was built for, at the moment somebody would open the
+ * page to find out whether it is stuck.
+ */
+const DEMO_WAITS: contracts.RunWait[] = [{
+  waitId: "00000000-0000-4000-8000-0000000aa001",
+  kind: "async_tool",
+  label: "waiting for render_video to finish",
+  nodeId: "render_video",
+  signalName: null,
+  externalRef: "job_9f2c41ab",
+  createdAt: new Date(FROZEN_DEMO_NOW - 6 * 60_000).toISOString(),
+  timeoutAt: new Date(FROZEN_DEMO_NOW + 4 * 60_000).toISOString(),
+  waitingMs: 6 * 60_000,
+  expiresInMs: 4 * 60_000,
+  pollAttempts: 3,
+}];
+
+
 /**
  * Recast a REAL run into a demo state, for the `?demo=` URLs.
  *
@@ -443,6 +484,18 @@ function applyDemoState(base: Run, demo: string | null): Run {
       return {
         ...base, status: "succeeded",
         nodes: nodes.map((n, i) => ({ ...n, state: i === 4 ? "recovered" : "committed", error: undefined })),
+      };
+    case "waiting":
+      /* Parked on a machine rather than a person: mid-run, one node gated, and
+         no worker held. The status is `waiting`, not `awaiting-approval` — the
+         whole point is that nobody has been asked to do anything. */
+      return {
+        ...base, status: "waiting", finishedAt: null, durationMs: null,
+        nodes: nodes.map((n, i) => ({
+          ...n,
+          state: i < mid ? "committed" : i === mid ? "gated" : "pending",
+          error: undefined,
+        })),
       };
     case "cancelled":
       return {

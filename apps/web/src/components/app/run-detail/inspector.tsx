@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import type { Route } from "next";
 import { cn } from "~/lib/cn";
+import { ShieldCheck } from "@phosphor-icons/react/dist/ssr";
 import { Text } from "~/components/ui/text";
 import { Button } from "~/components/ui/button";
 import { formatCost, formatDuration, formatTokens, EMPTY } from "~/lib/format";
@@ -153,6 +154,7 @@ function useNodeDebug() {
 
 function Inputs() {
   const { detail, loading } = useNodeDebug();
+  const { detail: runDetail } = useReplay();
 
   const inputs = React.useMemo<ResolvedInput[]>(() => {
     const sources = detail?.variableSources ?? detail?.resolvedVariables ?? [];
@@ -179,6 +181,10 @@ function Inputs() {
   }
 
   if (!detail) {
+    /* Withheld by policy is not the same fact as never captured, and telling a
+       customer to "start a debug run" would be advice that cannot work: a debug
+       run on a self-hosted pool captures into THEIR database too. */
+    if (runDetail?.payloadsWithheld) return <WithheldPane what="This step’s inputs" />;
     return (
       <Text variant="caption" tone="muted">
         No inputs were captured for this step. Payload capture is recorded per node while a run
@@ -207,6 +213,42 @@ function Inputs() {
           </Text>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The pane for a run whose payloads stayed inside the customer's network.
+ *
+ * ── A BLANK PANEL IS THE FAILURE THIS AVOIDS ────────────────────────
+ * A self-hosted runner executes with its payloads in the customer's own
+ * database, by design and at their request. Rendering "No output was captured"
+ * would be technically true from our side and completely misleading from
+ * theirs: it reads as a product that lost their data, when what happened is the
+ * product doing exactly what they bought it to do.
+ *
+ * So it says what happened, where the data IS, and what it would take to see it
+ * here — the same shape as every other explained absence on this screen.
+ */
+function WithheldPane({ what }: { what: string }) {
+  return (
+    <div className="border-subtle bg-surface-raised flex flex-col gap-2 rounded-md border p-3">
+      <div className="flex items-center gap-2">
+        <ShieldCheck aria-hidden className="text-fg-secondary size-4" weight="duotone" />
+        <Text variant="caption" className="text-fg-primary font-medium">
+          {what} stayed inside your network
+        </Text>
+      </div>
+      <Text variant="caption" tone="muted">
+        This run executed on one of your self-hosted runners, so its payloads were never
+        sent to Vectorbea. They are in that runner&rsquo;s own storage, inside your
+        perimeter.
+      </Text>
+      <Text variant="caption" tone="muted">
+        Timings, token counts and step outcomes are shown throughout. To see failure
+        messages here as well, set the runner pool&rsquo;s payload policy to
+        <span className="font-mono"> metadata_plus_errors</span>.
+      </Text>
     </div>
   );
 }
@@ -264,6 +306,10 @@ function Output() {
       </div>
     );
   }
+
+  /* Checked BEFORE "captured nothing", because they are different facts with
+     different fixes — and one of them is not a fault at all. */
+  if (runDetail?.payloadsWithheld) return <WithheldPane what="This step’s output" />;
 
   return (
     <Text variant="caption" tone="muted">
@@ -414,7 +460,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
  * `result.rows[0].account_id` to paste into the next query, and counting
  * brackets by eye is how people get it wrong.
  */
-function JsonViewer({ value }: { value: unknown }) {
+export function JsonViewer({ value }: { value: unknown }) {
   const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
   const [copiedPath, setCopiedPath] = React.useState<string | null>(null);

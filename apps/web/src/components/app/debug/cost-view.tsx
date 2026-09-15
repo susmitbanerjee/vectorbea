@@ -258,7 +258,7 @@ function Grid({ peak, axis, durationMs }: { peak: number; axis: Axis; durationMs
         const y = yFor(v, peak);
         return (
           <g key={i}>
-            <line x1={PAD_L} y1={y} x2={W} y2={y} className="stroke-border-subtle" strokeWidth={1} />
+            <line x1={PAD_L} y1={y} x2={W} y2={y} className="stroke-fg-disabled" strokeWidth={1} />
             <text x={PAD_L - 6} y={y + 3} textAnchor="end"
                   className="fill-fg-muted font-ui text-[9px] tabular-nums">
               {AXIS[axis].format(v)}

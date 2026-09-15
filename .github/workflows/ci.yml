@@ -39,12 +39,27 @@ jobs:
               - 'packages/shared/**'
             api:
               - 'apps/api-kotlin/**'
-              # observability-kotlin compiles INTO the api via includeBuild, so a change
-              # there can break this build without touching a file under apps/api-kotlin.
+              # Every one of these compiles INTO the api via includeBuild, so a
+              # change in any of them can break this build without touching a
+              # file under apps/api-kotlin. The list has to match
+              # apps/api-kotlin/settings.gradle.kts — it listed only
+              # observability-kotlin while three more were being included, which
+              # meant a change to a shared module could land with this job never
+              # having run against it.
               - 'packages/observability-kotlin/**'
+              - 'packages/graph-kotlin/**'
+              - 'packages/skills-kotlin/**'
+              - 'packages/mcp-kotlin/**'
+              # The api compiles a handful of worker source roots directly (see
+              # sourceSets.main and the Dockerfile), so those break it too.
+              - 'apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract/**'
+              - 'apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec/**'
             worker:
               - 'apps/worker-kotlin/**'
               - 'packages/observability-kotlin/**'
+              - 'packages/graph-kotlin/**'
+              - 'packages/skills-kotlin/**'
+              - 'packages/mcp-kotlin/**'
             observability:
               - 'packages/observability-kotlin/**'
             monitoring:

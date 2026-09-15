@@ -55,6 +55,8 @@ class HttpNodeExecutor(
      * queue plus an unguarded POST means duplicate side effects.
      */
     private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
+    /** Mirrors MESSAGING_WEBHOOKS_ENABLED. A parameter so a test can drive both settings. */
+    private val messagingWebhooksEnabled: Boolean = MESSAGING_WEBHOOKS_ENABLED,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -119,9 +121,17 @@ class HttpNodeExecutor(
         // ── Optional: resolve connection ──────────────────────────────────────
         val connectionIdStr = cfg["connectionId"] as? String
         var allowedHosts    = emptyList<String>()
+        /* Public until a connection says otherwise: a node with no connection has
+           nothing that could have authorised private egress. */
+        var egressPolicy    = SsrfGuard.EgressPolicy.PUBLIC
         var allowedPaths    = emptyList<String>()
         var baseUrl: String? = null
         var authHeader: Pair<String, String>? = null
+        /* Set when the connection's credential IS the destination — a Teams,
+           Google Chat or Discord incoming webhook. Never logged, never put in an
+           event: see `displayUrl` below. */
+        var webhookUrl: String? = null
+        var providerHeaders: Map<String, String> = emptyMap()
 
         if (!connectionIdStr.isNullOrBlank()) {
             val connectionId = try { UUID.fromString(connectionIdStr) }
@@ -142,32 +152,51 @@ class HttpNodeExecutor(
                 summary = "provider=${resolved.record.provider}")
 
             allowedHosts = resolved.record.allowedHosts
+            egressPolicy = resolved.record.egressPolicy
             allowedPaths = resolved.record.allowedPaths
             baseUrl      = resolved.record.configJson["baseUrl"] as? String
+
+            providerHeaders = PROVIDER_HEADERS[normaliseProvider(resolved.record.provider)] ?: emptyMap()
 
             // Build auth header from connection
             if (resolved.secret != null && !resolved.secret.isCleared()) {
                 val authType = resolved.record.authType.lowercase()
                 resolved.secret.useOnce { secret ->
-                    authHeader = when (authType) {
-                        "api_key"       -> "x-api-key" to secret
-                        "bearer", "jwt" -> "Authorization" to "Bearer $secret"
-                        "basic"         -> {
-                            val encoded = java.util.Base64.getEncoder()
-                                .encodeToString("${resolved.record.configJson["username"] ?: ""}:$secret".toByteArray())
-                            "Authorization" to "Basic $encoded"
-                        }
-                        else            -> "Authorization" to "Bearer $secret"
+                    if (authType == WEBHOOK_URL_AUTH) {
+                        webhookUrl = secret
+                    } else {
+                        authHeader = authHeaderFor(authType, secret, resolved.record.provider, resolved.record.configJson)
                     }
+                }
+            }
+
+            if (resolved.record.authType.equals(WEBHOOK_URL_AUTH, ignoreCase = true)) {
+                if (!messagingWebhooksEnabled) {
+                    return NodeResult.Failed(
+                        "HTTP node '${node.id}': posting through an incoming webhook (Microsoft Teams, " +
+                            "Google Chat, Discord) is switched off on this deployment. Set " +
+                            "MESSAGING_WEBHOOKS_ENABLED=true on the worker to turn it on.")
+                }
+                if (webhookUrl.isNullOrBlank()) {
+                    return NodeResult.Failed(
+                        "HTTP node '${node.id}': the connection '${resolved.record.name}' has no webhook URL " +
+                            "stored. Paste the channel's webhook URL into the connection again.")
                 }
             }
         }
 
         // ── Build URL ─────────────────────────────────────────────────────────
-        val templateUrl = resolveUrl(cfg, resolvedInputs, baseUrl)
+        /*
+         * A webhook connection's URL is the credential, so it is the ONLY URL the
+         * call may go to. Neither the tool's config nor the caller's input can
+         * move it: `resolveUrl` honours an input `url` when config has none, and
+         * an agent that could supply one could send the channel's messages
+         * anywhere.
+         */
+        val templateUrl = webhookUrl ?: resolveUrl(cfg, resolvedInputs, baseUrl)
             ?: return NodeResult.Failed("HTTP node '${node.id}': no URL provided (set 'url' in config or attach an HTTP connection with baseUrl)")
 
-        val rawUrl = try {
+        val rawUrl = if (webhookUrl != null) templateUrl else try {
             substitutePathParams(templateUrl, resolvedInputs)
         } catch (e: UnresolvedPathParam) {
             return NodeResult.Failed(
@@ -178,12 +207,20 @@ class HttpNodeExecutor(
 
         // ── SSRF check ────────────────────────────────────────────────────────
         try {
-            SsrfGuard.checkUrl(rawUrl, allowedHosts)
+            SsrfGuard.checkUrl(rawUrl, allowedHosts, egressPolicy)
         } catch (e: SsrfException) {
+            val reason = if (webhookUrl != null) "the webhook URL points at an address that is not allowed" else e.message
             emitEvent(context, node.id, EventType.HTTP_REQUEST_PREPARED, "blocked",
-                title = "SSRF blocked", summary = e.message?.take(200))
-            return NodeResult.Failed("SSRF protection blocked request for node '${node.id}': ${e.message}")
+                title = "SSRF blocked", summary = reason?.take(200))
+            return NodeResult.Failed("SSRF protection blocked request for node '${node.id}': $reason")
         }
+
+        /* What may be written down about the destination. A webhook's path and
+           query ARE its secret (Discord's token is the last path segment; Teams
+           and Google Chat sign the query), so only the host survives. */
+        val displayUrl = if (webhookUrl != null)
+            "https://${runCatching { URI.create(rawUrl).host }.getOrNull() ?: "webhook"}/…"
+        else sanitizeUrlForLog(rawUrl)
 
         // ── Allowed paths check ───────────────────────────────────────────────
         if (allowedPaths.isNotEmpty()) {
@@ -205,7 +242,7 @@ class HttpNodeExecutor(
         val maxRespBytes = (cfg["maxResponseBytes"] as? Number)?.toLong() ?: DEFAULT_MAX_RESPONSE_BYTES
 
         @Suppress("UNCHECKED_CAST")
-        val extraHeaders = (cfg["headers"] as? Map<String, String>) ?: emptyMap()
+        val extraHeaders = providerHeaders + ((cfg["headers"] as? Map<String, String>) ?: emptyMap())
 
         val bodyObj = cfg["body"] ?: resolvedInputs["body"]
         val bodyJson = if (bodyObj != null && method !in setOf("GET", "HEAD", "DELETE")) {
@@ -217,14 +254,14 @@ class HttpNodeExecutor(
 
         emitEvent(context, node.id, EventType.HTTP_REQUEST_PREPARED, "running",
             title = "HTTP request prepared",
-            summary = "$method ${sanitizeUrlForLog(rawUrl)}")
+            summary = "$method $displayUrl")
 
         // ── Execute ───────────────────────────────────────────────────────────
         val startMs = System.currentTimeMillis()
 
         emitEvent(context, node.id, EventType.HTTP_REQUEST_STARTED, "running",
             title = "HTTP request started",
-            summary = "$method ${sanitizeUrlForLog(rawUrl)}")
+            summary = "$method $displayUrl")
 
         // ── Exactly-once guard ────────────────────────────────────────────────
         // An HTTP tool call is an external side effect: it sends the email, posts
@@ -296,7 +333,10 @@ class HttpNodeExecutor(
             WorkerMetrics.toolCallDurationSeconds.observeMs(durationMs, method, "error")
             log.warn("[http] request failed [nodeId={}, method={}, durationMs={}]: {}",
                 node.id, method, durationMs, e.javaClass.simpleName)
-            return NodeResult.Failed("HTTP request failed for node '${node.id}': ${e.message?.take(200)}")
+            /* An HTTP client's exception message can carry the URI, and for a
+               webhook the URI is the credential. The class name is enough. */
+            val detail = if (webhookUrl != null) e.javaClass.simpleName else e.message?.take(200)
+            return NodeResult.Failed("HTTP request failed for node '${node.id}': $detail")
         }
 
         val durationMs = System.currentTimeMillis() - startMs
@@ -304,7 +344,7 @@ class HttpNodeExecutor(
         val success = statusCode in 200..299
         emitEvent(context, node.id, EventType.HTTP_REQUEST_COMPLETED, if (success) "success" else "failed",
             title = "HTTP request completed",
-            summary = "$method ${sanitizeUrlForLog(rawUrl)} → $statusCode (${durationMs}ms)",
+            summary = "$method $displayUrl → $statusCode (${durationMs}ms)",
             durationMs = durationMs)
 
         if (!success) {
@@ -471,3 +511,69 @@ class HttpNodeExecutor(
         ))
     } catch (_: Exception) {}
 }
+
+/**
+ * How a stored credential is presented, per connection.
+ *
+ * ── WHAT THE CONNECTION TEST PROVED IS WHAT RUNS ────────────────────────────
+ * `api_key` was always sent as `x-api-key: <key>`, while the connection test
+ * (`HttpTester.applyAuth` in the API) sends `Authorization: Bearer <key>` unless
+ * the connection names another header. So a Slack bot token passed its test and
+ * then failed every call with `not_authed`; GitHub, Notion, Airtable and HubSpot
+ * the same. The rules are now the tester's:
+ *
+ *   · a header named on the connection (`authHeaderName`) wins — `Authorization`
+ *     carries the key as Bearer, any other name carries it raw;
+ *   · a SaaS provider whose API takes Bearer gets Bearer;
+ *   · anything else keeps `x-api-key`, so a connection saved before either rule
+ *     existed, against an API that wants that header, is not changed under it.
+ */
+internal fun authHeaderFor(
+    authType: String,
+    secret: String,
+    provider: String,
+    config: Map<String, Any?>,
+): Pair<String, String> = when (authType.lowercase()) {
+    "api_key" -> {
+        val named = (config["authHeaderName"] as? String ?: config["apiKeyHeaderName"] as? String)
+            ?.trim()?.takeIf { it.isNotEmpty() }
+        when {
+            named != null && named.equals("authorization", ignoreCase = true) -> "Authorization" to "Bearer $secret"
+            named != null -> named to secret
+            normaliseProvider(provider) in BEARER_PROVIDERS -> "Authorization" to "Bearer $secret"
+            else -> "x-api-key" to secret
+        }
+    }
+    "bearer", "jwt", "oauth2" -> "Authorization" to "Bearer $secret"
+    "basic" -> {
+        val user = config["username"] as? String ?: config["email"] as? String ?: ""
+        "Authorization" to "Basic " + java.util.Base64.getEncoder().encodeToString("$user:$secret".toByteArray())
+    }
+    else -> "Authorization" to "Bearer $secret"
+}
+
+/** `google_sheets` and `google-sheets` are the same provider; the column carries both. */
+internal fun normaliseProvider(provider: String): String = provider.trim().lowercase().replace('_', '-')
+
+/** Providers whose API keys and tokens are Bearer credentials. Mirrors `SaasEndpoints`. */
+internal val BEARER_PROVIDERS = setOf(
+    "slack", "gmail", "google-sheets", "github", "notion", "airtable", "hubspot", "linear",
+)
+
+/** Headers a provider's API refuses to work without. Mirrors `SaasEndpoint.extraHeaders`. */
+internal val PROVIDER_HEADERS: Map<String, Map<String, String>> = mapOf(
+    "notion" to mapOf("Notion-Version" to "2022-06-28"),
+)
+
+/** `connections.auth_type` for a credential that is itself the destination URL. */
+internal const val WEBHOOK_URL_AUTH = "webhook_url"
+
+/**
+ * Posting to incoming webhooks (Teams, Google Chat, Discord).
+ *
+ * Off by default, per the standing convention for new runtime behaviour. Off, a
+ * webhook connection's call fails with a sentence naming this variable rather
+ * than posting — nothing else about HTTP tools changes either way.
+ */
+internal val MESSAGING_WEBHOOKS_ENABLED: Boolean =
+    System.getenv("MESSAGING_WEBHOOKS_ENABLED")?.lowercase() in setOf("true", "1", "yes")

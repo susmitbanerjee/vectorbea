@@ -1,5 +1,8 @@
 export type Environment = "production" | "staging" | "development" | "unknown";
-export type RunStatus = "succeeded" | "failed" | "running" | "queued" | "awaiting-approval" | "cancelled";
+/** `waiting` is parked on something outside the run — see docs/WAITS-AND-SIGNALS.md. */
+export type RunStatus =
+  | "succeeded" | "failed" | "running" | "queued"
+  | "awaiting-approval" | "waiting" | "cancelled";
 export type TriggerKind = "schedule" | "webhook" | "manual" | "api";
 export type WorkflowStatus = "active" | "draft" | "paused" | "archived";
 

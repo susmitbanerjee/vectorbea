@@ -43,6 +43,12 @@ type Approval = contracts.Approval;
  * which is worse than not painting it. `timed_out` and `paused` have no UI
  * colour of their own — timed out is a failure to an operator, and paused reads
  * as waiting.
+ *
+ * THE PARKED STATUSES USED TO COLLAPSE INTO `queued`, and that was a lie with a
+ * cost. `queued` means the platform has not picked the run up; a run parked on a
+ * six-minute render, a timer or a cooperative yield HAS started and is holding
+ * no worker. Reading a wall of them as queue depth sends an operator to scale
+ * workers that are already idle. `waiting` is the honest third answer.
  */
 const STATUS_MAP: Record<contracts.RunStatus, RunStatus> = {
   succeeded: "succeeded",
@@ -52,12 +58,19 @@ const STATUS_MAP: Record<contracts.RunStatus, RunStatus> = {
   queued: "queued",
   awaiting_approval: "awaiting-approval",
   waiting_for_approval: "awaiting-approval",
+  /*
+   * Parked on an async tool or an unarrived signal. NOT `awaiting-approval`:
+   * that would put "Awaiting approval" on a six-minute video render and send
+   * somebody looking for an approval queue that does not exist. NOT `queued`
+   * either — the run has started and is holding no worker.
+   */
+  waiting_for_event: "waiting",
   cancelled: "cancelled",
   timed_out: "failed",
   paused: "awaiting-approval",
-  waiting_for_timer: "queued",
+  waiting_for_timer: "waiting",
   recovering: "running",
-  yielded: "queued",
+  yielded: "waiting",
   cancellation_requested: "cancelled",
   enqueue_failed: "failed",
   continued_as_new: "cancelled",

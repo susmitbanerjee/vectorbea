@@ -288,3 +288,31 @@ answer present, in a form that can be read.
 A malformed contract logs once and falls back. It never fails a tool call: a
 contract is an improvement to an observation, and an improvement that can break
 the thing it improves is not one.
+
+---
+
+## 5. Extraction sits in front of this, for HTTP tools
+
+An HTTP tool declares a `response.extract` expression (JSONPath or JMESPath) in
+its `http_spec_json`. It runs **before** the projection, and the two are built to
+compose rather than to overlap:
+
+* **Extraction narrows the DOCUMENT.** `$.data`, unwrapping the envelope an API
+  puts around its payload.
+* **The contract narrows the FIELDS** within whatever extraction produced.
+
+Doing envelopes in the contract would mean writing `body.data.records.` in front
+of every field path. Doing fields in the extractor would mean one JSONPath per
+field, and no collection summary. Each layer does the job it is shaped for.
+
+An extraction that matches nothing returns the **whole body**, not an empty one —
+the same rule this layer already follows, for the same reason. The outcome is
+recorded as `extractionApplied` on the node's metadata, so "the expression stopped
+matching" is visible in the run rather than indistinguishable from an empty API.
+
+An OpenAPI import generates both halves: the extraction from the response
+schema's envelope (only when the envelope is a single-property wrapper carrying
+nothing else — unwrapping one that also holds `has_more` or `total_count` would
+throw away the two fields that stop a model concluding it has seen everything),
+and the contract from the item schema, trimmed to ten ranked fields. See
+docs/HTTP-TOOLS.md §2.4 and §4.1.

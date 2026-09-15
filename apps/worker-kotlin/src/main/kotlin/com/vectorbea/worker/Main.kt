@@ -227,6 +227,17 @@ fun main() {
      */
     val providerCapacity = com.vectorbea.worker.net.ProviderCapacityBucket(redis.commands)
 
+    /*
+     * ── ONE PARKING PRIMITIVE, THREE CONSUMERS ──────────────────────────────
+     *
+     * `WaitStore` is where an async tool, a signal and an agent's own WAIT all
+     * park; `SignalStore` is what delivers information into a live run. Built
+     * once here and shared, because two instances would be two caches of nothing
+     * and one more thing to wire.
+     */
+    val waitStore = com.vectorbea.worker.durable.wait.WaitStore(database.dataSource)
+    val signalStore = com.vectorbea.worker.durable.wait.SignalStore(database.dataSource)
+
     val workflowRuntime = WorkflowRuntime(
         dataSource         = database.dataSource,
         eventStore         = eventStore,
@@ -235,6 +246,8 @@ fun main() {
         stepOutputStore    = stepOutputStore,
         workerId           = config.workerId,
         connectionResolver = connectionResolver,
+        secretService      = secretService,
+        signals            = signalStore,
         dbPoolManager      = dbPoolManager,
         debugWriter        = com.vectorbea.worker.runtime.debug.DebugSnapshotWriter(database.dataSource),
         stepGuard          = stepGuard,
@@ -606,6 +619,50 @@ fun main() {
     resumeReconciler.start()
 
     /*
+     * ── THE THING THAT NOTICES A CALLBACK THAT NEVER CAME ───────────────────
+     *
+     * Polls what declares a poll, and times out what has run out of time. It is
+     * the only component that can produce the second of those: a callback that
+     * did not arrive is, by definition, not an event anything else observes.
+     *
+     * Enqueues onto the run's own class stream, exactly as the reconciler above
+     * does — a resume from a wait must not land on the system pool and take a
+     * slot that timer resumes and cancellations need.
+     */
+    val waitSweeper = com.vectorbea.worker.durable.wait.WaitSweeper(
+        dataSource = database.dataSource,
+        waits = waitStore,
+        connectionResolver = connectionResolver,
+        enqueue = { job ->
+            val cls = runClassLookup.classOf(job.runId)
+            val stream = com.vectorbea.worker.queue.TypedStreamConsumer.streamKeyFor(cls)
+            redis.commands.xadd(stream, job.toStreamFields())
+                ?: throw IllegalStateException("XADD returned null for stream=$stream")
+            WorkerMetrics.redisXadd.inc()
+        },
+    )
+    waitSweeper.start()
+
+    /*
+     * ── RESULT DELIVERY ─────────────────────────────────────────────────────
+     * Everything that happens AFTER a run is terminal: calling a customer's
+     * endpoint, pushing to a destination, backing off, dead-lettering.
+     *
+     * In the worker rather than the API because it is a background loop with a
+     * long, durable retry schedule, and because the API's instances are sized
+     * for request latency — a fleet of them each holding HTTP connections open
+     * to somebody's slow endpoint is a worse place for this than the pool that
+     * already exists for long work.
+     */
+    val deliveryDispatcher = com.vectorbea.worker.delivery.DeliveryDispatcher(
+        dataSource = database.dataSource,
+        store = com.vectorbea.worker.delivery.DeliveryStore(database.dataSource),
+        secrets = secretService,
+        events = eventStore,
+    )
+    deliveryDispatcher.start()
+
+    /*
      * Partition maintenance — creates next month's partitions before anything needs
      * to write into them, for BOTH run_events and run_spans.
      *
@@ -701,6 +758,12 @@ fun main() {
         // Stop accepting new jobs
         heartbeat.drain()
         timerScheduler.stop()
+        waitSweeper.stop()
+        /* Before the pool closes. A dispatcher mid-attempt would otherwise write
+           its outcome against a closing datasource and leave the row `delivering`
+           until the claim TTL — a five-minute delay on every deploy. */
+        deliveryDispatcher.stop()
+        resumeReconciler.stop()
         crashRecovery.stop()
         /* Stopped early and without waiting: a sweep interrupted mid-batch loses
            nothing — every batch has already committed and the next pass recomputes

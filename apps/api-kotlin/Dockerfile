@@ -6,13 +6,26 @@
 #                            apps/api-kotlin/Dockerfile)
 #
 # The context is the repo root and NOT apps/api-kotlin, because
-# settings.gradle.kts declares a composite build:
+# settings.gradle.kts declares composite builds:
 #
 #     includeBuild("../../packages/observability-kotlin")
+#     includeBuild("../../packages/graph-kotlin")
+#     includeBuild("../../packages/skills-kotlin")
+#     includeBuild("../../packages/mcp-kotlin")
 #
 # Docker cannot read anything outside its build context, so with the context set
 # to apps/api-kotlin that path can never resolve and Gradle fails during
 # settings evaluation with "A path must be specified!".
+#
+# ── EVERY ONE OF THEM NEEDS TWO COPY LINES BELOW ────────────────────────────
+# The build scripts (cached early) and the sources. Gradle validates an
+# included build's directory during SETTINGS EVALUATION, before any task runs,
+# so one that was added to settings.gradle.kts and not here fails with
+#
+#     Included build '/workspace/packages/<name>' does not exist.
+#
+# which names the path and says nothing about this file. That is exactly what
+# adding mcp-kotlin without touching it produced.
 #
 # Layout inside the image mirrors the repository so every relative Gradle path
 # resolves exactly as it does in CI and local development:
@@ -39,30 +52,38 @@ RUN apk add --no-cache curl unzip && \
     rm /tmp/gradle.zip
 ENV PATH="/opt/gradle/bin:${PATH}"
 
-# Limit JVM heap for Gradle + Kotlin compiler to stay within Railway build limits.
-# --no-daemon already prevents a second JVM, but the single Gradle JVM still needs
-# explicit caps or it will try to use ~25% of total RAM and OOM-kill silently.
-ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx512m -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false"
+# Compile in the Gradle JVM with enough heap for a full API compilation.
+# Kotlin execution settings are project properties (-P on the build below).
+ENV GRADLE_OPTS="-Dorg.gradle.jvmargs=-Xmx2g -Dorg.gradle.daemon=false"
 
 # Copy build scripts first — maximises Docker layer cache.
 # Source code changes won't invalidate the dependency resolution layer.
-COPY apps/api-kotlin/settings.gradle.kts apps/api-kotlin/build.gradle.kts ./
+COPY apps/api-kotlin/settings.gradle.kts apps/api-kotlin/build.gradle.kts apps/api-kotlin/gradle.properties ./
 COPY packages/observability-kotlin/settings.gradle.kts packages/observability-kotlin/build.gradle.kts /workspace/packages/observability-kotlin/
 COPY packages/graph-kotlin/settings.gradle.kts packages/graph-kotlin/build.gradle.kts /workspace/packages/graph-kotlin/
+COPY packages/skills-kotlin/settings.gradle.kts packages/skills-kotlin/build.gradle.kts /workspace/packages/skills-kotlin/
+COPY packages/mcp-kotlin/settings.gradle.kts packages/mcp-kotlin/build.gradle.kts /workspace/packages/mcp-kotlin/
 
 # Pre-resolve Gradle dependencies (separate cached layer)
 RUN gradle dependencies --no-daemon --console=plain --max-workers=1 -q 2>/dev/null || true
 
 # Copy source and build fat jar. The included build must be present at the
 # exact path declared in settings.gradle.kts before Gradle evaluates it.
-# cache-bust: v3
+# cache-bust: v4
 COPY apps/api-kotlin/src ./src
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/crypto /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/crypto
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/dbcatalog
 COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/contract
+# Keep these shared source roots aligned with sourceSets.main in build.gradle.kts.
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/tools/httpspec
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/durable/wait /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/durable/wait
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/delivery /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/delivery
+COPY apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging /workspace/apps/worker-kotlin/src/main/kotlin/com/vectorbea/worker/logging
 COPY packages/observability-kotlin/src /workspace/packages/observability-kotlin/src
 COPY packages/graph-kotlin/src /workspace/packages/graph-kotlin/src
-RUN gradle fatJar --no-daemon --console=plain --max-workers=1 --info --stacktrace 2>&1
+COPY packages/skills-kotlin/src /workspace/packages/skills-kotlin/src
+COPY packages/mcp-kotlin/src /workspace/packages/mcp-kotlin/src
+RUN gradle fatJar --no-daemon --console=plain --max-workers=1 -Pkotlin.compiler.execution.strategy=in-process -Pkotlin.incremental=false --info --stacktrace 2>&1
 
 # ── Stage 2: Runtime ──────────────────────────────────────────────────────────
 FROM eclipse-temurin:17-jre-alpine AS runtime

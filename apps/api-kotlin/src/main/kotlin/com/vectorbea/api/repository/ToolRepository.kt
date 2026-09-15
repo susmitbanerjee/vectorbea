@@ -25,6 +25,33 @@ data class Tool(
     val retryPolicyJson: String,
     val idempotencyStrategy: String?,
     val status: String,
+    /** The declarative HTTP call (V064). Null means the legacy config keys. */
+    val httpSpecJson: String?,
+    /** What the model sees of the result (V056). */
+    val resultContractJson: String?,
+    /** Which `tool_versions.version` is live. */
+    val currentVersion: Int,
+    /**
+     * The MCP server this tool was discovered through (V058), or null for a
+     * locally-authored tool.
+     *
+     * On the model so a tools list can say WHERE a tool came from. Without it,
+     * twelve rows named `mcp-1a2b3c4d.*` are unreadable — the namespacing in
+     * `McpDiscovery.syncTools` exists so two servers' `search` tools are
+     * distinguishable, and a list that cannot name the server leaves that
+     * thought half-finished.
+     */
+    val mcpServerConnectionId: UUID?,
+    /** What the server calls this tool. Differs from `name`, which is namespaced. */
+    val mcpToolName: String?,
+    /**
+     * When discovery last saw this tool advertised.
+     *
+     * Null on a locally-authored tool. On a discovered one, an old value is how
+     * a withdrawn tool is recognised — it keeps its row and its grants and fails
+     * at call time, rather than being deleted (MCP.md §3).
+     */
+    val mcpLastSeenAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
 )
@@ -54,7 +81,10 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
     private val cols = """
         id, workspace_id, environment_id, name, slug, type, description, connection_id,
         input_schema_json, output_schema_json, config_json, risk_level, requires_approval,
-        timeout_ms, retry_policy_json, idempotency_strategy, status, created_at, updated_at
+        timeout_ms, retry_policy_json, idempotency_strategy, status,
+        http_spec_json, result_contract_json, current_version,
+        mcp_server_connection_id, mcp_tool_name, mcp_last_seen_at,
+        created_at, updated_at
     """.trimIndent()
 
     fun findById(id: UUID, workspaceId: UUID): Tool? = queryOne(
@@ -138,6 +168,17 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         retryPolicy: Map<String, Any>? = null,
         idempotencyStrategy: String? = null,
         status: String? = null,
+        /**
+         * The declarative HTTP call, as JSON text.
+         *
+         * TEXT rather than a Map, and written with `?::jsonb`, because it is a
+         * document the worker's `HttpToolSpec` reader owns end to end. Round
+         * tripping it through a Kotlin `Map` here would let this layer reorder
+         * keys, coerce a number, or drop a null — and the reader would then be
+         * parsing something subtly different from what the generator produced.
+         */
+        httpSpecJson: String? = null,
+        resultContractJson: String? = null,
     ): Tool? {
         val setClauses = buildList {
             if (name != null) add("name = ?")
@@ -152,6 +193,8 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
             if (retryPolicy != null) add("retry_policy_json = ?")
             if (idempotencyStrategy != null) add("idempotency_strategy = ?")
             if (status != null) add("status = ?")
+            if (httpSpecJson != null) add("http_spec_json = ?::jsonb")
+            if (resultContractJson != null) add("result_contract_json = ?::jsonb")
             add("updated_at = now()")
         }
         if (setClauses.size == 1) return findById(id, workspaceId)
@@ -171,6 +214,8 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
                 if (retryPolicy != null) setJsonb(i++, retryPolicy)
                 if (idempotencyStrategy != null) setString(i++, idempotencyStrategy)
                 if (status != null) setString(i++, status)
+                if (httpSpecJson != null) setString(i++, httpSpecJson)
+                if (resultContractJson != null) setString(i++, resultContractJson)
                 setUuid(i++, id)
                 setUuid(i, workspaceId)
             },
@@ -201,6 +246,12 @@ class ToolRepository(dataSource: DataSource) : BaseRepository(dataSource) {
         retryPolicyJson = rs.getJsonbString("retry_policy_json"),
         idempotencyStrategy = rs.getString("idempotency_strategy"),
         status = rs.getString("status"),
+        httpSpecJson = rs.getString("http_spec_json"),
+        resultContractJson = rs.getString("result_contract_json"),
+        currentVersion = rs.getInt("current_version"),
+        mcpServerConnectionId = rs.uuidOrNull("mcp_server_connection_id"),
+        mcpToolName = rs.getString("mcp_tool_name"),
+        mcpLastSeenAt = rs.instantOrNull("mcp_last_seen_at"),
         createdAt = rs.instant("created_at"),
         updatedAt = rs.instant("updated_at"),
     )

@@ -520,6 +520,20 @@ object WorkerMetrics {
         "side_effect_dedupe", "External calls skipped because already performed", listOf("effect_type"))
 
     /**
+     * Checkpoints that could not be written.
+     *
+     * Non-zero means long runs are resuming by replaying from their first node.
+     * It sat silently non-zero for the life of the feature while
+     * `run_checkpoints` had two conflicting definitions (V069), which is why it
+     * is a counter now rather than only a log line: a warning that always fires
+     * is invisible, and a metric that is supposed to be zero is not.
+     */
+    internal val checkpointWriteFailures = WCounter(
+        "worker_checkpoint_write_failures",
+        "Checkpoint writes that failed — the run will replay from its first node on resume",
+        emptyList())
+
+    /**
      * Side effects whose outcome could not be established — a previous attempt
      * died mid-call and we refuse to guess.
      *

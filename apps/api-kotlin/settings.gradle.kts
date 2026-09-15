@@ -23,3 +23,26 @@ includeBuild("../../packages/observability-kotlin")
  * the first time a third shape appears.
  */
 includeBuild("../../packages/graph-kotlin")
+
+/*
+ * Skills: what a skill is, and the three answers both services must give
+ * identically — which required tools are missing, what the composed prompt
+ * block looks like, and which text is safe to put in a prompt.
+ *
+ * Shared for `RunIngress`' reason (invariant 16): the whole point of refusing a
+ * grant at SAVE time is that the author learns what the RUNTIME will do. A
+ * second implementation of the composer makes that promise false the first time
+ * one of them changes.
+ */
+includeBuild("../../packages/skills-kotlin")
+
+/*
+ * MCP: the wire protocol, the sanitizer and discovery.
+ *
+ * The API calls discovery from two places — the Discover action, and the
+ * connect wizard's verify step, which is where the product says "this server
+ * advertises 12 tools". Both have to be answers about the code that will
+ * actually run the customer's tools, so it is the worker's implementation,
+ * shared, rather than a second one that agrees today.
+ */
+includeBuild("../../packages/mcp-kotlin")

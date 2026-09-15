@@ -229,7 +229,8 @@ this look like a run going in circles.
 
 | Node type | Executor | Notes |
 |---|---|---|
-| `trigger`, `transform`, `branch`, `parallel`, `join`, `end` | control-flow | No external I/O |
+| `trigger`, `transform`, `branch`, `parallel`, `join` (canvas: `merge`), `end` | control-flow | No external I/O |
+| `checkpoint` (also `commit`, `savepoint`) | `CheckpointNodeExecutor` | Completes at once and passes its inputs through. Every completed node's output is already persisted, which is what a resume reuses; this step only marks the boundary. It used to resolve to `UNKNOWN` and fail the run. `wait` and `output` still do. |
 | `approval` | `ApprovalNodeExecutor` | Explicit human gate |
 | `llm` | `LlmNodeExecutor` | Provider dialects, throttle, circuit breaker, replay recording |
 | `http` | `HttpNodeExecutor` | Side-effect guard |
@@ -281,9 +282,103 @@ the agent row does not override them:
 | `maxCostCents` | 50 |
 | `timeoutMs` | 120 000 |
 
-`taskInstruction` falls back through node config → `taskInstruction` → `task` →
-`prompt` → `input` in resolved inputs, so an agent fed by input mapping still gets
-its task.
+`maxTotalTokens`, `maxToolCalls` and `maxCostCents` come from the STEP's
+`config.budget` when set (the builder's "Limits for this step", and the workflow
+templates), otherwise 16,384 tokens (`AGENT_MAX_TOTAL_TOKENS_DEFAULT` overrides it
+fleet-wide) and the agent row's tool-call and cost limits. `maxTotalTokens` had no
+source before and was always 16,384, whatever the step or agent said. The agent
+editor's "Max tokens" is the per-reply `max_tokens`, a different number.
+
+Actions are parsed by `ActionParsing`: an explicit `null` for a defaulted field is
+the default, a missing `type` is inferred from `toolId` / `finalOutput` /
+`failReason`, a one-level `{"action": {...}}` wrapper is unwrapped, and enum case is
+ignored. Each of those used to cost a repair THINK iteration. It also accepts the
+type as text under `action` / `actionType` (`"tool_call"` → CALL_TOOL,
+`"done"` → FINAL), snake_case field names, a string `finalOutput` (becomes
+`{content}`), and a bare answer carrying the step's declared output fields with no
+envelope (read as FINAL). A reply that still does not parse is logged with its
+top-level field names only, and the repair THINK tells the model the format it
+must use instead of "trying next iteration".
+
+**Model calls wait for their whole budget.** `OutboundHttp.send` capped the wait
+for response headers at `HTTP_HEADERS_TIMEOUT_MS` (30s) on every call. A
+non-streaming provider sends headers only with the finished completion, so any
+answer that took more than 30s to write failed with `HttpTimeoutException` —
+under a 120s agent timeout — and the step retry re-ran the agent from iteration 1.
+`LlmNodeExecutor` now passes its total budget as `headersTimeoutMs`; other callers
+keep the 30s default.
+
+**Run memory rows stay valid JSON.** `AgentMemoryStore` serialised a value and then
+cut the JSON text at 4 096 characters, which on a long observation (a patch full of
+escapes) left an unterminated string and Postgres rejected the row. `boundedJson`
+shortens the value before encoding and re-checks the encoded length.
+
+`taskInstruction` falls back through node config (`taskInstruction`, then the
+builder's older `taskOverride`) → `taskInstruction` → `task` → `prompt` → `input`
+in resolved inputs, so an agent fed by input mapping still gets its task.
+
+### 6a. What a workflow step passes an agent, and gets back
+
+Built on the canvas, a step's data lives in its own `config`:
+
+| Key | Written by | Read by |
+|---|---|---|
+| `inputMapping` | Inputs tab. `{ name: value }`; a value is typed text or `{{ steps.<nodeId>.output.<field> }}` | `WorkflowGraph.convertNode` → `MappingResolver` |
+| `taskInstruction` | Configure tab (was `taskOverride`, which nothing read — both are accepted) | `nodeTaskInstruction` |
+| `outputFields` | Output tab. `[{ name, type, description }]` | `stepOutputFields` |
+
+- **Both paths see the task AND the data.** The single model call used to send
+  `taskInstruction ?: inputs-as-JSON`, so a step with an instruction and mapped
+  inputs sent the instruction alone. It now sends the instruction, then
+  `INPUT DATA:` and the inputs (`singleCallUserContent`), which is what the
+  tool-using loop's `AgentPromptBuilder` always did.
+- **Output fields are asked for, then read.** The single call appends "Reply with
+  only a JSON object with these fields" to the USER message (not the system
+  prompt — the skills position there is not reopened), strips a Markdown fence,
+  and merges the parsed fields into the output. The loop receives them as
+  `outputSchemaJson`, which `AgentBrainConfig` carried and nothing set.
+- **`content` always exists.** "Full reply" is offered for every agent step, so
+  the loop's final output gains `content` when it has none (`withFullReply`). The
+  loop's prompt also asks for the answer in `finalOutput.content` when no output
+  fields are declared, and a FINAL with an empty `finalOutput` keeps its
+  reasoning summary as `content` rather than handing the next step `{}`.
+- **The loop is told the current time** (`objectiveText`, UTC, to the minute).
+  Without it "the last 24h" was computed from the model's training year; with the
+  date alone it was cut off at midnight and missed today's commits.
+- **A required tool input that resolved to nothing fails by name, before the
+  call** (`missingRequiredInputs`, from `tools.input_schema_json`, honouring
+  `boundParameters`). The message names the input and the `{{ steps… }}`
+  reference that was empty, instead of the provider's `no_text`.
+- **Commit SHAs are not redacted.** `AgentSafetyGuard` masks any 40+ character
+  base64-alphabet run in tool results; exactly 40- or 64-character hex (git SHAs,
+  SHA-256 digests) is now exempt, because a masked SHA was passed back to
+  `get_commit` as the literal `[REDACTED]`.
+- **Source paths are not redacted either** (`isFilePath`). Letters and slashes
+  are base64 alphabet, so every long Java/Kotlin path became `[REDACTED].java` and
+  a code-review agent could name no file. A match is kept when it reads like a
+  path: 2+ slash-separated segments, no `+`/`=`, digits under 20%, capitals under a
+  third of letters, and a vowel share of words (1 in 4, or 1 in 5 with a file
+  extension right after it). Random base64 is half capitals with about one vowel
+  in five letters, so real tokens still fail.
+- **A repeated identical tool call is named as one.** The step guard replays the
+  stored result; the observation now opens with "You already made this exact
+  call… repeating it will not return anything new", because an agent told only
+  the result's shape asked a third time and failed.
+- **Budget errors say where to raise the limit** ("Raise Total tokens under Step
+  limits on this step"), since the agent's max reply length is a different
+  setting and the two were confused.
+- **Provider errors say what they are.** A non-2xx LLM response keeps the
+  provider's `error.message` (credential patterns masked, capped at 300 chars)
+  instead of "HTTP 400". OpenAI reasoning models (`o*`, `gpt-5*`) are sent
+  `max_completion_tokens` (floor 8192) and no `temperature`, which they otherwise
+  reject with 400.
+- **A thrown iteration is closed as `failed`** (`markIterationFailed`), so the
+  Activity tab no longer shows "Still running" under a failed run.
+- The builder's field lists come from these keys and the tool registry
+  (`components/app/builder/step-io.ts`), not from fixtures. An agent's registered
+  `outputSchema` is not offered, because no step execution path sends it.
+
+Tests: `AgentStepInputsTest` (worker), `__tests__/step-io.test.ts` (web).
 
 ---
 
@@ -335,7 +430,13 @@ action schema, the output schema if declared, and the safety rules.
 The observation payload matters: without it the model is told a tool call
 succeeded and told the *names* of the fields it returned, then asked to answer from
 data it has never seen. Payloads are sanitized and capped at
-`MAX_TOOL_PAYLOAD_CHARS` (2 000) per observation.
+`MAX_TOOL_PAYLOAD_CHARS` per observation: 2 000 by default, raised with
+`AGENT_TOOL_RESULT_MAX_CHARS` (500–64 000). Two thousand characters is a few rows
+and not a commit diff — a reviewer shown the first 2 000 characters of a patch
+asked for it again, got the same cut copy from the step guard, and failed. Only
+the NEWEST observation is shown at the cap; older ones are shortened to
+`OLDER_RESULT_CHARS` (2 000) in the prompt, so ten observations do not add up to
+ten times the cap. At the default cap nothing changes.
 
 ### The five actions
 

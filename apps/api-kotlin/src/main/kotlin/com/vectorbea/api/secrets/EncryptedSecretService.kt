@@ -139,6 +139,24 @@ class EncryptedSecretService(
     override fun maskSecret(plaintext: String): String =
         Redactor.maskedPreview(plaintext)
 
+    override fun sealForWorkspace(plaintext: String, workspaceId: UUID): String? = try {
+        Encryption.encrypt(plaintext, keyBytes, keyVersion, aadFor(workspaceId))
+    } catch (e: Exception) {
+        log.warn("Failed to seal a workspace credential: {}", e.javaClass.simpleName)
+        null
+    }
+
+    override fun openForWorkspace(token: String?, workspaceId: UUID): String? {
+        if (token.isNullOrBlank()) return null
+        return try {
+            Encryption.decrypt(token, keyBytes, aadFor(workspaceId))
+        } catch (e: Exception) {
+            log.warn("Failed to open a workspace credential [bound={}]: {}",
+                Encryption.isBound(token), e.javaClass.simpleName)
+            null
+        }
+    }
+
     private fun parseRef(secretRef: String): UUID = try {
         UUID.fromString(secretRef.trim())
     } catch (_: IllegalArgumentException) {

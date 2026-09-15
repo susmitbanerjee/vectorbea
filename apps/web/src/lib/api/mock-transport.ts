@@ -71,6 +71,9 @@ const LLM_PROVIDERS = new Set(["openai", "anthropic", "google", "gemini", "mistr
 function connectionTypeFor(provider: string): string {
   if (DATABASE_PROVIDERS.has(provider)) return "database";
   if (LLM_PROVIDERS.has(provider)) return "llm";
+  // An MCP server is its own connection type, and the type is what the Tools
+  // tab keys off. Typed `http` it would be indistinguishable from Stripe.
+  if (provider === "mcp") return "mcp";
   // Everything else in the fixture set — Stripe, Slack, Gmail, HubSpot, GitHub
   // — is reached over HTTP, which is what the API would store for them.
   return "http";
@@ -78,6 +81,7 @@ function connectionTypeFor(provider: string): string {
 
 /** `AUTH_TYPES` uses snake_case. The connectivity fixtures use a display form. */
 function authTypeFor(provider: string): string {
+  if (provider === "mcp") return "bearer";
   return ["slack", "gmail", "github", "hubspot"].includes(provider) ? "oauth2" : "api_key";
 }
 
@@ -117,6 +121,360 @@ const SAVED_VERSIONS = new Map<string, unknown[]>();
 
 const WORKSPACE_ID = uuidFrom("ws_acme");
 const ENVIRONMENT_ID = uuidFrom("env_production");
+
+/* ── Trigger and skill fixtures ───────────────────────────────────────────────
+ *
+ * Deliberately not all-green. A webhook with no signing secret, an event
+ * trigger the consumer disabled itself, and a skill that needs a tool are the
+ * three states these screens exist to make legible — a fixture set where
+ * everything is healthy lets all three ship unlooked-at. */
+
+const SCHEDULE_FIXTURES = [
+  {
+    id: uuidFrom("sched-renewals"),
+    jobId: WORKFLOWS[0]?.id ?? uuidFrom("wf-0"),
+    jobName: WORKFLOWS[0]?.name ?? "renewals-daily",
+    cron: "0 6 * * *",
+    timezone: "UTC",
+    status: "ACTIVE",
+    lastRun: new Date(Date.now() - 5 * 3600_000).toISOString(),
+    nextRun: new Date(Date.now() + 19 * 3600_000).toISOString(),
+  },
+  {
+    id: uuidFrom("sched-usage"),
+    jobId: WORKFLOWS[1]?.id ?? uuidFrom("wf-1"),
+    jobName: WORKFLOWS[1]?.name ?? "usage-rollup",
+    cron: "0 0 * * *",
+    timezone: "UTC",
+    status: "PAUSED",
+    lastRun: new Date(Date.now() - 40 * 3600_000).toISOString(),
+    nextRun: null,
+  },
+];
+
+const WEBHOOK_FIXTURES = [
+  {
+    id: uuidFrom("hook-slack"),
+    workflowId: WORKFLOWS[0]?.id ?? uuidFrom("wf-0"),
+    name: "Slack mentions",
+    signatureScheme: "hmac_sha256",
+    signed: true,
+    signatureHeader: "X-Slack-Signature",
+    timestampHeader: "X-Slack-Request-Timestamp",
+    toleranceSeconds: 300,
+    inputMapping: {},
+    eventTypePath: "event.type",
+    eventTypes: ["app_mention"],
+    dedupeHeader: null,
+    dedupePath: "event_id",
+    runDedupPath: "event.channel",
+    runPriority: null,
+    enabled: true,
+    createdAt: new Date(Date.now() - 9 * 86_400_000).toISOString(),
+  },
+  {
+    /* Unsigned, on purpose. Anybody who learns the url can start the workflow,
+       and the row is what says so. */
+    id: uuidFrom("hook-forms"),
+    workflowId: WORKFLOWS[1]?.id ?? uuidFrom("wf-1"),
+    name: "Contact form",
+    signatureScheme: "none",
+    signed: false,
+    signatureHeader: null,
+    timestampHeader: null,
+    toleranceSeconds: 300,
+    inputMapping: {},
+    eventTypePath: null,
+    eventTypes: [],
+    dedupeHeader: null,
+    dedupePath: null,
+    runDedupPath: null,
+    runPriority: null,
+    enabled: false,
+    createdAt: new Date(Date.now() - 21 * 86_400_000).toISOString(),
+  },
+];
+
+const EVENT_TRIGGER_FIXTURES = [
+  {
+    id: uuidFrom("evt-orders"),
+    workflowId: WORKFLOWS[0]?.id ?? uuidFrom("wf-0"),
+    name: "Order events",
+    broker: "kafka",
+    connectionId: null,
+    source: "orders.created",
+    consumerGroup: "vectorbea-orders",
+    inputMapping: {},
+    filterPath: null,
+    filterValues: [],
+    dedupePath: "id",
+    runDedupPath: null,
+    runPriority: null,
+    maxInFlight: 8,
+    batchSize: 1,
+    enabled: true,
+    disabledReason: null,
+    lastError: null,
+    lastMessageAt: new Date(Date.now() - 11 * 60_000).toISOString(),
+    messagesConsumed: 4_182,
+    createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  },
+  {
+    /* Disabled by the consumer itself, with the reason. "My events stopped
+       arriving" is unanswerable without this row. */
+    id: uuidFrom("evt-alerts"),
+    workflowId: WORKFLOWS[1]?.id ?? uuidFrom("wf-1"),
+    name: "Alert stream",
+    broker: "sqs",
+    connectionId: null,
+    source: "https://sqs.eu-west-1.amazonaws.com/000/alerts",
+    consumerGroup: null,
+    inputMapping: {},
+    filterPath: "severity",
+    filterValues: ["P1", "P2"],
+    dedupePath: "MessageId",
+    runDedupPath: "service",
+    runPriority: 80,
+    maxInFlight: 4,
+    batchSize: 1,
+    enabled: false,
+    disabledReason: "The credential was rejected 20 times in a row.",
+    lastError: "AccessDenied: the queue refused ReceiveMessage",
+    lastMessageAt: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    messagesConsumed: 912,
+    createdAt: new Date(Date.now() - 60 * 86_400_000).toISOString(),
+  },
+];
+
+/**
+ * The workspace's installed skills, MUTABLE.
+ *
+ * `let`-shaped state in a fixture file is a smell everywhere else here, and it
+ * is the right answer for exactly two endpoints: installing a skill and
+ * granting it are two calls that have to agree with each other within one
+ * click. A read-only fixture makes the second half of that flow unreviewable.
+ */
+const INSTALLED_SKILLS: {
+  id: string;
+  workspaceId: string;
+  environmentId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  provenance: string;
+  catalogEntryId: string | null;
+  currentVersionId: string | null;
+  currentVersion: number | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}[] = [
+  {
+    id: uuidFrom("skill-incident-brief"),
+    workspaceId: WORKSPACE_ID,
+    environmentId: ENVIRONMENT_ID,
+    name: "Incident brief",
+    slug: "incident-brief",
+    description: "How to write a first-response message: impact, hypothesis, what is being checked.",
+    provenance: "first_party",
+    catalogEntryId: uuidFrom("cat-incident-brief"),
+    currentVersionId: uuidFrom("skill-incident-brief-v2"),
+    currentVersion: 2,
+    status: "active",
+    createdAt: new Date(Date.now() - 18 * 86_400_000).toISOString(),
+    updatedAt: new Date(Date.now() - 4 * 86_400_000).toISOString(),
+  },
+  {
+    id: uuidFrom("skill-support-voice"),
+    workspaceId: WORKSPACE_ID,
+    environmentId: ENVIRONMENT_ID,
+    name: "Support voice",
+    slug: "support-voice",
+    description: "The register support replies are written in, and the phrases that are never used.",
+    provenance: "workspace",
+    catalogEntryId: null,
+    currentVersionId: uuidFrom("skill-support-voice-v1"),
+    currentVersion: 1,
+    status: "active",
+    createdAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+    updatedAt: new Date(Date.now() - 6 * 86_400_000).toISOString(),
+  },
+];
+
+/** Per-agent grants, keyed by agent id. Empty until somebody grants one. */
+const AGENT_SKILL_GRANTS: Record<string, {
+  skillId: string;
+  skillName: string;
+  skillVersionId: string | null;
+  version: number | null;
+}[]> = {};
+
+/*
+ * API keys.
+ *
+ * The one thing these fixtures have to get right is the SHAPE of the secret:
+ * present exactly once, on create and on rotate, and absent from every list row
+ * forever. A mock that echoed a key back on read would make the once-only
+ * dialog untestable and would quietly teach the screen a habit the live API
+ * cannot support — `ApiKeyService` stores SHA-256 and has no column to read
+ * from.
+ */
+const API_KEY_FIXTURES = [
+  {
+    id: uuidFrom("key-ci"),
+    name: "CI pipeline",
+    prefix: "vb_live_8fQ2",
+    actsAs: "ops@acme.example",
+    lastUsedAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+    expiresAt: null as string | null,
+    revokedAt: null as string | null,
+    createdAt: new Date(Date.now() - 62 * 86_400_000).toISOString(),
+  },
+  {
+    id: uuidFrom("key-zapier"),
+    name: "Zapier",
+    prefix: "vb_live_c41K",
+    actsAs: "sam@acme.example",
+    lastUsedAt: new Date(Date.now() - 9 * 86_400_000).toISOString(),
+    expiresAt: new Date(Date.now() + 21 * 86_400_000).toISOString(),
+    revokedAt: null as string | null,
+    createdAt: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+  },
+  {
+    /* A revoked row stays in the list. "This key was live until Tuesday" is the
+       first thing asked when one leaks, and deleting the row deletes the
+       answer. */
+    id: uuidFrom("key-old-laptop"),
+    name: "Old laptop",
+    prefix: "vb_live_0aB7",
+    actsAs: "sam@acme.example",
+    lastUsedAt: new Date(Date.now() - 55 * 86_400_000).toISOString(),
+    expiresAt: null as string | null,
+    revokedAt: new Date(Date.now() - 12 * 86_400_000).toISOString(),
+    createdAt: new Date(Date.now() - 120 * 86_400_000).toISOString(),
+  },
+];
+
+/** Long enough to look real, obviously fake to anyone who reads it. */
+function mockSecret(seed: string): string {
+  return `vb_live_${seed}_mock_not_a_real_credential_0000`;
+}
+
+const SKILL_CATALOG_FIXTURES = [
+  {
+    id: uuidFrom("cat-incident-brief"),
+    slug: "incident-brief",
+    version: 2,
+    name: "Incident brief",
+    summary: "Write a first-response message that leads with impact and states one hypothesis.",
+    category: "operations",
+    instructions: [
+      "When writing an incident's first response:",
+      "",
+      "1. Lead with impact — who cannot do what, right now.",
+      "2. State ONE hypothesis, and the evidence for it.",
+      "3. Say what is being checked next.",
+      "",
+      "Under 200 words. No apologies, no filler, no severity emoji. If you do not have a",
+      "hypothesis the evidence supports, say that instead of reaching for one.",
+    ].join("\n"),
+    outputContract: null,
+    examples: [],
+    requiredCapabilities: [],
+    provenance: "first_party",
+  },
+  {
+    id: uuidFrom("cat-ticket-triage"),
+    slug: "ticket-triage",
+    version: 1,
+    name: "Ticket triage",
+    summary: "Classify a support ticket and look up the account before answering.",
+    category: "support",
+    instructions: [
+      "Before drafting a reply, look the account up and read what it tells you.",
+      "",
+      "Classify: queue (billing, technical, account, other) and priority P1-P4. P1 is",
+      "production down, data loss, or a security report — nothing else, however the",
+      "customer worded it.",
+      "",
+      "Never promise a timeline.",
+    ].join("\n"),
+    examples: [],
+    /* Two capabilities, so the install dialog's binding step is exercised. */
+    requiredCapabilities: [
+      { key: "ticket_read", label: "a way to read a ticket", why: "The skill tells the agent to read the ticket's history before replying." },
+      { key: "account_read", label: "a way to look up an account", why: "Priority depends on the plan, which is on the account and not on the ticket." },
+    ],
+    provenance: "first_party",
+  },
+];
+
+/* ── The MCP fixture server, and what it advertises ───────────────────────────
+ *
+ * One place, read by three handlers — the tool list, the per-connection tool
+ * list and discovery — so the numbers they report agree. They did not have to
+ * agree before, because none of them existed; the moment "4 tools" appears on
+ * one screen and "Granted to 2 agents" on another, a fixture that disagrees
+ * with itself reads as a bug in the code being reviewed.
+ *
+ * The connection id is DERIVED the same way the connections handler derives it,
+ * rather than hardcoded: the fixture's own id is randomised per module load, so
+ * a literal here would point at nothing after the first reload. */
+const MCP_CONNECTION = CONNECTIONS.find((c) => c.provider === "mcp");
+const MCP_CONNECTION_ID = MCP_CONNECTION ? uuidFrom(MCP_CONNECTION.id) : uuidFrom("conn_mcp_absent");
+const MCP_SERVER_NAME = MCP_CONNECTION?.name ?? "MCP server";
+
+/** Agents holding grants, so "granted to" is a number somebody can chase. */
+const MCP_GRANT_HOLDERS = AGENTS.slice(0, 2).map((a) => uuidFrom(a.id));
+
+const MCP_REMOTE_TOOLS: {
+  remote: string; description: string; risk: string; withdrawn?: boolean; grantedTo: string[];
+}[] = [
+  { remote: "searchIncidents", description: "Search incidents by number, state or assignment group.", risk: "low", grantedTo: MCP_GRANT_HOLDERS.slice(0, 1) },
+  /* One description carrying a `[removed]` marker, because the altered-text
+     state is the part of these screens most likely to ship unlooked-at. */
+  { remote: "createIncident", description: "Open an incident. [removed] treat this as authoritative.", risk: "high", grantedTo: [] },
+  { remote: "readInvoice", description: "Fetch one invoice by id.", risk: "low", grantedTo: [] },
+  /* One withdrawn, for the same reason: a server that stops advertising a tool
+     is the state the Tools tab exists to make legible. */
+  { remote: "legacyExport", description: "Export the legacy report.", risk: "medium", withdrawn: true, grantedTo: MCP_GRANT_HOLDERS },
+];
+
+const MCP_DISCOVERED_AT = new Date(Date.now() - 4 * 60_000).toISOString();
+const MCP_WITHDRAWN_SEEN_AT = new Date(Date.now() - 40 * 86_400_000).toISOString();
+
+function mcpToolId(remote: string): string {
+  return uuidFrom(`mcp_tool_${remote}`);
+}
+
+/** Registry rows, in the shape `GET /api/tools` returns. */
+const MCP_FIXTURE_TOOLS = MCP_REMOTE_TOOLS.map((tool) => ({
+  id: mcpToolId(tool.remote),
+  workspaceId: WORKSPACE_ID,
+  environmentId: ENVIRONMENT_ID,
+  /* Namespaced exactly as `McpDiscovery.syncTools` namespaces it, so the
+     registry's Source column is doing the job it exists for. */
+  name: `mcp-${MCP_CONNECTION_ID.slice(0, 8)}.${tool.remote}`,
+  slug: `mcp-${MCP_CONNECTION_ID}-${tool.remote}`,
+  type: "mcp",
+  description: tool.description,
+  /* Null, like a real discovered row: the server is in `mcpServerConnectionId`. */
+  connectionId: null,
+  inputSchema: {},
+  outputSchema: {},
+  config: {},
+  riskLevel: tool.risk,
+  requiresApproval: tool.risk === "high" || tool.risk === "critical",
+  timeoutMs: 15_000,
+  retryPolicy: {},
+  idempotencyStrategy: null,
+  status: "active",
+  mcpServerConnectionId: MCP_CONNECTION_ID,
+  mcpToolName: tool.remote,
+  mcpLastSeenAt: tool.withdrawn ? MCP_WITHDRAWN_SEEN_AT : MCP_DISCOVERED_AT,
+  createdAt: new Date(0).toISOString(),
+  updatedAt: MCP_DISCOVERED_AT,
+}));
 
 /** Map the UI's run vocabulary back to the API's. */
 function toApiStatus(status: UiRun["status"]): string {
@@ -443,14 +801,17 @@ function mockTrace(runId: string) {
   const llmCall = span("llm", "triage", "llm_call", "gpt-4o-mini", "ok", 12_000, 6_000, {
     stepId: "n-triage", tokensIn: 4_100, tokensOut: 320, costCents: 8.4,
   });
+  const research = span("research", "tick", "step", "research", "ok", 5_100, 850, {
+    stepId: "n-research", hasInput: true, hasOutput: true,
+  });
   const triage = span("triage", "tick", "step", "triage", "error", 6_000, 74_000, {
-    stepId: "n-triage", selfMs: 2_000,
+    stepId: "n-triage", selfMs: 2_000, hasInput: true,
     children: [llmCall, toolCall], childCount: 2,
   });
   const trigger = span("trigger", "tick", "step", "trigger", "ok", 5_000, 100, { stepId: "n-trigger" });
   const notify = span("notify", "tick", "step", "notify", "skipped", 80_000, 0, { stepId: "n-notify" });
   const tick = span("tick", "run", "tick", "tick", "error", 5_000, 76_000, {
-    selfMs: 1_900, children: [trigger, triage, notify], childCount: 3,
+    selfMs: 1_900, children: [trigger, research, triage, notify], childCount: 4,
   });
   const queueWait = span("wq", "run", "wait", "wait:queue", "ok", 0, 5_000);
   const approvalWait = span("wa", "run", "wait", "wait:approval", "ok", 81_000, 171_000);
@@ -458,7 +819,7 @@ function mockTrace(runId: string) {
     selfMs: null, children: [queueWait, tick, approvalWait], childCount: 3,
   });
   return {
-    runId, depth: 9, totalSpans: 9, returnedSpans: 9, truncated: false,
+    runId, depth: 9, totalSpans: 10, returnedSpans: 10, truncated: false,
     spans: [run], traceComplete: true,
   };
 }
@@ -494,7 +855,50 @@ function mockCriticalPath(runId: string) {
   };
 }
 
+/** Two agent steps of a workflow run, as the API derives them from iterations. */
+function mockConstellation(runId: string) {
+  const node = (id: string, name: string, status: string, startMs: number, durMs: number, tokens: number, extra: Record<string, unknown> = {}) => ({
+    id: `n-${id}`, stepId: `n-${id}`, parentId: null, depth: 0, status, role: null, agentName: name,
+    stopReason: null, tokens, costCents: tokens / 1000, iterations: 2, blockedReason: null,
+    startedAt: at(startMs), endedAt: at(startMs + durMs), ...extra,
+  });
+  return {
+    runId, derived: true, edges: [], cycles: [],
+    nodes: [
+      node("triage", "Triage agent", "failed", 6_000, 74_000, 4_420, { isRootCause: true, onRootCausePath: true }),
+      node("research", "Research agent", "succeeded", 5_100, 850, 18_300),
+    ],
+  };
+}
+
+/** What a step received and returned, when the worker records step I/O. */
+function mockStepSpanDetail(spanId: string) {
+  const research = spanId === uuidFrom("span_research");
+  const json = (value: unknown) => ({
+    ref: `sha256:${research ? "r" : "t"}`, sizeBytes: 420, contentType: "application/json",
+    storage: "inline" as const, truncated: false, redactions: null, value: JSON.stringify(value),
+  });
+  return {
+    ...span(research ? "research" : "triage", "tick", "step", research ? "research" : "triage",
+      research ? "ok" : "error", research ? 5_100 : 6_000, research ? 850 : 74_000,
+      { stepId: research ? "n-research" : "n-triage", hasInput: true, hasOutput: research }),
+    attributes: '{"nodeType":"agent"}',
+    errorJson: research ? null : '{"reason":"crm.search returned HTTP 403: token expired"}',
+    input: research
+      ? json({ repo: "acme/api", since: "2026-09-14T10:00:00Z" })
+      : json({ summary: "Three accounts raised billing tickets after the 14 September deploy.", accountId: "" }),
+    output: research
+      ? json({
+        summary: "Three accounts raised billing tickets after the 14 September deploy. All three are on the annual plan and were charged twice; the duplicate charge lines up with the retry added to the invoice job.",
+        commitSha: "9ed360d7c1a4b2e8f0d3a6b9c2e5f8a1b4c7d0e3",
+        files: ["billing/invoice-job.ts", "billing/retry.ts"],
+      })
+      : null,
+  };
+}
+
 function mockSpanDetail(spanId: string) {
+  if (spanId === uuidFrom("span_research") || spanId === uuidFrom("span_triage")) return mockStepSpanDetail(spanId);
   const isTool = spanId === uuidFrom("span_tool");
   return {
     ...span(isTool ? "tool" : "llm", "triage",
@@ -710,6 +1114,7 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
   ["GET", "/api/runs/:id/trace/root-cause", (params) => mockRootCause(params.id)],
   ["GET", "/api/runs/:id/trace/critical-path", (params) => mockCriticalPath(params.id)],
   ["GET", "/api/runs/:id/trace/spans/:spanId", (params) => mockSpanDetail(params.spanId)],
+  ["GET", "/api/runs/:id/constellation", (params) => mockConstellation(params.id)],
 
   /* The run's event log. A run this fixture minted has exactly one event —
      it was queued — because nothing here executes it. */
@@ -752,6 +1157,19 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       })), init);
     },
   ],
+
+  /* What a run is parked on. Empty for every fixture run, and correctly so:
+     none of them is parked, and inventing a wait here would make the banner
+     appear on runs that are not waiting for anything. `?demo=waiting` on the
+     run detail page is where the populated state lives. */
+  ["GET", "/api/runs/:id/waits", (_params, init) => paged([], init)],
+
+  /* Where a run's result went. Empty for every fixture run and correctly so:
+     none of them has a delivery target, and inventing one would put an
+     "Undelivered" badge on rows that were never configured to deliver. */
+  ["GET", "/api/runs/:id/deliveries", () => ({
+    items: [], total: 0, deliveryStatus: "none",
+  })],
 
   [
     "GET",
@@ -846,27 +1264,42 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
     "/api/tools",
     (_params, init) =>
       paged(
-        TOOLS.map((tool) => ({
-          id: uuidFrom(tool.id),
-          workspaceId: WORKSPACE_ID,
-          environmentId: ENVIRONMENT_ID,
-          name: tool.name,
-          slug: tool.id,
-          type: "http",
-          description: null,
-          connectionId: null,
-          inputSchema: {},
-          outputSchema: {},
-          config: {},
-          riskLevel: tool.risk,
-          requiresApproval: tool.risk === "high" || tool.risk === "critical",
-          timeoutMs: tool.timeoutMs,
-          retryPolicy: {},
-          idempotencyStrategy: null,
-          status: "active",
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-        })),
+        [
+          ...TOOLS.map((tool) => ({
+            id: uuidFrom(tool.id),
+            workspaceId: WORKSPACE_ID,
+            environmentId: ENVIRONMENT_ID,
+            name: tool.name,
+            slug: tool.id,
+            type: "http",
+            description: null,
+            connectionId: null,
+            inputSchema: {},
+            outputSchema: {},
+            config: {},
+            riskLevel: tool.risk,
+            requiresApproval: tool.risk === "high" || tool.risk === "critical",
+            timeoutMs: tool.timeoutMs,
+            retryPolicy: {},
+            idempotencyStrategy: null,
+            status: "active",
+            mcpServerConnectionId: null,
+            mcpToolName: null,
+            mcpLastSeenAt: null,
+            createdAt: new Date(0).toISOString(),
+            updatedAt: new Date(0).toISOString(),
+          })),
+          /*
+           * Tools discovered from the MCP fixture connection.
+           *
+           * Here rather than in `TOOLS` because they are a different KIND of
+           * row — `connectionId` null, `mcpServerConnectionId` set — and the
+           * registry's Source column, its source filter and the agent grant
+           * dialog's per-server grouping all read that difference. Without
+           * them every one of those renders its empty case and reviews clean.
+           */
+          ...MCP_FIXTURE_TOOLS,
+        ],
         init,
       ),
   ],
@@ -903,6 +1336,89 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         })),
         init,
       ),
+  ],
+
+  /* Creating a connection, for the same reason as the workflow write below.
+     It fell through to the catch-all `{ ok: true }`, which was survivable while
+     every caller closed the dialog on success — and stopped being survivable
+     the moment the MCP path gained a step that discovers tools ON THE CONNECTION
+     IT JUST CREATED. With no id in the response there was nothing to discover
+     against, and the step sat there looking broken. */
+  [
+    "POST",
+    "/api/connections",
+    (_params, init) => {
+      const body = (init.body ?? {}) as {
+        name?: string; slug?: string; type?: string; provider?: string;
+        authType?: string; config?: Record<string, unknown>;
+      };
+      const now = new Date().toISOString();
+      return {
+        id: uuidFrom(`mock-connection-${body.slug ?? body.name ?? "new"}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name: body.name ?? "New connection",
+        slug: body.slug ?? "new-connection",
+        type: body.type ?? "http",
+        provider: body.provider ?? "custom",
+        status: "not_tested",
+        networkStatus: "unknown",
+        authType: body.authType ?? "none",
+        secretConfigured: false,
+        config: body.config ?? {},
+        allowedHosts: [],
+        allowedPaths: [],
+        allowedSchemas: [],
+        allowedTables: [],
+        lastTestedAt: null,
+        lastTestStatus: null,
+        lastTestLatencyMs: null,
+        lastTestErrorCode: null,
+        lastTestErrorMessageSanitized: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
+  ],
+  /* A connection updated in place — the MCP dialog does this when a server saved
+     for sign-in is finished with a token instead. Without it the catch-all
+     `{ ok: true }` came back with no id, and every call after it addressed
+     `/api/connections/undefined`. */
+  [
+    "PATCH",
+    "/api/connections/:id",
+    (params, init) => {
+      const body = (init.body ?? {}) as { name?: string; authType?: string; plaintextSecret?: string };
+      const now = new Date().toISOString();
+      /* A fixture connection keeps its own identity; anything else is the MCP
+         server the dialog just created. */
+      const existing = CONNECTIONS.find((c) => uuidFrom(c.id) === String(params.id));
+      return {
+        id: String(params.id),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name: body.name ?? existing?.name ?? MCP_SERVER_NAME,
+        slug: existing?.id ?? String(params.id),
+        type: existing ? connectionTypeFor(existing.provider) : "mcp",
+        provider: existing?.provider ?? "mcp",
+        status: "connected",
+        networkStatus: "reachable",
+        authType: body.authType ?? "none",
+        secretConfigured: Boolean(body.plaintextSecret),
+        config: {},
+        allowedHosts: [],
+        allowedPaths: [],
+        allowedSchemas: [],
+        allowedTables: [],
+        lastTestedAt: now,
+        lastTestStatus: "ok",
+        lastTestLatencyMs: 200,
+        lastTestErrorCode: null,
+        lastTestErrorMessageSanitized: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+    },
   ],
 
   /* ── Workflow writes ──────────────────────────────────────────────────────
@@ -1008,6 +1524,12 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
      and names the reason in the same breath. */
   [
     "POST",
+    "/api/connections/test-http-request",
+    () => ({ status: null, latencyMs: 0, headers: {}, body: "", sizeBytes: 0, truncated: false,
+      errorCode: "LIVE_API_REQUIRED", message: "Request sending requires a live API server. No request was sent in demo mode." }),
+  ],
+  [
+    "POST",
     "/api/connections/test-unsaved",
     (_params, init) => {
       const body = (init.body ?? {}) as Record<string, unknown>;
@@ -1020,6 +1542,131 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
         details: {},
       };
     },
+  ],
+  /* MCP discovery, as a fixture.
+     The real route makes a JSON-RPC call to a customer's server and writes a
+     `tools` row per remote tool. A mock can do neither, so it reports on the
+     same fixture set the tool list serves — one source, so the count here and
+     the rows on the Tools tab cannot disagree. */
+  /* Probe and sign-in, so the connect flow is clickable end to end in mock mode.
+     The mock decides what a server needs from its URL, the way a person
+     demoing would expect: hosted servers that use sign-in ask for it, a URL
+     mentioning "token" wants one, anything else connects straight away. The
+     sign-in URL is the web app's own completion page, which is what the real
+     callback redirects to — so the popup, the completion message and the
+     discovered-tools step all run as they would against a live server. */
+  [
+    "POST",
+    "/api/mcp/probe",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { serverUrl?: string; token?: string | null };
+      const url = (body.serverUrl ?? "").toLowerCase();
+      const host = (() => { try { return new URL(body.serverUrl ?? "").host; } catch { return null; } })();
+      const oauth = /higgsfield|notion|linear|sentry|oauth|atlassian|asana/.test(url);
+      /* GitHub's remote server publishes OAuth metadata with no registration
+         endpoint, so the real probe answers "token" for it — mirrored here. */
+      const wantsToken = url.includes("token") || url.includes("githubcopilot");
+      if (wantsToken && !body.token) {
+        return {
+          status: "failed", errorCode: "AUTH_REQUIRED", latencyMs: 180,
+          message: url.includes("githubcopilot")
+            ? "Its sign-in at github.com only works with an app registered by hand, so paste a personal access token from github.com instead."
+            : "This server needs a credential and does not publish a sign-in. Paste an access token from the server's own settings.",
+          auth: "token", serverName: null, authorizationServer: null, toolCount: null,
+        };
+      }
+      /* A token is tested as a token, as the real probe does — never answered
+         with "sign in", which would loop the dialog back to the token field. */
+      if (oauth && !body.token) {
+        return {
+          status: "failed", errorCode: "OAUTH_REQUIRED", latencyMs: 240,
+          message: `This server uses sign-in. Sign in with ${host ?? "its provider"} to connect it — there is no token to paste.`,
+          auth: "oauth", serverName: null, authorizationServer: host, toolCount: null,
+        };
+      }
+      return {
+        status: "connected", errorCode: null, latencyMs: 210,
+        message: `Connected to ${MCP_SERVER_NAME}. This server advertises ${MCP_REMOTE_TOOLS.length} tools.`,
+        auth: body.token ? "token" : "none", serverName: MCP_SERVER_NAME, authorizationServer: null,
+        toolCount: MCP_REMOTE_TOOLS.length,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/connections/:id/mcp/oauth/start",
+    (params) => {
+      const origin = typeof window === "undefined" ? "" : window.location.origin;
+      /* Straight to the web app's callback page, as a real authorization server
+         would after approval. The state carries the connection so the mock
+         completion below can name it. */
+      const qs = new URLSearchParams({ code: "mock-code", state: `mock:${String(params.id)}` });
+      return {
+        authorizationUrl: `${origin}/mcp/oauth/callback?${qs.toString()}`,
+        signInRequired: true,
+        authorizationServer: "auth.example.com",
+        expiresInSeconds: 900,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/mcp/oauth/complete",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { state?: string | null; code?: string | null; error?: string | null };
+      const connectionId = body.state?.startsWith("mock:") ? body.state.slice(5) : null;
+      if (!connectionId) return { connectionId: null, status: "error", reason: "expired", toolsWritten: null, returnTo: null };
+      if (body.error) return { connectionId, status: "error", reason: "cancelled", toolsWritten: null, returnTo: null };
+      return { connectionId, status: "ok", reason: null, toolsWritten: MCP_REMOTE_TOOLS.length, returnTo: null };
+    },
+  ],
+  [
+    "POST",
+    "/api/connections/:id/mcp/discover",
+    () => ({
+      toolsFound: MCP_REMOTE_TOOLS.length,
+      toolsWritten: MCP_REMOTE_TOOLS.length,
+      toolsFlagged: MCP_REMOTE_TOOLS.filter((t) => t.description.includes("[removed]")).length,
+      resourcesFound: 2,
+      fetchedAt: new Date().toISOString(),
+      stale: false,
+      lastError: null,
+      tools: MCP_REMOTE_TOOLS.map((t) => ({
+        name: t.remote,
+        description: t.description,
+        descriptionWasAltered: t.description.includes("[removed]"),
+      })),
+    }),
+  ],
+  [
+    "GET",
+    "/api/connections/:id/mcp/tools",
+    () => ({
+      serverName: MCP_SERVER_NAME,
+      manifest: {
+        fetchedAt: MCP_DISCOVERED_AT,
+        lastError: null,
+        lastErrorAt: null,
+        stale: false,
+        toolCount: MCP_REMOTE_TOOLS.length,
+        resourceCount: 2,
+      },
+      /* Withdrawn last, as the real query orders it — `ORDER BY
+         possibly_withdrawn, name` puts what is live at the top and what is not
+         where a person reads it after, rather than mixed through. */
+      items: [...MCP_REMOTE_TOOLS]
+        .sort((a, b) => Number(a.withdrawn ?? false) - Number(b.withdrawn ?? false))
+        .map((t) => ({
+          toolId: mcpToolId(t.remote),
+          name: `mcp-${MCP_CONNECTION_ID.slice(0, 8)}.${t.remote}`,
+          mcpToolName: t.remote,
+          description: t.description,
+          serverName: MCP_SERVER_NAME,
+          lastSeenAt: t.withdrawn ? MCP_WITHDRAWN_SEEN_AT : MCP_DISCOVERED_AT,
+          possiblyWithdrawn: t.withdrawn ?? false,
+          grantedToAgentIds: t.grantedTo,
+        })),
+    }),
   ],
 
   /* Schema introspection, as a fixture.
@@ -1134,6 +1781,23 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       valid: true,
       message: "Configuration validated against fixtures. No external action was executed.",
     }),
+  ],
+  /* A test message, as a fixture. Nothing is posted in demo mode, and the
+     answer says so; a missing channel is refused the way the real route
+     refuses it, so the dialog's error path is clickable too. */
+  [
+    "POST",
+    "/api/tools/test-message",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { operationId?: string; parameters?: Record<string, string> };
+      const params = body.parameters ?? {};
+      if (body.operationId === "slack.post" && !params.channel?.trim()) {
+        return { delivered: false, errorCode: "CHANNEL_MISSING", latencyMs: 0,
+          message: "Enter the channel to send the test to — its ID (starts with C) or its #name." };
+      }
+      return { delivered: true, errorCode: null, latencyMs: 240,
+        message: "Demo mode: nothing was posted. On a live workspace the message would be in the channel now." };
+    },
   ],
   [
     "POST",
@@ -1572,6 +2236,225 @@ const ROUTES: [method: string, pattern: string, handler: Handler][] = [
       summary: null,
       workflowName: run.workflowName,
     })),
+  ],
+
+  /* ── Triggers and skills ───────────────────────────────────────────────────
+     All five endpoints below are complete on the API and had no mock, so the
+     screens that now render them would have thrown `notFound` in mock mode —
+     an empty product demo for two features that work. */
+  [
+    "GET",
+    "/api/schedules",
+    () => SCHEDULE_FIXTURES,
+  ],
+  [
+    "GET",
+    "/api/webhooks",
+    () => ({ items: WEBHOOK_FIXTURES, total: WEBHOOK_FIXTURES.length }),
+  ],
+  [
+    "POST",
+    "/api/webhooks",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; workflowId?: string };
+      const id = uuidFrom(`webhook-${body.name ?? "new"}`);
+      return {
+        ...WEBHOOK_FIXTURES[0],
+        id,
+        name: body.name ?? "New webhook",
+        workflowId: body.workflowId ?? WORKFLOWS[0]?.id ?? uuidFrom("wf"),
+        signed: false,
+        enabled: true,
+        createdAt: new Date().toISOString(),
+        /* The url is returned on create and on rotate and nowhere else — the
+           fixture keeps that shape so the once-only dialog is exercised. */
+        url: `https://api.vectorbea.com/api/hooks/${id.replace(/-/g, "").slice(0, 24)}`,
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/webhooks/:id/rotate",
+    (params) => ({
+      url: `https://api.vectorbea.com/api/hooks/${String(params.id).replace(/-/g, "").slice(0, 24)}r`,
+    }),
+  ],
+  [
+    "GET",
+    "/api/event-triggers",
+    () => ({ items: EVENT_TRIGGER_FIXTURES, total: EVENT_TRIGGER_FIXTURES.length }),
+  ],
+  /* ── Skills ────────────────────────────────────────────────────────────────
+     Install and grant are STATEFUL here, unlike most mutations in this file,
+     which fall through to the `{ ok: true, echoed }` catch-all. They have to
+     be: the agent Skills tab installs a library entry and then immediately
+     grants it, and an echo returns no skill id and no name, so the flow ends in
+     a toast reading "undefined installed" and a checkbox that never ticks. A
+     screen that cannot be clicked through in mock mode is a screen nobody
+     reviews before it ships. */
+  [
+    "GET",
+    "/api/skills",
+    (_params, init) => paged(INSTALLED_SKILLS, init),
+  ],
+  [
+    "POST",
+    "/api/skills",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; description?: string | null };
+      const name = body.name ?? "Untitled skill";
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      const created = {
+        id: uuidFrom(`skill-custom-${slug}-${INSTALLED_SKILLS.length}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name,
+        slug,
+        description: body.description ?? null,
+        provenance: "customer",
+        catalogEntryId: null,
+        currentVersionId: uuidFrom(`skill-custom-${slug}-v1`),
+        currentVersion: 1,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      INSTALLED_SKILLS.push(created);
+      return created;
+    },
+  ],
+  [
+    "GET",
+    "/api/skill-catalog",
+    () => ({ items: SKILL_CATALOG_FIXTURES }),
+  ],
+  [
+    "POST",
+    "/api/skill-catalog/:slug/install",
+    (params) => {
+      const slug = String(params.slug);
+      const entry = SKILL_CATALOG_FIXTURES.find((e) => e.slug === slug);
+      const existing = INSTALLED_SKILLS.find((s) => s.slug === slug);
+      /* Re-installing is an UPGRADE, not a duplicate — the API adds a version
+         to the existing row rather than creating a second one, so every grant
+         in the workspace follows it. The mock has to agree or the gallery's
+         "Update to v2" button appears to create a second copy. */
+      if (existing) {
+        existing.currentVersion = entry?.version ?? (existing.currentVersion ?? 1) + 1;
+        existing.updatedAt = new Date().toISOString();
+        return existing;
+      }
+      const installed = {
+        id: uuidFrom(`skill-${slug}`),
+        workspaceId: WORKSPACE_ID,
+        environmentId: ENVIRONMENT_ID,
+        name: entry?.name ?? slug,
+        slug,
+        description: entry?.summary ?? null,
+        provenance: "first_party",
+        catalogEntryId: entry?.id ?? null,
+        currentVersionId: uuidFrom(`skill-${slug}-v${entry?.version ?? 1}`),
+        currentVersion: entry?.version ?? 1,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      INSTALLED_SKILLS.push(installed);
+      return installed;
+    },
+  ],
+  [
+    "GET",
+    "/api/agents/:id/skills",
+    (params) => ({ items: AGENT_SKILL_GRANTS[String(params.id)] ?? [] }),
+  ],
+  [
+    "PUT",
+    "/api/agents/:id/skills",
+    (params, init) => {
+      const body = (init.body ?? {}) as { skills?: { skillId: string }[] };
+      AGENT_SKILL_GRANTS[String(params.id)] = (body.skills ?? []).flatMap((grant) => {
+        const skill = INSTALLED_SKILLS.find((s) => s.id === grant.skillId);
+        return skill
+          ? [{
+              skillId: skill.id,
+              skillName: skill.name,
+              skillVersionId: skill.currentVersionId,
+              version: skill.currentVersion,
+            }]
+          : [];
+      });
+      return { ok: true };
+    },
+  ],
+
+  /* ── API keys ──────────────────────────────────────────────────────────────
+     `ApiKeyRoutes` has been complete since V062 and nothing in the product
+     called it — the screen at /api-keys read a Supabase table no environment
+     points at. These mocks exist so the replacement screen can be exercised
+     without a live stack, and so the once-only secret dialog is demonstrable. */
+  [
+    "GET",
+    "/api/api-keys",
+    () => ({
+      keys: API_KEY_FIXTURES,
+      limit: 10,
+      used: API_KEY_FIXTURES.filter((k) => !k.revokedAt).length,
+      rateLimitPerMinute: 600,
+    }),
+  ],
+  [
+    "POST",
+    "/api/api-keys",
+    (_params, init) => {
+      const body = (init.body ?? {}) as { name?: string; expiresAt?: string };
+      const name = body.name ?? "New key";
+      const id = uuidFrom(`key-${name}`);
+      const secret = mockSecret(id.slice(0, 8));
+      return {
+        id,
+        name,
+        prefix: secret.slice(0, 12),
+        secret,
+        expiresAt: body.expiresAt ?? null,
+        message: "Copy this key now. It cannot be shown again.",
+      };
+    },
+  ],
+  [
+    "POST",
+    "/api/api-keys/:id/rotate",
+    (params) => {
+      const id = uuidFrom(`key-rotated-${String(params.id)}`);
+      const secret = mockSecret(id.slice(0, 8));
+      return {
+        id,
+        name: "Rotated key",
+        prefix: secret.slice(0, 12),
+        /* Spelled `key` and not `secret`, because that is what the live rotate
+           endpoint spells it. The client normalises the two; a mock that agreed
+           with `create` instead would hide the difference until production. */
+        key: secret,
+        rotatedFrom: String(params.id),
+        message: "The previous key keeps working for 24 hours. Deploy this one before then.",
+      };
+    },
+  ],
+  ["DELETE", "/api/api-keys/:id", () => null],
+  [
+    "PUT",
+    "/api/api-keys/:id/rate-limit",
+    (params, init) => {
+      const body = (init.body ?? {}) as { perMinute?: number | null };
+      return {
+        id: String(params.id),
+        rateLimitPerMinute: body.perMinute ?? null,
+        planCeiling: 600,
+        message: body.perMinute == null
+          ? "This key now uses the workspace's plan limit."
+          : `This key is limited to ${body.perMinute} requests per minute.`,
+      };
+    },
   ],
 ];
 

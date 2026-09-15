@@ -37,6 +37,10 @@ private data class CreateToolBody(
     val inputSchema: Map<String, Any>? = null,
     val outputSchema: Map<String, Any>? = null,
     val config: Map<String, Any>? = null,
+    /** The declarative HTTP call. See HttpToolSpec and V064. */
+    val httpSpec: Map<String, Any>? = null,
+    /** What the model sees of the result. See ToolResultContract and V056. */
+    val resultContract: Map<String, Any>? = null,
     val riskLevel: String?,
     val requiresApproval: Boolean? = null,
     val timeoutMs: Int? = null,
@@ -52,6 +56,8 @@ private data class UpdateToolBody(
     val inputSchema: Map<String, Any>? = null,
     val outputSchema: Map<String, Any>? = null,
     val config: Map<String, Any>? = null,
+    val httpSpec: Map<String, Any>? = null,
+    val resultContract: Map<String, Any>? = null,
     val riskLevel: String? = null,
     val requiresApproval: Boolean? = null,
     val timeoutMs: Int? = null,
@@ -66,6 +72,7 @@ private data class TestToolBody(
     val inputSchema: Map<String, Any>? = null,
     val outputSchema: Map<String, Any>? = null,
     val config: Map<String, Any>? = null,
+    val httpSpec: Map<String, Any>? = null,
 )
 
 @Suppress("UNCHECKED_CAST")
@@ -87,6 +94,20 @@ private fun Tool.toResponse(): Map<String, Any?> = mapOf(
     "retryPolicy" to runCatching { mapper.readValue(retryPolicyJson, Map::class.java) }.getOrDefault(emptyMap<String, Any>()),
     "idempotencyStrategy" to idempotencyStrategy,
     "status" to status,
+    "httpSpec" to httpSpecJson?.let { runCatching { mapper.readValue(it, Map::class.java) }.getOrNull() },
+    "resultContract" to resultContractJson?.let { runCatching { mapper.readValue(it, Map::class.java) }.getOrNull() },
+    "currentVersion" to currentVersion,
+    /*
+     * Where this tool came from. Null on a locally-authored one, which is what
+     * a registry list renders as "—".
+     *
+     * Nullable, and the columns default to NULL, so the API and the worker
+     * deploy independently and tolerate schema skew in both directions — an
+     * older worker writing rows an newer API reads, and the reverse.
+     */
+    "mcpServerConnectionId" to mcpServerConnectionId?.toString(),
+    "mcpToolName" to mcpToolName,
+    "mcpLastSeenAt" to mcpLastSeenAt?.toString(),
     "createdAt" to createdAt.toString(),
     "updatedAt" to updatedAt.toString(),
 )
@@ -95,6 +116,20 @@ class ToolRoutes(
     private val repo: ToolRepository,
     private val connectionRepo: ConnectionRepository,
     private val cache: CacheService,
+    /**
+     * Records a snapshot on every definition change.
+     *
+     * ── WHY A UI EDIT APPLIES AND AN IMPORT DOES NOT ────────────────────────
+     * A person editing their own tool has just decided to; making them then
+     * approve their own edit is bureaucracy, and bureaucracy that fires on every
+     * save is bureaucracy people route around. A spec RE-IMPORT is different:
+     * nobody read the forty operations it changed, and one of them may be a tool
+     * an agent is granted. So an edit here writes an `applied` version — history
+     * and a rollback point — and `ApiSpecRoutes` writes a `pending` one.
+     *
+     * Null keeps existing call sites compiling and skips the snapshot.
+     */
+    private val versions: com.vectorbea.api.repository.ToolVersionRepository? = null,
 ) {
     fun register(router: Router) {
         router.get("/api/tools", ::list)
@@ -116,6 +151,7 @@ class ToolRoutes(
         val type = requireOneOf(requireField(body.type, "type"), "type", TOOL_TYPES)
         val config = body.config ?: emptyMap()
         validateConfigJsonNotContainsSecrets(config, "config")
+        val httpSpecJson = validateHttpSpec(body.httpSpec, type)
 
         if (body.connectionId != null) {
             validateToolConnection(body.connectionId, type, ctx.workspaceId)
@@ -125,15 +161,26 @@ class ToolRoutes(
 
         when (type) {
             "http" -> {
-                val url = requireField(config["url"] as? String, "config.url")
-                val uri = runCatching { java.net.URI(url) }.getOrElse {
-                    throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                /* A catalogue operation (Slack "Post a message", Teams, GitHub…)
+                   stores the vendor's PATH — or nothing, for a channel webhook
+                   whose connection URL is the destination — and takes its host
+                   from the connection. Demanding an absolute URL here refused
+                   every one of them at Validate while Register accepted them. */
+                val catalogueOperation = config["operationId"] is String && body.connectionId != null
+                if (httpSpecJson == null && catalogueOperation) {
+                    val method = (config["method"] as? String)?.uppercase() ?: "GET"
+                    requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
+                } else if (httpSpecJson == null) {
+                    val url = requireField(config["url"] as? String, "config.url")
+                    val uri = runCatching { java.net.URI(url) }.getOrElse {
+                        throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                    }
+                    if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) {
+                        throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
+                    }
+                    val method = (config["method"] as? String)?.uppercase() ?: "GET"
+                    requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"))
                 }
-                if (uri.scheme !in setOf("http", "https") || uri.host.isNullOrBlank()) {
-                    throw ApiError.ValidationError("config.url must be a valid HTTP or HTTPS URL")
-                }
-                val method = (config["method"] as? String)?.uppercase() ?: "GET"
-                requireOneOf(method, "config.method", setOf("GET", "POST", "PUT", "PATCH", "DELETE"))
             }
             "database" -> requireField(config["sqlTemplate"] as? String, "config.sqlTemplate")
         }
@@ -169,6 +216,7 @@ class ToolRoutes(
         val config = body.config ?: emptyMap()
         validateConfigJsonNotContainsSecrets(config, "config")
         requirePositive(body.timeoutMs, "timeoutMs")
+        val httpSpecJson = validateHttpSpec(body.httpSpec, type)
         val slug = slugify(body.slug?.takeIf { it.isNotBlank() } ?: name)
 
         // DB-write tools always require approval by default
@@ -201,8 +249,24 @@ class ToolRoutes(
                 status = body.status ?: "active",
             )
         )
+        /*
+         * The spec is written in a second statement because `CreateToolRequest`
+         * predates it and every other caller — the architect, the connector UI,
+         * the tests — would otherwise grow two fields it has no value for. The
+         * write is unconditional and immediate, so a tool never exists without
+         * the spec it was created with.
+         */
+        val stored = if (httpSpecJson != null || body.resultContract != null) {
+            repo.update(
+                id = tool.id, workspaceId = ctx.workspaceId,
+                httpSpecJson = httpSpecJson,
+                resultContractJson = body.resultContract?.let { mapper.writeValueAsString(it) },
+            ) ?: tool
+        } else tool
+
+        snapshot(stored, ctx.workspaceId, req.principal?.appUserId, "Created.")
         invalidateListCache(ctx.workspaceId, envId)
-        return Response.created(tool.toResponse())
+        return Response.created(stored.toResponse())
     }
 
     private fun getById(req: Request): Response {
@@ -221,9 +285,11 @@ class ToolRoutes(
         if (body.riskLevel != null) requireOneOf(body.riskLevel, "riskLevel", RISK_LEVELS)
         requirePositive(body.timeoutMs, "timeoutMs")
 
+        val existing = repo.findById(id, ctx.workspaceId) ?: throw ApiError.NotFound("Tool")
+        val httpSpecJson = validateHttpSpec(body.httpSpec, existing.type)
+
         var connectionId: UUID? = null
         if (body.connectionId != null) {
-            val existing = repo.findById(id, ctx.workspaceId) ?: throw ApiError.NotFound("Tool")
             connectionId = validateToolConnection(body.connectionId, existing.type, ctx.workspaceId)
         }
 
@@ -242,8 +308,16 @@ class ToolRoutes(
             retryPolicy = body.retryPolicy,
             idempotencyStrategy = body.idempotencyStrategy,
             status = body.status,
+            httpSpecJson = httpSpecJson,
+            resultContractJson = body.resultContract?.let { mapper.writeValueAsString(it) },
         ) ?: throw ApiError.NotFound("Tool")
 
+        /* Snapshotted only when the DEFINITION changed. Renaming a tool or pausing
+           it does not change what it does, and a version per rename would bury the
+           changes that matter under the ones that do not. */
+        if (httpSpecJson != null || body.resultContract != null || body.inputSchema != null) {
+            snapshot(tool, ctx.workspaceId, req.principal?.appUserId, "Edited in the tool editor.")
+        }
         invalidateListCache(ctx.workspaceId, tool.environmentId)
         return Response.ok(tool.toResponse())
     }
@@ -255,6 +329,77 @@ class ToolRoutes(
         repo.delete(id, ctx.workspaceId)
         invalidateListCache(ctx.workspaceId, existing.environmentId)
         return Response.noContent()
+    }
+
+    /**
+     * Check a submitted HTTP definition before it is stored, and return it as text.
+     *
+     * Two checks, and both matter:
+     *
+     *   · IT MUST PARSE WITH THE WORKER'S OWN READER. The API stores what the
+     *     worker executes, so a document this service accepts and that service
+     *     cannot read is a tool that saves cleanly and fails on its first run —
+     *     long after whoever configured it has stopped looking. `HttpToolSpec` is
+     *     compiled by both services precisely so this check is the real one.
+     *   · IT MUST NOT CARRY A CREDENTIAL. `http_spec_json` is returned by the
+     *     list endpoint, rendered in a form, snapshotted into `tool_versions` and
+     *     shown in a re-import diff; a secret in it is a secret in all four. Auth
+     *     names FIELDS of the connection's secret, never values.
+     */
+    private fun validateHttpSpec(spec: Map<String, Any>?, toolType: String): String? {
+        if (spec == null) return null
+        if (toolType !in setOf("http", "slack", "email", "crm")) {
+            throw ApiError.ValidationError(
+                "Only HTTP tools carry an httpSpec; this tool is type '$toolType'."
+            )
+        }
+        val json = mapper.writeValueAsString(spec)
+
+        com.vectorbea.api.openapi.SpecSecretScan.findInlineSecret(mapper.readTree(json))?.let {
+            throw ApiError.ValidationError("The definition carries $it")
+        }
+        com.vectorbea.worker.tools.httpspec.HttpToolSpec.parse(json)
+            ?: throw ApiError.ValidationError(
+                "That definition is not one the runtime can execute. Check that " +
+                    "`request.method` is a real HTTP method, that every input declares " +
+                    "`in`, and that `specVersion` is not newer than this deployment."
+            )
+        return json
+    }
+
+    /** Record what the tool is now, so a change is reversible and legible. */
+    private fun snapshot(tool: Tool, workspaceId: UUID, actor: UUID?, summary: String) {
+        val store = versions ?: return
+        runCatching {
+            store.create(
+                com.vectorbea.api.repository.CreateToolVersion(
+                    toolId = tool.id,
+                    workspaceId = workspaceId,
+                    name = tool.name,
+                    description = tool.description,
+                    connectionId = tool.connectionId,
+                    inputSchemaJson = tool.inputSchemaJson,
+                    outputSchemaJson = tool.outputSchemaJson,
+                    configJson = tool.configJson,
+                    httpSpecJson = tool.httpSpecJson,
+                    resultContractJson = tool.resultContractJson,
+                    riskLevel = tool.riskLevel,
+                    requiresApproval = tool.requiresApproval,
+                    timeoutMs = tool.timeoutMs,
+                    reviewState = "applied",
+                    source = "manual",
+                    specImportId = null,
+                    changeSummary = summary,
+                    changeJson = null,
+                    createdBy = actor,
+                )
+            )
+        }.onFailure {
+            /* History is valuable and is not the point of the request. A tool the
+               user just saved must not fail to save because its snapshot did. */
+            org.slf4j.LoggerFactory.getLogger(ToolRoutes::class.java)
+                .warn("[tools] could not snapshot version [tool={}]: {}", tool.id, it.message)
+        }
     }
 
     private fun validateToolConnection(connIdStr: String, toolType: String, workspaceId: UUID): UUID {

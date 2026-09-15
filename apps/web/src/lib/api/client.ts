@@ -1,4 +1,5 @@
 import { contracts } from "@vectorbea/shared";
+import type { HttpRequestPayload, HttpResponseResult } from "~/lib/tools/http-client";
 import type { Workspace } from "~/mocks/shell";
 import type {
   AnimationStep, ArchitectPlan, ArchitectSession, ArchitectUsage,
@@ -35,6 +36,11 @@ type Workflow = contracts.Workflow;
 type WorkflowVersion = contracts.WorkflowVersion;
 type Agent = contracts.Agent;
 type Tool = contracts.Tool;
+type ToolVersion = contracts.ToolVersion;
+type SpecImport = contracts.SpecImport;
+type SpecImportResult = contracts.SpecImportResult;
+type SpecOperation = contracts.SpecOperation;
+type SpecDiff = contracts.SpecDiff;
 type Connection = contracts.Connection;
 export interface ConnectionTestResult {
   status: "connected" | "failed" | "private_runner_required" | "whitelist_required";
@@ -45,6 +51,9 @@ export interface ConnectionTestResult {
   details: Record<string, unknown>;
 }
 export interface RegistryTestResult { valid: boolean; message: string; details?: Record<string, unknown> }
+/** `POST /api/tools/test-message`. `errorCode` is the provider's own (`not_in_channel`) or ours. */
+export interface TestMessageResult { delivered: boolean; errorCode: string | null; message: string; latencyMs: number }
+export interface TestMessageBody { connectionId: string; operationId: string; parameters: Record<string, string> }
 
 /**
  * `POST /api/connections/test-unsaved` body, as `ConnectionTestRoutes.UnsavedTestBody`
@@ -65,6 +74,7 @@ export interface TestConnectionDraftBody {
 
 /** `POST /api/tools/test-unsaved` body, as `ToolRoutes.TestToolBody` declares it. */
 export interface TestToolDraftBody {
+  httpSpec?: Record<string, unknown>;
   type: string;
   connectionId?: string | null;
   inputSchema?: Record<string, unknown>;
@@ -234,6 +244,340 @@ export interface SchemaPreviewResult {
 }
 
 /**
+ * `POST /api/connections/:id/mcp/discover`, as `McpConnectorRoutes` declares it.
+ *
+ * `toolsFound` and `toolsWritten` are different numbers and both are reported:
+ * found is what the server advertised, written is what reached the registry. A
+ * gap between them is a partial write worth seeing rather than rounding away.
+ */
+export interface McpDiscoverResult {
+  toolsFound: number;
+  toolsWritten: number;
+  /** How many descriptions the sanitizer altered. Surfaced, never only logged. */
+  toolsFlagged: number;
+  resourcesFound: number;
+  fetchedAt: string;
+  /** The last refresh failed and these tools came from the previous one. */
+  stale: boolean;
+  lastError: string | null;
+  tools: { name: string; description: string | null; descriptionWasAltered: boolean }[];
+}
+
+/**
+ * `POST /api/mcp/probe` — what an MCP server needs, before anything is saved.
+ *
+ * `auth` is the answer the connect screen is built around: `none` means it is
+ * already connected, `oauth` means show a sign-in button, `token` means ask for
+ * a token. The rest of the shape is the ordinary test result.
+ */
+export interface McpProbeResult {
+  status: "connected" | "failed" | "private_runner_required" | "whitelist_required";
+  errorCode: string | null;
+  message: string;
+  latencyMs: number;
+  auth: "none" | "oauth" | "token";
+  serverName: string | null;
+  /** The sign-in host, for "Sign in with auth.example.com". */
+  authorizationServer: string | null;
+  toolCount: number | null;
+}
+
+/** `POST /api/mcp/oauth/complete`. `reason` is a short machine code, never provider prose. */
+export interface McpSignInOutcome {
+  connectionId: string | null;
+  status: "ok" | "error";
+  reason: string | null;
+  toolsWritten: number | null;
+  returnTo: string | null;
+}
+
+/** `POST /api/connections/:id/mcp/oauth/start`. */
+export interface McpSignInStart {
+  /** Null when the server turned out to need no sign-in at all. */
+  authorizationUrl: string | null;
+  signInRequired: boolean;
+  authorizationServer?: string | null;
+  expiresInSeconds?: number;
+  message?: string;
+}
+
+/** One row of `mcp_tools_available`, as the API returns it. */
+export interface McpToolRow {
+  toolId: string;
+  name: string;
+  mcpToolName: string | null;
+  description: string | null;
+  serverName: string | null;
+  lastSeenAt: string | null;
+  /**
+   * The server has not advertised this in a week.
+   *
+   * "Possibly" is the API's word and it is kept: a server down for eight days
+   * has withdrawn nothing. The row keeps its grants either way.
+   */
+  possiblyWithdrawn: boolean;
+  grantedToAgentIds: string[];
+}
+
+/** The manifest cache's health — a different fact from the tools themselves. */
+export interface McpManifest {
+  fetchedAt: string;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  stale: boolean;
+  toolCount: number;
+  resourceCount: number;
+}
+
+export interface McpToolsResponse {
+  items: McpToolRow[];
+  manifest: McpManifest | null;
+  serverName: string;
+  /** The connection holds a sign-in (OAuth) rather than a pasted token or nothing. */
+  signedIn?: boolean;
+}
+
+/* ── Triggers ─────────────────────────────────────────────────────────────── */
+
+/** One inbound webhook, as `WebhookRoutes.toResponse` returns it. */
+export interface WebhookRow {
+  id: string;
+  workflowId: string;
+  name: string;
+  signatureScheme: string;
+  /** True when a signing secret is stored. The secret itself is never returned. */
+  signed: boolean;
+  signatureHeader: string | null;
+  timestampHeader: string | null;
+  toleranceSeconds: number;
+  inputMapping: Record<string, string>;
+  eventTypePath: string | null;
+  eventTypes: string[];
+  dedupeHeader: string | null;
+  dedupePath: string | null;
+  runDedupPath: string | null;
+  runPriority: number | null;
+  enabled: boolean;
+  createdAt: string;
+  /** Present only on create and rotate. */
+  url?: string;
+}
+
+export interface CreateWebhookBody {
+  workflowId: string;
+  name: string;
+  signatureScheme?: string;
+  /** Plaintext, exactly once. Stored encrypted; never returned. */
+  signingSecret?: string | null;
+  signatureHeader?: string | null;
+  timestampHeader?: string | null;
+  toleranceSeconds?: number;
+  inputMapping?: Record<string, string>;
+  eventTypePath?: string | null;
+  eventTypes?: string[];
+  dedupeHeader?: string | null;
+  dedupePath?: string | null;
+  runDedupPath?: string | null;
+}
+
+export interface WebhookDeliveryRow {
+  id: string;
+  receivedAt: string;
+  /** `accepted`, `rejected`, `duplicate`, … — why the call did or did not run. */
+  outcome: string;
+  detail: string | null;
+  headers: Record<string, string>;
+  body: string | null;
+  bodyBytes: number;
+}
+
+/** One broker subscription, as `EventTriggerRoutes.toResponse` returns it. */
+export interface EventTriggerRow {
+  id: string;
+  workflowId: string;
+  name: string;
+  broker: string;
+  connectionId: string | null;
+  source: string;
+  consumerGroup: string | null;
+  inputMapping: Record<string, string>;
+  filterPath: string | null;
+  filterValues: string[];
+  dedupePath: string | null;
+  runDedupPath: string | null;
+  runPriority: number | null;
+  maxInFlight: number | null;
+  batchSize: number | null;
+  enabled: boolean;
+  /** Why it stopped, if it did. The answer to "my events stopped arriving". */
+  disabledReason: string | null;
+  lastError: string | null;
+  lastMessageAt: string | null;
+  messagesConsumed: number;
+  createdAt: string;
+}
+
+export interface CreateEventTriggerBody {
+  workflowId: string;
+  name: string;
+  broker: string;
+  connectionId?: string | null;
+  source: string;
+  consumerGroup?: string | null;
+  inputMapping?: Record<string, string>;
+  filterPath?: string | null;
+  filterValues?: string[];
+  dedupePath?: string | null;
+  runDedupPath?: string | null;
+}
+
+/* ── Skills ───────────────────────────────────────────────────────────────── */
+
+export interface SkillRow {
+  id: string;
+  workspaceId: string;
+  environmentId: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  /** `first_party` for a library install, `workspace` for one written here. */
+  provenance: string;
+  catalogEntryId: string | null;
+  currentVersionId: string | null;
+  currentVersion: number | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SkillVersionRow {
+  id: string;
+  skillId: string;
+  version: number;
+  name: string;
+  summary: string | null;
+  instructions: string;
+  outputContract: string | null;
+  examples: { title: string; body: string }[];
+  requiredTools: { toolId: string; label: string }[];
+  /**
+   * The text tripped the frame-impersonation rules and was defanged.
+   *
+   * Surfaced, never hidden: the sanitizer does not reject, so a flagged version
+   * is installed and composing, and the API saying so is the only way anybody
+   * finds out.
+   */
+  flaggedForReview: boolean;
+  changeSummary: string | null;
+  createdAt: string;
+}
+
+export interface SkillCatalogRow {
+  id: string;
+  slug: string;
+  version: number;
+  name: string;
+  summary: string | null;
+  category: string | null;
+  instructions: string;
+  outputContract: string | null;
+  examples: { title: string; body: string }[];
+  /**
+   * What this skill needs an agent to be able to DO, in the abstract.
+   *
+   * A library entry cannot name tool uuids — it has no workspace — so it names
+   * capabilities, and installing binds each to a real tool. That binding is the
+   * install's whole job.
+   */
+  requiredCapabilities: { key: string; label: string; why: string }[];
+  provenance: string;
+}
+
+export interface InstallSkillBody {
+  version?: number;
+  slug?: string;
+  /** capability key → tool uuid. Every declared capability must appear. */
+  toolBindings: Record<string, string>;
+}
+
+export interface CreateSkillBody {
+  name: string;
+  description?: string | null;
+  summary?: string | null;
+  instructions: string;
+  /** What the agent's answer should look like, in prose. Optional. */
+  outputContract?: string | null;
+  examples?: { title: string; body: string }[];
+}
+
+export interface SkillGrantRow {
+  skillId: string;
+  skillName: string;
+  skillVersionId: string | null;
+  version: number | null;
+}
+
+/* ── API keys ─────────────────────────────────────────────────────────────── */
+
+/**
+ * A key as it can be LISTED, which is a deliberately thin row.
+ *
+ * `ApiKeyService` stores SHA-256 of the secret and nothing else. What survives
+ * in clear is `prefix` — the first twelve characters — which is enough to match
+ * a row to a log line and useless to whoever finds it. There is no field here
+ * that could carry the secret, because there is no column that holds it: losing
+ * a key means minting another, which is the right trade for a credential that
+ * can spend money.
+ */
+export interface ApiKeyRow {
+  id: string;
+  name: string;
+  /** First twelve characters. Identifies, never authenticates. */
+  prefix: string;
+  /**
+   * The member this key spends as, by email, or null for a service key.
+   *
+   * Not decoration. A key is charged against its creator's member cap, so a
+   * guest who mints one is still held to the budget their host set — "make an
+   * API key" is a different door into the same allowance, never a bigger one.
+   */
+  actsAs: string | null;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface ApiKeyListResponse {
+  keys: ApiKeyRow[];
+  /** The plan's ceiling on how many keys this workspace may hold. */
+  limit: number | null;
+  used: number;
+  rateLimitPerMinute: number;
+}
+
+/** The response to a mint or a rotate. The ONLY time `secret` exists. */
+export interface CreatedApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  /**
+   * The secret, once.
+   *
+   * Named `secret` rather than `key` upstream so that a client logging the whole
+   * response is at least obvious about what it has just written to disk. The
+   * rotate endpoint spells the same value `key`; both are normalised here so a
+   * caller never has to know which it called.
+   */
+  secret: string;
+  expiresAt?: string | null;
+  /** Present on a rotate: the key this one replaces. */
+  rotatedFrom?: string | null;
+  /** Upstream's own sentence — when the old key stops working, in words. */
+  message?: string;
+}
+
+/**
  * `POST /api/workflows/:id/run`, as `RunRoutes.triggerRun` declares it.
  *
  * `mode` is the one that matters: "simulation" executes the graph without
@@ -354,6 +698,24 @@ export interface VectorbeaClient {
     list(filters?: RunListFilters, options?: RequestOptions): Promise<Paged<Run>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<RunDetail>;
     queuePosition(id: string, scope?: Scope, options?: RequestOptions): Promise<QueuePosition>;
+    /**
+     * `GET /api/runs/:id/waits` — what the run is parked on, right now.
+     *
+     * Only worth calling while the run is parked; a finished run has no active
+     * waits and the endpoint correctly returns none. The completed spans live in
+     * the event log instead.
+     */
+    waits(id: string, scope?: Scope, options?: RequestOptions): Promise<Paged<contracts.RunWait>>;
+    /**
+     * `GET /api/runs/:id/deliveries` — where the result went.
+     *
+     * Read on every finished run, not only failed ones: "delivered" is the
+     * answer somebody is looking for as often as "not delivered".
+     */
+    deliveries(id: string, scope?: Scope, options?: RequestOptions):
+        Promise<{ items: contracts.RunDelivery[]; total: number; deliveryStatus: string }>;
+    /** `POST /api/deliveries/:id/redeliver` — try again, with the same key. */
+    redeliver(deliveryId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
     purgeQueued(scope?: Scope, options?: RequestOptions): Promise<{ purged: number; status: string }>;
     cancel(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
     retry(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
@@ -559,11 +921,76 @@ export interface VectorbeaClient {
      * must be checkable without being fired.
      */
     testDraft(body: TestToolDraftBody, scope?: Scope, options?: RequestOptions): Promise<RegistryTestResult>;
+    /**
+     * Send ONE REAL MESSAGE through a messaging connection — Slack, Teams,
+     * Google Chat, Discord. Unlike `testDraft` this has a side effect by design:
+     * the failures that matter (bot not in the channel, wrong channel id, deleted
+     * webhook) are only reported when something is posted.
+     */
+    testMessage(body: TestMessageBody, scope?: Scope, options?: RequestOptions): Promise<TestMessageResult>;
     update(id: string, patch: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Tool>;
     delete(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    /** `GET /api/tools/:id/versions` — the definition's history. */
+    versions(id: string, scope?: Scope, options?: RequestOptions): Promise<{
+      currentVersion?: number | null; toolName: string; items: ToolVersion[];
+    }>;
+  };
+
+  /**
+   * Import an API document, and turn its operations into tools.
+   *
+   * Three steps rather than one, deliberately: importing lists nine hundred
+   * GitHub operations and creates NOTHING, and a second call creates the four
+   * somebody actually wants. An import that created nine hundred tools would
+   * have made the registry unusable in one click, with no undo.
+   */
+  toolSpecs: {
+    /**
+     * `POST /api/tool-specs/import` — fetch or accept a document.
+     *
+     * Exactly one of `url` and `document`. A URL is fetched SERVER-side (so it
+     * needs no CORS, and so the SSRF guard applies, including across redirects);
+     * `document` is for a file the person has on disk, and is bounded by the
+     * API's request-body cap rather than the larger document cap.
+     */
+    import(
+      body: { name?: string; url?: string; document?: string; connectionId?: string | null; previousImportId?: string },
+      scope?: Scope, options?: RequestOptions,
+    ): Promise<SpecImportResult>;
+    list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<SpecImport>>;
+    get(id: string, scope?: Scope, options?: RequestOptions): Promise<SpecImport>;
+    operations(
+      id: string, params?: { tag?: string; q?: string },
+      scope?: Scope, options?: RequestOptions,
+    ): Promise<{ items: SpecOperation[]; tags: string[]; total: number }>;
+    /** `GET /api/tool-specs/:id/diff` — what a re-import changed. */
+    diff(id: string, previousImportId?: string, scope?: Scope, options?: RequestOptions): Promise<SpecDiff>;
+    /**
+     * `POST /api/tool-specs/:id/tools` — selected operations become tools.
+     *
+     * An operation that ALREADY backs a tool does not overwrite it: it produces
+     * a pending version for review, in `pendingReview`. Re-selecting forty
+     * operations must not be a silent mass edit of forty granted tools.
+     */
+    createTools(
+      id: string, body: { operationKeys: string[]; connectionId?: string | null },
+      scope?: Scope, options?: RequestOptions,
+    ): Promise<contracts.SpecToolsCreated>;
+    attachConnection(id: string, connectionId: string | null, scope?: Scope, options?: RequestOptions): Promise<void>;
+  };
+
+  /** The review queue. The only place a pending definition becomes live. */
+  toolVersions: {
+    pending(scope?: Scope, options?: RequestOptions): Promise<{
+      items: contracts.PendingToolVersion[]; total: number; grantedCount: number;
+    }>;
+    get(versionId: string, scope?: Scope, options?: RequestOptions): Promise<ToolVersion>;
+    apply(versionId: string, scope?: Scope, options?: RequestOptions): Promise<{ applied: boolean; message: string }>;
+    reject(versionId: string, scope?: Scope, options?: RequestOptions): Promise<{ rejected: boolean; message: string }>;
   };
 
   connections: {
+    testHttpRequest(body: HttpRequestPayload, scope?: Scope, options?: RequestOptions): Promise<HttpResponseResult>;
     list(params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<Connection>>;
     get(id: string, scope?: Scope, options?: RequestOptions): Promise<Connection>;
     create(body: Record<string, unknown>, scope?: Scope, options?: RequestOptions): Promise<Connection>;
@@ -582,10 +1009,149 @@ export interface VectorbeaClient {
      * Metadata only - no row data ever crosses this boundary.
      */
     schemaPreview(id: string, scope?: Scope, options?: RequestOptions): Promise<SchemaPreviewResult>;
+    /**
+     * Ask an MCP server what it offers, and register each tool it names.
+     *
+     * Writes one `tools` row per remote tool. It does NOT grant anything —
+     * granting is per tool, on an agent, and there is deliberately no call here
+     * or anywhere that could express "every tool from this server".
+     */
+    mcpDiscover(id: string, scope?: Scope, options?: RequestOptions): Promise<McpDiscoverResult>;
+    /** What this server has advertised, including what it has stopped advertising. */
+    mcpTools(id: string, scope?: Scope, options?: RequestOptions): Promise<McpToolsResponse>;
+    /**
+     * Ask an unsaved server what it needs: nothing, a sign-in, or a token.
+     * A `token` is tested as a bearer token when given.
+     */
+    mcpProbe(body: { serverUrl: string; token?: string | null }, scope?: Scope, options?: RequestOptions): Promise<McpProbeResult>;
+    /**
+     * Begin signing in to a saved MCP connection. Returns the URL to open; the
+     * server redirects back to `/mcp/oauth/complete`, and the tools are
+     * discovered on the way.
+     */
+    mcpSignIn(
+      id: string,
+      body: { returnTo?: string | null; redirectOrigin?: string | null },
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<McpSignInStart>;
+    /**
+     * Hand a sign-in back to the API from the web app's `/mcp/oauth/callback`
+     * page. Needs no workspace: the single-use `state` names the connection.
+     */
+    mcpCompleteSignIn(
+      body: { state: string | null; code: string | null; error: string | null },
+      options?: RequestOptions,
+    ): Promise<McpSignInOutcome>;
   };
   schedules: {
     list(scope?: Scope, options?: RequestOptions): Promise<Schedule[]>;
     setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /**
+   * Inbound webhooks — the "something happened over there" trigger.
+   *
+   * Shipped on the API since the beginning with no client and no screen, so the
+   * only way to start a workflow from a third party was to read the route
+   * handler. See `WebhookRoutes`.
+   */
+  webhooks: {
+    list(params?: Scope & { workflowId?: string }, options?: RequestOptions): Promise<{ items: WebhookRow[]; total: number }>;
+    /**
+     * Returns the row WITH its url — the only time it is ever returned.
+     *
+     * A webhook url is pasted into somebody else's console, which makes it a
+     * bearer credential for "may enqueue work in this workspace" even with a
+     * signature on top. It appears on create and on rotate and nowhere else, so
+     * the caller has to keep it or rotate again.
+     */
+    create(body: CreateWebhookBody, scope?: Scope, options?: RequestOptions): Promise<WebhookRow & { url: string }>;
+    remove(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /** Issues a new token and invalidates the old one. Returns the new url, once. */
+    rotate(id: string, scope?: Scope, options?: RequestOptions): Promise<{ url: string }>;
+    deliveries(id: string, params?: Scope & PageParams, options?: RequestOptions): Promise<Paged<WebhookDeliveryRow>>;
+    replay(id: string, deliveryId: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /** Broker subscriptions — Kafka, SQS, Pub/Sub. See `EventTriggerRoutes`. */
+  eventTriggers: {
+    list(params?: Scope & { workflowId?: string }, options?: RequestOptions): Promise<{ items: EventTriggerRow[]; total: number }>;
+    create(body: CreateEventTriggerBody, scope?: Scope, options?: RequestOptions): Promise<EventTriggerRow>;
+    remove(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    setEnabled(id: string, enabled: boolean, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /**
+   * Skills: the first-party library, a workspace's installed bundles, and the
+   * per-agent grant.
+   *
+   * `setGrants` is the one that matters. It REFUSES a grant whose skill needs a
+   * tool the agent does not hold, and the refusal carries the missing list —
+   * see `SkillToolsMissing`. That refusal is the feature, not an obstacle: the
+   * alternative is an agent that does exactly what its skill taught it, gets
+   * refused by the runtime, and presents as one that hallucinated a tool.
+   */
+  skills: {
+    list(params?: Scope & { status?: string } & PageParams, options?: RequestOptions): Promise<Paged<SkillRow>>;
+    get(id: string, scope?: Scope, options?: RequestOptions): Promise<SkillRow & { currentVersionDetail?: SkillVersionRow }>;
+    archive(id: string, scope?: Scope, options?: RequestOptions): Promise<unknown>;
+    /**
+     * Write a skill of your own. Sanitized at the API's write boundary, versioned
+     * from v1, and — like every skill — it shapes how an agent works without
+     * granting it anything.
+     */
+    create(body: CreateSkillBody, scope?: Scope, options?: RequestOptions): Promise<SkillRow>;
+    holders(id: string, scope?: Scope, options?: RequestOptions): Promise<{ items: { agentId: string; agentName: string }[] }>;
+    catalog(scope?: Scope, options?: RequestOptions): Promise<{ items: SkillCatalogRow[] }>;
+    /** Copies a library entry into this workspace, binding its capabilities to real tools. */
+    install(slug: string, body: InstallSkillBody, scope?: Scope, options?: RequestOptions): Promise<SkillRow>;
+    grants(agentId: string, scope?: Scope, options?: RequestOptions): Promise<{ items: SkillGrantRow[] }>;
+    setGrants(agentId: string, skillIds: string[], scope?: Scope, options?: RequestOptions): Promise<unknown>;
+  };
+
+  /**
+   * Workspace API credentials — `ApiKeyRoutes`.
+   *
+   * ── THIS IS NOT THE ROUTE THE APP USED TO CALL ──────────────────────────
+   * `/app/api/keys` writes to a Supabase `api_keys` table that no environment
+   * points at any more, so the screen it backs could list nothing and mint
+   * nothing while reporting success. The live store is Postgres, behind the
+   * Kotlin API, and it is the same table `authenticate()` reads — which is the
+   * only property that makes a minted key actually work.
+   *
+   * `create` and `rotate` are the only calls that ever return a secret, and
+   * they return it once. Nothing here can read one back.
+   */
+  apiKeys: {
+    list(scope?: Scope, options?: RequestOptions): Promise<ApiKeyListResponse>;
+    create(
+      body: { name: string; actsAs?: string | null; expiresAt?: string | null },
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<CreatedApiKey>;
+    /**
+     * Mint a replacement and start a bounded clock on the old one.
+     *
+     * Not "revoke then create": that is an outage between the revoke and the
+     * new key reaching every deployment holding it, and "rotate your keys
+     * regularly" is advice nobody follows twice after that happens once.
+     */
+    rotate(
+      id: string,
+      graceSeconds?: number,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<CreatedApiKey>;
+    revoke(id: string, scope?: Scope, options?: RequestOptions): Promise<void>;
+    /** Null clears this key's own ceiling and leaves only the plan's. */
+    setRateLimit(
+      id: string,
+      perMinute: number | null,
+      scope?: Scope,
+      options?: RequestOptions,
+    ): Promise<{ planCeiling: number; message: string }>;
   };
 
   approvals: {
@@ -740,6 +1306,21 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<QueuePosition>(
           `/api/runs/${id}/queue-position`,
           req(scope, contracts.queuePosition, options),
+        ),
+      waits: (id, scope, options) =>
+        call<Paged<contracts.RunWait>>(
+          `/api/runs/${id}/waits`,
+          req(scope, contracts.runWaitPage, options),
+        ),
+      deliveries: (id, scope, options) =>
+        call<{ items: contracts.RunDelivery[]; total: number; deliveryStatus: string }>(
+          `/api/runs/${id}/deliveries`,
+          req(scope, contracts.runDeliveryList, options),
+        ),
+      redeliver: (deliveryId, scope, options) =>
+        call<unknown>(
+          `/api/deliveries/${deliveryId}/redeliver`,
+          { ...req(scope, undefined, options), method: "POST" },
         ),
       purgeQueued: (scope, options) =>
         call<{ purged: number; status: string }>("/api/runs/purge-queued", {
@@ -990,10 +1571,62 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           body: { ...body, connectionId: body.connectionId ?? null },
           ...req(scope, undefined, options),
         }),
+      testMessage: (body, scope, options) =>
+        call<TestMessageResult>("/api/tools/test-message", {
+          method: "POST",
+          body,
+          ...req(scope, undefined, options),
+        }),
       update: (id, patch, scope, options) =>
         call<Tool>(`/api/tools/${id}`, { method: "PATCH", body: patch, ...req(scope, contracts.tool, options) }),
       delete: (id, scope, options) =>
         call<void>(`/api/tools/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      versions: (id, scope, options) =>
+        call(`/api/tools/${id}/versions`, req(scope, contracts.toolVersionList, options)),
+    },
+
+    toolSpecs: {
+      import: (body, scope, options) =>
+        call(`/api/tool-specs/import`, {
+          method: "POST", body,
+          /* A 12 MB document is fetched and parsed server-side, and GitHub's takes
+             seconds. The default timeout is written for a row read. */
+          ...req(scope, contracts.specImportResult, { timeoutMs: 120_000, ...options }),
+        }),
+      list: ({ workspaceId, environmentId, page, pageSize } = {}, options) =>
+        call(`/api/tool-specs`, req({ workspaceId, environmentId }, contracts.specImportPage, options, { page, pageSize })),
+      get: (id, scope, options) =>
+        call(`/api/tool-specs/${id}`, req(scope, contracts.specImport, options)),
+      operations: (id, params, scope, options) =>
+        call(`/api/tool-specs/${id}/operations`, req(scope, contracts.specOperationList, options, {
+          tag: params?.tag, q: params?.q,
+        })),
+      diff: (id, previousImportId, scope, options) =>
+        call(`/api/tool-specs/${id}/diff`, req(scope, contracts.specDiff, options, { previousImportId })),
+      createTools: (id, body, scope, options) =>
+        call(`/api/tool-specs/${id}/tools`, {
+          method: "POST", body,
+          ...req(scope, contracts.specToolsCreated, { timeoutMs: 120_000, ...options }),
+        }),
+      attachConnection: (id, connectionId, scope, options) =>
+        call<void>(`/api/tool-specs/${id}`, {
+          method: "PATCH", body: { connectionId }, ...req(scope, undefined, options),
+        }),
+    },
+
+    toolVersions: {
+      pending: (scope, options) =>
+        call(`/api/tool-versions/pending`, req(scope, contracts.pendingToolVersionList, options)),
+      get: (versionId, scope, options) =>
+        call(`/api/tool-versions/${versionId}`, req(scope, contracts.toolVersion, options)),
+      apply: (versionId, scope, options) =>
+        call(`/api/tool-versions/${versionId}/apply`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+      reject: (versionId, scope, options) =>
+        call(`/api/tool-versions/${versionId}/reject`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
     },
 
     connections: {
@@ -1017,6 +1650,10 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         }),
       delete: (id, scope, options) =>
         call<void>(`/api/connections/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      testHttpRequest: (body, scope, options) =>
+        call<HttpResponseResult>("/api/connections/test-http-request", {
+          method: "POST", body, ...req(scope, undefined, { timeoutMs: 35_000, ...options }),
+        }),
       testDraft: (body, scope, options) =>
         call<ConnectionTestResult>("/api/connections/test-unsaved", {
           method: "POST",
@@ -1045,6 +1682,42 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
           // information_schema queries over it. The 15s default abandons a cold
           // pooler mid-answer and reports it as a timeout the user cannot tell
           // apart from a wrong host.
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
+      mcpDiscover: (id, scope, options) =>
+        call<McpDiscoverResult>(`/api/connections/${id}/mcp/discover`, {
+          method: "POST",
+          body: {},
+          // A JSON-RPC round trip to somebody else's server, then a write per
+          // tool. The 15s default abandons a slow customer server and reports a
+          // timeout that reads as "discovery is broken".
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
+      mcpTools: (id, scope, options) =>
+        call<McpToolsResponse>(`/api/connections/${id}/mcp/tools`, req(scope, undefined, options)),
+      mcpProbe: (body, scope, options) =>
+        call<McpProbeResult>("/api/mcp/probe", {
+          method: "POST",
+          body,
+          /* A handshake with somebody else's server, and on a 401 a walk of its
+             OAuth metadata documents — several round trips, none of them ours. */
+          timeoutMs: 30_000,
+          ...req(scope, undefined, options),
+        }),
+      mcpCompleteSignIn: (body, options) =>
+        call<McpSignInOutcome>("/api/mcp/oauth/complete", {
+          method: "POST",
+          body,
+          /* A token exchange with somebody else's server, then discovery. */
+          timeoutMs: 45_000,
+          ...req(undefined, undefined, options),
+        }),
+      mcpSignIn: (id, body, scope, options) =>
+        call<McpSignInStart>(`/api/connections/${id}/mcp/oauth/start`, {
+          method: "POST",
+          body,
           timeoutMs: 30_000,
           ...req(scope, undefined, options),
         }),
@@ -1097,6 +1770,152 @@ export function createVectorbeaClient(options: CreateClientOptions): VectorbeaCl
         call<unknown>(`/api/schedules/${id}`, {
           method: "PATCH",
           body: { enabled },
+          ...req(scope, undefined, options),
+        }),
+    },
+
+    webhooks: {
+      list: ({ workspaceId, environmentId, workflowId } = {}, options) =>
+        call<{ items: WebhookRow[]; total: number }>(
+          "/api/webhooks",
+          req({ workspaceId, environmentId }, undefined, options, { workflowId }),
+        ),
+      create: (body, scope, options) =>
+        call<WebhookRow & { url: string }>("/api/webhooks", {
+          method: "POST", body, ...req(scope, undefined, options),
+        }),
+      remove: (id, scope, options) =>
+        call<void>(`/api/webhooks/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      /* Two endpoints, not a PATCH with a flag — that is how the API models it,
+         and mirroring it keeps the audit trail one action per row. */
+      setEnabled: (id, enabled, scope, options) =>
+        call<unknown>(`/api/webhooks/${id}/${enabled ? "enable" : "disable"}`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+      rotate: (id, scope, options) =>
+        call<{ url: string }>(`/api/webhooks/${id}/rotate`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+      deliveries: (id, { workspaceId, environmentId, page, pageSize } = {}, options) =>
+        call<Paged<WebhookDeliveryRow>>(
+          `/api/webhooks/${id}/deliveries`,
+          req({ workspaceId, environmentId }, undefined, options, { page, pageSize }),
+        ),
+      replay: (id, deliveryId, scope, options) =>
+        call<unknown>(`/api/webhooks/${id}/deliveries/${deliveryId}/replay`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+    },
+
+    eventTriggers: {
+      list: ({ workspaceId, environmentId, workflowId } = {}, options) =>
+        call<{ items: EventTriggerRow[]; total: number }>(
+          "/api/event-triggers",
+          req({ workspaceId, environmentId }, undefined, options, { workflowId }),
+        ),
+      create: (body, scope, options) =>
+        call<EventTriggerRow>("/api/event-triggers", {
+          method: "POST", body, ...req(scope, undefined, options),
+        }),
+      remove: (id, scope, options) =>
+        call<void>(`/api/event-triggers/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      setEnabled: (id, enabled, scope, options) =>
+        call<unknown>(`/api/event-triggers/${id}/${enabled ? "enable" : "disable"}`, {
+          method: "POST", body: {}, ...req(scope, undefined, options),
+        }),
+    },
+
+    skills: {
+      list: ({ workspaceId, environmentId, status, page, pageSize } = {}, options) =>
+        call<Paged<SkillRow>>(
+          "/api/skills",
+          req({ workspaceId, environmentId }, undefined, options, { status, page, pageSize }),
+        ),
+      get: (id, scope, options) =>
+        call<SkillRow & { currentVersionDetail?: SkillVersionRow }>(
+          `/api/skills/${id}`, req(scope, undefined, options),
+        ),
+      archive: (id, scope, options) =>
+        call<unknown>(`/api/skills/${id}`, { method: "DELETE", ...req(scope, undefined, options) }),
+      create: (body, scope, options) =>
+        call<SkillRow>("/api/skills", { method: "POST", body, ...req(scope, undefined, options) }),
+      holders: (id, scope, options) =>
+        call<{ items: { agentId: string; agentName: string }[] }>(
+          `/api/skills/${id}/agents`, req(scope, undefined, options),
+        ),
+      catalog: (scope, options) =>
+        call<{ items: SkillCatalogRow[] }>("/api/skill-catalog", req(scope, undefined, options)),
+      install: (slug, body, scope, options) =>
+        call<SkillRow>(`/api/skill-catalog/${slug}/install`, {
+          method: "POST", body, ...req(scope, undefined, options),
+        }),
+      grants: (agentId, scope, options) =>
+        call<{ items: SkillGrantRow[] }>(`/api/agents/${agentId}/skills`, req(scope, undefined, options)),
+      /*
+       * PUT, and it REPLACES the list — the API models grants as a set, not as
+       * a stream of adds and removes, so a caller that sent only the new one
+       * would silently revoke the rest. Every call sends the whole intended set.
+       */
+      setGrants: (agentId, skillIds, scope, options) =>
+        call<unknown>(`/api/agents/${agentId}/skills`, {
+          method: "PUT",
+          body: { skills: skillIds.map((skillId) => ({ skillId })) },
+          ...req(scope, undefined, options),
+        }),
+    },
+
+    apiKeys: {
+      list: (scope, options) =>
+        call<ApiKeyListResponse>("/api/api-keys", req(scope, undefined, options)),
+
+      create: (body, scope, options) =>
+        call<CreatedApiKey>("/api/api-keys", {
+          method: "POST",
+          /*
+           * `actsAs` is OMITTED, not sent as null, when the caller does not
+           * name one. The route reads the three cases apart: absent means "the
+           * person minting it", an empty string means an unattributed service
+           * key, and a uuid means that member. Sending null for "I did not
+           * choose" would mint an unattributed key — one charged to the
+           * workspace and to nobody's cap — which is the opposite of the
+           * default and is exactly how a guest would escape their budget.
+           */
+          body: {
+            name: body.name,
+            ...(body.actsAs === undefined ? {} : { actsAs: body.actsAs }),
+            ...(body.expiresAt ? { expiresAt: body.expiresAt } : {}),
+          },
+          ...req(scope, undefined, options),
+        }),
+
+      rotate: async (id, graceSeconds, scope, options) => {
+        /* Upstream calls the secret `key` here and `secret` on create. Same
+           value, same one-and-only-showing; normalised so a caller does not
+           have to remember which endpoint it reached. */
+        const payload = await call<CreatedApiKey & { key?: string }>(
+          `/api/api-keys/${id}/rotate`,
+          {
+            method: "POST",
+            body: {},
+            ...req(
+              scope, undefined, options,
+              graceSeconds == null ? undefined : { graceSeconds },
+            ),
+          },
+        );
+        return { ...payload, secret: payload.secret ?? payload.key ?? "" };
+      },
+
+      revoke: (id, scope, options) =>
+        call<void>(`/api/api-keys/${id}`, {
+          method: "DELETE",
+          ...req(scope, undefined, options),
+        }),
+
+      setRateLimit: (id, perMinute, scope, options) =>
+        call<{ planCeiling: number; message: string }>(`/api/api-keys/${id}/rate-limit`, {
+          method: "PUT",
+          body: { perMinute },
           ...req(scope, undefined, options),
         }),
     },

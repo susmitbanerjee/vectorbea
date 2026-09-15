@@ -4,6 +4,7 @@ import * as React from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cn } from "~/lib/cn";
 import { cellPath } from "~/components/app/ribbon/geometry";
+import { cellRingPath } from "~/components/app/ribbon/geometry-ring";
 import { NODE_MARKS } from "~/components/icons/nodes";
 import { ProviderLogo } from "~/components/ui/provider-logo";
 import { NODE_SIZE, nodeSize } from "./store";
@@ -12,6 +13,7 @@ import { readTeamConfig, POLICY_INFO, joinPolicyLabel, depthCounts, longestChain
 import type { BoundResource, NodeChrome } from "~/mocks/builder";
 import type { VersionNode } from "~/mocks/workflow-nodes";
 import type { NodeKind } from "~/mocks/domain";
+import { nodeSummary } from "./node-summary";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE NODE — one component, twelve type variants, eleven states.
@@ -191,8 +193,7 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
       >
         {style.halo ? (
           <path
-            d={cellPath(w + 10, h + 10)}
-            transform="translate(-5 -5)"
+            d={cellRingPath(w, h, 5)}
             fill="none"
             stroke={style.halo}
             strokeWidth={2}
@@ -261,9 +262,7 @@ function WorkflowNodeImpl({ data, selected }: NodeProps) {
                     </span>
                   ) : (
                     <span className="font-ui text-caption text-fg-disabled truncate">
-                      {node.kind === "branch" && !node.config.condition ? "No condition set"
-                        : node.kind === "approval" && !node.config.approverGroup ? "No approver group"
-                          : mark?.meaning.split(" — ")[0] ?? node.kind}
+                      {nodeSummary(node)}
                     </span>
                   )}
 

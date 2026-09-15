@@ -113,6 +113,17 @@ class HttpServer(
 
         var response: Response? = null
         try {
+            // The public API hostname serves the run API and nothing else. Checked
+            // before the body is read or anybody is authenticated: a route that is
+            // not published on this host should cost nothing to refuse.
+            val hostHeaders = listOfNotNull(
+                exchange.requestHeaders["Host"],
+                exchange.requestHeaders["X-Forwarded-Host"],
+            ).flatten()
+            if (!PublicHostGate.allows(exchange.requestMethod, exchange.requestURI.path ?: "/", hostHeaders)) {
+                throw ApiError.NotFound("Route")
+            }
+
             // Parse request (may throw ApiError.ValidationError for body-too-large)
             val rawRequest = Request.from(exchange, requestId, config.maxRequestBodyBytes)
 
@@ -132,7 +143,7 @@ class HttpServer(
                 enforceRequestRate(request)
 
                 // Check for SSE route before normal dispatch
-                val sseMatch = router.findSseRoute(request.method, request.path)
+                val sseMatch = router.findSseRoute(request)
                 if (sseMatch != null) {
                     val (sseRoute, params) = sseMatch
                     val enrichedRequest = request.copy(pathParams = params)
@@ -332,19 +343,42 @@ class HttpServer(
      */
     private fun enforceRequestRate(request: Request) {
         val bucket = requestRateLimiter ?: return
-        val caller = request.principal?.appUserId?.toString() ?: return
+
+        /*
+         * ── THE BUCKET IS PER KEY, NOT PER USER ─────────────────────────────
+         * Keyed on the user, two integrations sharing a service account shared
+         * one budget: a runaway sync job consumed the throughput of the
+         * dashboard, the CI job and the key an operator was using to look into
+         * it. A key gets its own bucket so a misbehaving one starves only itself.
+         *
+         * Falls back to the user for a browser session, which has no key and for
+         * which the person IS the right unit.
+         */
+        val caller = request.apiKeyId?.let { "key:$it" }
+            ?: request.principal?.appUserId?.let { "req:$it" }
+            ?: return
+
+        /* A key's own ceiling when it set one, clamped to the platform's on the
+           way in (see ApiKeyService.setRateLimit) so this cannot be a way to buy
+           more throughput. The burst scales with it rather than staying at the
+           platform's, or a key limited to 10/min would still be allowed a
+           1,200-request spike. */
+        val perMinute = request.apiKeyRateLimit ?: REQUESTS_PER_MINUTE
+        val burst = if (request.apiKeyRateLimit != null) (perMinute * 2).coerceAtLeast(1)
+                    else REQUESTS_BURST
+
         val verdict = bucket.tryConsume(
-            key = "req:$caller",
-            refillPerMinute = REQUESTS_PER_MINUTE,
-            burst = REQUESTS_BURST,
+            key = caller,
+            refillPerMinute = perMinute,
+            burst = burst,
         )
         if (!verdict.allowed) {
             throw ApiError.TooManyRequests(
-                "Too many requests. The limit is $REQUESTS_PER_MINUTE per minute; " +
+                "Too many requests. The limit is $perMinute per minute; " +
                     "retry in ${verdict.retryAfterSeconds}s.",
                 mapOf(
-                    "limitPerMinute" to REQUESTS_PER_MINUTE,
-                    "burst" to REQUESTS_BURST,
+                    "limitPerMinute" to perMinute,
+                    "burst" to burst,
                     "retryAfterSeconds" to verdict.retryAfterSeconds,
                     "retryable" to true,
                 ),

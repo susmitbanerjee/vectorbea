@@ -25,7 +25,19 @@ open class ConnectionResolver(
     private val secretService: SecretService,
 ) {
     private val log    = logger()
+    private val untestedWarned = java.util.concurrent.ConcurrentHashMap.newKeySet<Any>()
     private val mapper = jacksonObjectMapper()
+
+    /**
+     * The secret service this resolver decrypts with, for executors built from it.
+     *
+     * Exposed so the agent brain's tool executor is wired with the SAME secrets a
+     * workflow `tool` node gets. It was built without one, so an agent calling a
+     * tool that needs to read or seal a credential — a signed-in MCP server's
+     * refresh, a spec-driven HTTP tool's named secret fields — took a degraded
+     * path the identical workflow step never did.
+     */
+    val secrets: SecretService get() = secretService
 
     /**
      * Load and return a [ResolvedConnection] for the given [connectionId] scoped
@@ -57,7 +69,9 @@ open class ConnectionResolver(
             // successful test; "active" is the legacy value; "not_tested" means
             // the user skipped the test step (proceed with a warning).
             "active", "connected", "ok" -> { /* OK */ }
-            "not_tested" -> log.warn(
+            /* Once per connection per process: it was logged on every model call,
+               so one agent run printed it a dozen times and buried real errors. */
+            "not_tested" -> if (untestedWarned.add(record.id)) log.warn(
                 "[conn] connection '{}' ({}) has not been tested — proceeding anyway",
                 record.name, record.id
             )
@@ -122,6 +136,12 @@ open class ConnectionResolver(
                             secretRef      = rs.getString("secret_ref"),   // NOT returned to callers
                             configJson     = configJson,
                             allowedHosts   = parseJsonList("allowed_hosts"),
+                            /* Tolerated missing: the API applies V071 and the
+                               worker may be running ahead of it. An unreadable
+                               policy reads as PUBLIC, which is the restrictive
+                               answer and the one that fails visibly. */
+                            egressPolicy   = SsrfGuard.EgressPolicy.of(
+                                runCatching { rs.getString("egress_policy") }.getOrNull()),
                             allowedPaths   = parseJsonList("allowed_paths"),
                             allowedSchemas = parseJsonList("allowed_schemas"),
                             allowedTables  = parseJsonList("allowed_tables"),
@@ -159,7 +179,8 @@ open class ConnectionResolver(
         private val SELECT_SQL = """
             SELECT id, workspace_id, environment_id, name, type, provider,
                    status, auth_type, secret_ref, config_json,
-                   allowed_hosts, allowed_paths, allowed_schemas, allowed_tables
+                   allowed_hosts, allowed_paths, allowed_schemas, allowed_tables,
+                   COALESCE(egress_policy, 'public') AS egress_policy
             FROM connections
             WHERE id = ? AND workspace_id = ?
         """.trimIndent()

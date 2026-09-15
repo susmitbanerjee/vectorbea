@@ -214,7 +214,8 @@ function queryForCluster(key: string): string {
 /** Counts by status, for the quick-filter chips. */
 export function countByStatus(runs: Run[]): Record<RunStatus, number> {
   const out: Record<RunStatus, number> = {
-    succeeded: 0, failed: 0, running: 0, queued: 0, "awaiting-approval": 0, cancelled: 0,
+    succeeded: 0, failed: 0, running: 0, queued: 0, "awaiting-approval": 0,
+    waiting: 0, cancelled: 0,
   };
   for (const r of runs) out[r.status] += 1;
   return out;

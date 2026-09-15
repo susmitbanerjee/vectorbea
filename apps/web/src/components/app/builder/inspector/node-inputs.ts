@@ -1,6 +1,7 @@
 import type { contracts } from "@vectorbea/shared";
-import { inputsFor, type InputDeclaration, type FieldType } from "~/mocks/io-schema";
-import { resolveTool, type BuilderRegistry, type BindableNode } from "../use-builder-registry";
+import type { InputDeclaration, FieldType } from "~/mocks/io-schema";
+import type { BuilderRegistry, BindableNode } from "../use-builder-registry";
+import { stepInputs, type ValueKind } from "../step-io";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    WHAT A STEP ASKS FOR
@@ -91,18 +92,22 @@ export function toolInputDeclarations(tool: contracts.Tool): InputDeclaration[] 
 }
 
 /**
- * The inputs for any node: the tool's real schema where there is one, and the
- * per-kind declarations otherwise.
+ * The inputs for any node, in the declaration shape the Configure and Advanced
+ * tabs read. A tool's come from its schema; every other step's are the named
+ * values its author passes it (see `stepInputs`) — never the per-kind fixture
+ * list, which invented a required "Objective" for every agent that no run reads.
  */
 export function nodeInputs(node: BindableNode, registry: BuilderRegistry): InputDeclaration[] {
-  if (node.kind === "tool") {
-    const tool = resolveTool(node.config, registry);
-    if (tool) {
-      const declared = toolInputDeclarations(tool);
-      if (declared) return declared;
-    }
-  }
-  // `inputsFor` takes the fixture node type; every field it reads is present on
-  // the structural one.
-  return inputsFor(node as Parameters<typeof inputsFor>[0]);
+  return stepInputs(node, registry).map((input) => ({
+    id: input.id,
+    label: input.label,
+    type: FIELD_TYPE[input.kind],
+    required: input.required,
+    description: input.help ?? "",
+    nullPolicy: input.required ? "fail" : "pass-null",
+  }));
 }
+
+const FIELD_TYPE: Record<ValueKind, FieldType> = {
+  text: "string", number: "number", boolean: "boolean", list: "array", record: "object", any: "any",
+};

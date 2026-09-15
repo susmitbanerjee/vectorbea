@@ -103,6 +103,7 @@ function toRunStatus(status: contracts.RunStatus): RunStatus {
   if (status === "failed" || status === "timed_out" || status === "enqueue_failed") return "failed";
   if (status === "running" || status === "recovering") return "running";
   if (status === "awaiting_approval" || status === "waiting_for_approval" || status === "paused") return "awaiting-approval";
+  if (status === "waiting_for_event" || status === "waiting_for_timer" || status === "yielded") return "waiting";
   if (status === "cancelled" || status === "cancellation_requested") return "cancelled";
   return "queued";
 }
@@ -111,6 +112,19 @@ function toEnvironment(value: string | null | undefined): Environment {
   return value === "production" || value === "staging" || value === "development" ? value : "unknown";
 }
 
+/**
+ * A RUN's trigger, read as a WORKFLOW's trigger kind.
+ *
+ * The two vocabularies are deliberately different sizes. A workflow is
+ * configured with a cron or a webhook; "an MCP client called it" and "a message
+ * arrived on a queue" describe how one RUN started, not how the workflow is set
+ * up — and a workflows list that showed "mcp" as a trigger kind would be
+ * reporting the last run rather than the configuration.
+ *
+ * Both collapse to `api`, which is what they are from the workflow's side: it
+ * was called.
+ */
 function toTrigger(value: contracts.TriggerType | undefined): TriggerKind {
+  if (value === "event" || value === "mcp") return "api";
   return value ?? "manual";
 }

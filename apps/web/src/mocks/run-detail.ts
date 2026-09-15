@@ -35,7 +35,12 @@ export function buildGraph(run: Run): RunGraph {
 
 /* ── Log stream ───────────────────────────────────────────────────────────── */
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+/* Defined in `~/lib/runs/model` — a type does not belong in the fixtures, and
+   anything classifying a REAL run's events needs it without importing from
+   here (this module is a restricted import). Re-exported so existing callers
+   are unaffected. */
+import type { LogLevel } from "~/lib/runs/model";
+export type { LogLevel };
 
 export interface LogLine {
   seq: number;

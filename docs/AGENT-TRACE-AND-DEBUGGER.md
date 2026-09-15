@@ -580,15 +580,37 @@ Served by `GET /api/runs/{id}/constellation` (`ConstellationRoutes`) — nodes f
   So an ordinary single-agent run now draws its agent like any other run, and
   the apologetic empty state is gone.
 
-- **`derived: true` travels with the response, and the view says one thing with
-  it.** Not a quality warning — a derived node's numbers are the run's real
-  numbers. It means exactly one thing: handoff EDGES were never recorded,
-  because `agent_handoffs` is written on the same path as `agent_activations`.
+- **`derived: true` travels with the response, and the view draws run order
+  with it.** Not a quality warning — a derived node's numbers are the run's real
+  numbers. Handoff EDGES were never recorded, because `agent_handoffs` is written
+  on the same path as `agent_activations`. Derived agent steps of a workflow run
+  are separate steps that ran one after another, so they are laid out as a ROW in
+  `startedAt` order with plain unlabelled arrows between them ("ran next", not a
+  handoff). They used to stack into one column at depth 0, where a large node's
+  labels ran into the next one. The explanatory banner is gone; the arrows say it.
 
-  With ONE node there is nothing missing and the view says nothing. With two or
-  more it says so, because silence would let a reader conclude the agents never
-  handed off to each other — which is a stronger claim than "we did not record
-  it", and the wrong one.
+- **Selecting an agent shows what its step received and returned.** A pipeline
+  hands data forward through step inputs, so there is usually no edge to hover.
+  The panel under the graph reads the `step` span of the node's `stepId` (latest
+  execution) through `GET /api/runs/{id}/trace/spans/{spanId}` and renders each
+  top-level input and output field as a labelled block, empty fields marked, plus
+  the step's failure reason. It opens on the root-cause agent, else the first.
+
+  The worker writes those payloads only with `TRACE_STEP_IO_ENABLED=true`
+  (`events/StepIoCapture`, off by default): the resolved inputs as the step span's
+  `input_ref` and a completed step's output as its `output_ref`, and — same flag —
+  each `llm_call` span's prompt (messages rendered as `ROLE:` over text) and
+  response, which fill the Activity view's Prompt and Model response panels. All
+  through `PayloadStore`, which redacts before hashing. Runs without it say
+  "Inputs and outputs were not recorded for this run."
+
+- **The row layout is for any graph with no handoffs**, not only derived ones:
+  recorded activations at one depth with no edges are separate workflow steps too.
+
+- **Inline payload text is decoded by the API.** `run_payloads.inline_value` is
+  jsonb, so text is stored as a JSON string and was served quoted with escape
+  sequences. `resolvePayload` unwraps a JSON string; the web still unwraps one
+  itself for an older API.
 
 - **`emptyCause` survives for the genuinely empty case.** A run with no agent
   step at all gets "this run had no agent steps" and a pointer at Flow and
@@ -881,6 +903,24 @@ Design decisions that matter here:
 - **Redactions render in place as `[redacted: reason]`**, never as a gap. A gap
   reads as a bug in the debugger and sends the reader looking for missing text;
   a named redaction is a deliberate act with a reason.
+
+#### 5.5.2 Tool results, budgets and the root-cause sentence
+
+- **"Show result" on a tool call** reads
+  `GET /api/runs/{id}/trace/iterations/{iterationId}/tool-result`, which resolves
+  that iteration's `tool_result_ref` (the full result) and `observation_payload_ref`
+  (the capped copy the model read). Keyed by iteration so only this run's refs are
+  reachable. When the copy is shorter, the panel says "The agent saw only the first
+  N characters". The Tool field shows the tool's name, never its uuid.
+- **Budget rows are paired.** Ceilings arrive as `maxIterations`/`maxTotalTokens`
+  and spend as `iterations`/`tokens`; they were drawn as separate rows, so every
+  limit appeared twice and neither showed it had been hit. `pairBudgets` (API and
+  web) joins them, and counts tool calls from the iterations when the consumption
+  record has none.
+- **An agent that stopped itself gets its own sentence.** When the root-cause span
+  is an iteration, activation or step, `causeSentence` quotes the step's failure
+  reason ("the Code reviewer agent stopped: …") instead of "could not complete
+  iteration 4 … → iteration `iteration 4`".
 
 ### 5.6 Cost — burn-down
 

@@ -33,13 +33,30 @@ class ConnectionTestRoutes(
     private val connectionRepo: ConnectionRepository,
     private val secretService: SecretService,
     private val cache: CacheService,
+    /**
+     * The governance trail.
+     *
+     * A connection test exercises a real credential against a real endpoint, so
+     * "who was probing the production database connection at 2am" is a question
+     * a security review asks — and `AuditLog.Action.CONNECTION_TEST` existed
+     * with no caller.
+     */
+    private val audit: com.vectorbea.api.audit.AuditLog? = null,
 ) {
     private val log = LoggerFactory.getLogger(ConnectionTestRoutes::class.java)
     private val tester = ConnectionTester(secretService)
+    private val httpRequestTester = com.vectorbea.api.connector.HttpRequestTester()
 
     fun register(router: Router) {
         router.post("/api/connections/:id/test", ::testSaved)
         router.post("/api/connections/test-unsaved", ::testUnsaved)
+        router.post("/api/connections/test-http-request") { req ->
+            req.context()
+            val result = httpRequestTester.test(
+                req.bodyAs<com.vectorbea.api.connector.HttpTestRequest>()
+            )
+            Response.ok(result).copy(headers = mapOf("Content-Type" to "application/json; charset=utf-8", "Cache-Control" to "no-store"))
+        }
         router.post("/api/connections/:id/rotate-secret", ::rotateSecret)
         router.get("/api/connections/:id/list-models", ::listModels)
     }
@@ -68,6 +85,20 @@ class ConnectionTestRoutes(
 
         // Cache briefly — result never contains secrets
         cache.set(cacheKey, result.toResponse(), ttlSeconds = 30L)
+
+        /* Recorded whether it passed or failed, and a FAILED test is recorded as
+           `error` rather than as a success with a field: a run of failing tests
+           against one connection is what credential probing looks like, and it
+           has to be filterable as such. The cached branch above returns before
+           this deliberately — nothing was tested, so nothing happened. */
+        audit?.recordUserAction(
+            req, ctx.workspaceId, com.vectorbea.api.audit.AuditLog.Action.CONNECTION_TEST,
+            targetType = "connection", targetId = id, environmentId = connection.environmentId,
+            after = mapOf("status" to result.status.name.lowercase()),
+            result = if (result.status == ConnectionTestResult.TestStatus.CONNECTED)
+                com.vectorbea.api.audit.AuditLog.Result.SUCCESS
+            else com.vectorbea.api.audit.AuditLog.Result.ERROR,
+        )
 
         return Response.ok(result.toResponse())
     }

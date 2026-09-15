@@ -393,20 +393,91 @@ fun main() {
             connectionRepo, cacheService, secretService, telemetry, auditLog,
             environmentRepo,
         ).register(router)
-        ConnectionTestRoutes(connectionRepo, secretService, cacheService).register(router)
+        ConnectionTestRoutes(connectionRepo, secretService, cacheService, auditLog).register(router)
+        com.vectorbea.api.routes.ToolTestMessageRoutes(connectionRepo, secretService, auditLog).register(router)
+        /* A customer's negotiated rate, per connection. Without it every call
+           through their own gateway is priced at our list rate, which
+           over-reports their spend — the first number a finance team reconciles
+           against the provider invoice. */
+        ds?.let {
+            com.vectorbea.api.routes.ConnectionPriceRoutes(it, connectionRepo, auditLog)
+                .register(router)
+        }
         SchemaPreviewRoutes(connectionRepo, secretService).register(router)
+
+        /*
+         * ── MCP: DISCOVERY, AND WHAT A SERVER OFFERS ────────────────────────
+         *
+         * Registered under connections because an MCP server IS a connection —
+         * MCP is a tool type, not a subsystem (MCP.md §2), and the surfaces have
+         * to say what the runtime says. Discovery itself is
+         * `packages/mcp-kotlin`, the same implementation the worker runs, so the
+         * tool count this reports is a fact about the code that will run them.
+         */
+        ds?.let {
+            com.vectorbea.api.routes.McpConnectorRoutes(
+                connections = connectionRepo,
+                mcpTools = com.vectorbea.api.repository.McpToolRepository(it),
+                dataSource = it,
+                secretService = secretService,
+                entitlements = entitlementGuard,
+                audit = auditLog,
+            ).register(router)
+        }
     } else log.warn("ConnectionRoutes disabled — no database")
 
     if (agentRepo != null && connectionRepo != null) {
         AgentRoutes(agentRepo, connectionRepo, cacheService, entitlementGuard).register(router)
     } else log.warn("AgentRoutes disabled — no database")
 
+    /*
+     * ── SKILLS: THE LIBRARY, THE BUNDLES, AND THE GRANT ─────────────────────
+     *
+     * Registered beside AgentRoutes rather than folded into it because the
+     * grant is its own write with its own refusal — `PUT /api/agents/:id/skills`
+     * fails with the missing tool list when the agent lacks something a skill
+     * requires — and putting that inside the agent PATCH would make "save the
+     * agent" fail for a reason that has nothing to do with the fields being
+     * saved. See V073 and docs/SKILLS.md.
+     */
+    if (ds != null && agentRepo != null && toolRepo != null) {
+        com.vectorbea.api.routes.SkillRoutes(
+            repo = com.vectorbea.api.repository.SkillRepository(ds),
+            agentRepo = agentRepo,
+            toolRepo = toolRepo,
+        ).register(router)
+    } else log.warn("SkillRoutes disabled — no database")
+
+    /*
+     * ── TOOLS, THEIR VERSIONS, AND THE SPEC IMPORTS THAT PROPOSE THEM ───────
+     *
+     * One `ToolVersionRepository` shared by all three, because they are three
+     * views of one rule: a tool's definition changes only through a version.
+     * `ToolRoutes` writes an `applied` one (a person edited their own tool);
+     * `ApiSpecRoutes` writes a `pending` one (nobody has read what a re-import
+     * changed); `ToolVersionRoutes` is the only thing that makes a pending one
+     * live. See V064.
+     */
+    val toolVersionRepo = ds?.let { com.vectorbea.api.repository.ToolVersionRepository(it) }
+
     if (toolRepo != null && connectionRepo != null) {
-        ToolRoutes(toolRepo, connectionRepo, cacheService).register(router)
+        ToolRoutes(toolRepo, connectionRepo, cacheService, toolVersionRepo).register(router)
     } else log.warn("ToolRoutes disabled — no database")
 
+    if (toolRepo != null && connectionRepo != null && toolVersionRepo != null && ds != null) {
+        com.vectorbea.api.routes.ApiSpecRoutes(
+            imports = com.vectorbea.api.repository.SpecImportRepository(ds),
+            tools = toolRepo,
+            versions = toolVersionRepo,
+            connections = connectionRepo,
+            dataSource = ds,
+        ).register(router)
+        com.vectorbea.api.routes.ToolVersionRoutes(toolVersionRepo, toolRepo).register(router)
+    } else log.warn("Spec import and tool versioning disabled — no database")
+
     if (workflowRepo != null) {
-        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo, entitlementGuard).register(router)
+        WorkflowRoutes(workflowRepo, cacheService, telemetry, scheduleRepo, entitlementGuard, auditLog)
+            .register(router)
     } else log.warn("WorkflowRoutes disabled — no database")
 
     // Cron schedules: read API + the firing loop (see WorkflowScheduler).
@@ -427,9 +498,96 @@ fun main() {
     } else log.warn("WorkflowArchitectRoutes disabled — no database")
     } else log.warn("DashboardRoutes disabled — no database")
 
+    /*
+     * ── ONE ADMISSION PATH, BUILT ONCE ──────────────────────────────────────
+     * Every ingress — API, webhook, schedule, event, MCP — is handed this same
+     * instance. Constructing a second one per caller would be harmless today and
+     * would be how the checks drift apart tomorrow, which is exactly what
+     * happened while the sequence lived inside `RunRoutes` and the scheduler
+     * kept its own subset.
+     *
+     * Declared out here rather than inside the run-routes block precisely so
+     * that the four other ingress paths below cannot accidentally build their
+     * own.
+     */
+    /*
+     * ── THE WAIT PRIMITIVE, BUILT ONCE AND SHARED ───────────────────────
+     * Constructed up here rather than beside its routes because `RunIngress`
+     * needs the same `SignalDelivery`: a workflow whose deduplication policy is
+     * `join` turns a second alert into a signal on the run already working the
+     * incident, and that has to be the SAME delivery — same rate limit, same
+     * wait resolution, same resume enqueue. Invariant 15, from the other side.
+     */
+    val waitStore = ds?.let { com.vectorbea.worker.durable.wait.WaitStore(it) }
+    val signalStore = ds?.let { com.vectorbea.worker.durable.wait.SignalStore(it) }
+    val signalDelivery = if (ds != null && waitStore != null && signalStore != null)
+        com.vectorbea.api.signals.SignalDelivery(
+            dataSource = ds,
+            signals = signalStore,
+            waits = waitStore,
+            queue = workflowQueue,
+            rateLimiter = rateLimiter,
+        ) else null
+
+    val runIngress = if (runRepo != null && runEventRepo != null && workflowRepo != null)
+        com.vectorbea.api.ingress.RunIngress(
+            runRepo = runRepo,
+            eventRepo = runEventRepo,
+            workflowRepo = workflowRepo,
+            queue = workflowQueue,
+            dataSource = ds,
+            idempotency = ds?.let { com.vectorbea.api.ingress.IdempotencyStore(it) },
+            classResolver = executionClassResolver,
+            admission = ds?.let { com.vectorbea.api.admission.AdmissionControl(it) },
+            rateLimiter = tokenBucket,
+            entitlements = entitlementGuard,
+            usageMeter = usageMeter,
+            rateFor = { ws -> com.vectorbea.api.ingress.WorkspaceRunRate.of(ds, ws) },
+            dedup = ds?.let { com.vectorbea.api.ingress.RunDedup(it) },
+            /*
+             * `join` in one line: deliver the second alert to the live run, and
+             * say whether it landed. A `false` — the holder finished underneath
+             * us — makes the ingress fall through and start a fresh run, which is
+             * correct: the key is free now and the alert still needs working.
+             */
+            joinSignal = signalDelivery?.let { sd ->
+                com.vectorbea.api.ingress.RunIngress.JoinSignalSender {
+                    runId, workspaceId, environmentId, name, payloadJson, dedupeKey ->
+                    sd.deliver(
+                        runId = runId,
+                        workspaceId = workspaceId,
+                        environmentId = environmentId,
+                        name = name,
+                        payloadJson = payloadJson,
+                        source = "dedup_join",
+                        dedupeKey = dedupeKey,
+                    ).delivered
+                }
+            },
+        ) else null
+
+    /*
+     * ── SELF-HOSTED RUNNERS ─────────────────────────────────────
+     * Two surfaces, deliberately separate. `RunnerPoolRoutes` is the customer's
+     * browser managing pools and tokens, behind the ordinary auth. `RunnerRoutes`
+     * is the machine protocol, authenticated by a runner token and exempt from
+     * that middleware — see the `/api/runner/` note in `AuthMiddleware`.
+     */
+    if (ds != null && runEventRepo != null) {
+        val runnerStore = com.vectorbea.api.runner.RunnerStore(ds)
+        com.vectorbea.api.routes.RunnerPoolRoutes(runnerStore, auditLog).register(router)
+        com.vectorbea.api.routes.RunnerRoutes(
+            dataSource = ds,
+            runners = runnerStore,
+            events = runEventRepo,
+            queue = workflowQueue,
+        ).register(router)
+    } else log.warn("Self-hosted runners disabled — no database")
+
     if (runRepo != null && runEventRepo != null) {
         val betaRepoForRuns = ds?.let { com.vectorbea.api.beta.BetaAccessRepository(it) }
         RunRoutes(
+            runIngress = runIngress,
             classResolver = executionClassResolver,
             dataSource = ds,
             runRepo = runRepo,
@@ -446,6 +604,7 @@ fun main() {
             runRateLimiter = tokenBucket,
             entitlements = entitlementGuard,
             usageMeter = usageMeter,
+            audit = auditLog,
         ).register(router)
 
         com.vectorbea.api.routes.DebugRoutes(
@@ -466,6 +625,111 @@ fun main() {
             audit     = auditLog,
         ).register(router)
     } else log.warn("ApprovalRoutes disabled — no database")
+
+    /*
+     * ── WAKING A PARKED RUN, FROM BOTH DIRECTIONS ───────────────────────────
+     *
+     * `SignalRoutes` is authenticated and workspace-scoped like everything else.
+     * `ToolCallbackRoutes` cannot be: its caller is a video-generation service
+     * with no session and no API key, so the unguessable token in the URL is the
+     * authentication and the wait it names carries the workspace that scopes
+     * everything after. That is why it is registered on the same router but
+     * resolves its own scope from the row rather than from the request.
+     *
+     * Both share one `WaitStore` with the worker — the same class, compiled by
+     * both services, so the CAS that makes a duplicated callback resolve exactly
+     * once has one implementation.
+     */
+    if (ds != null && waitStore != null && signalStore != null && signalDelivery != null) {
+        com.vectorbea.api.routes.SignalRoutes(
+            dataSource = ds,
+            signals = signalStore,
+            waits = waitStore,
+            delivery = signalDelivery,
+        ).register(router)
+
+        com.vectorbea.api.routes.ToolCallbackRoutes(
+            dataSource = ds,
+            waits = waitStore,
+            queue = workflowQueue,
+            rateLimiter = rateLimiter,
+        ).register(router)
+    } else log.warn("Signals and tool callbacks disabled — no database")
+
+    /*
+     * ── WEBHOOK TRIGGERS ────────────────────────────────────────────────────
+     * The public delivery endpoint plus its management and replay. It shares the
+     * one `RunIngress`, so a delivery is admitted by the same quota, rate limit
+     * and admission control as an API call — an unauthenticated ingress that
+     * bypassed those would be a way around every plan limit in the product.
+     */
+    if (ds != null && runIngress != null) {
+        val webhookRepo = com.vectorbea.api.webhook.WebhookRepository(ds)
+        com.vectorbea.api.routes.WebhookRoutes(
+            webhooks = webhookRepo,
+            delivery = com.vectorbea.api.webhook.WebhookIngress(
+                webhooks = webhookRepo,
+                ingress = runIngress,
+                secrets = secretService,
+            ),
+            secrets = secretService,
+            rateLimiter = rateLimiter,
+        ).register(router)
+    } else log.warn("Webhook triggers disabled — requires database + run ingress")
+
+    /*
+     * ── MCP SERVER MODE ─────────────────────────────────────────────────────
+     * Vectorbea's workflows, exposed as MCP tools. Same ingress, so an MCP tool
+     * call is a run like any other and shows in the trace as one — the whole
+     * feature is a JSON-RPC adapter over machinery that already exists.
+     */
+    if (runIngress != null && workflowRepo != null && runRepo != null) {
+        com.vectorbea.api.routes.McpRoutes(
+            com.vectorbea.api.mcp.McpServer(
+                workflows = workflowRepo,
+                ingress = runIngress,
+                waiter = com.vectorbea.api.ingress.SyncRunWaiter(runRepo),
+                runRepo = runRepo,
+            )
+        ).register(router)
+    } else log.warn("MCP server mode disabled — requires workflows + run ingress")
+
+    /*
+     * ── RESULT DELIVERY ─────────────────────────────────────────────────────
+     * The read and control surface. The DELIVERING happens in the worker's
+     * dispatcher — a long, durable retry schedule belongs on the pool sized for
+     * long work, not on instances sized for request latency.
+     */
+    if (ds != null) {
+        com.vectorbea.api.routes.DeliveryRoutes(
+            ds = ds,
+            store = com.vectorbea.worker.delivery.DeliveryStore(ds),
+            secrets = secretService,
+            rateLimiter = rateLimiter,
+            audit = auditLog,
+        ).register(router)
+    } else log.warn("Result delivery disabled — no database")
+
+    /*
+     * ── EVENT TRIGGERS ──────────────────────────────────────────────────────
+     * Consuming from a broker the customer already runs. The runner is started
+     * here and stopped in the shutdown hook; it reconciles against the table
+     * every thirty seconds, so enabling or disabling a trigger takes effect
+     * without a deploy.
+     */
+    val eventTriggerRunner = if (ds != null && runIngress != null) {
+        val triggerRepo = com.vectorbea.api.event.EventTriggerRepository(ds)
+        com.vectorbea.api.routes.EventTriggerRoutes(triggerRepo).register(router)
+        com.vectorbea.api.event.EventTriggerRunner(
+            triggers = triggerRepo,
+            ingress = runIngress,
+            connections = connectionRepo,
+            secrets = secretService,
+        ).also { it.start() }
+    } else {
+        log.warn("Event triggers disabled — requires database + run ingress")
+        null
+    }
 
     if (ds != null) {
         WorkerRoutes(ds).register(router)
@@ -536,7 +800,7 @@ fun main() {
         // is shared. Both require the guard: a key is created against a plan
         // ceiling, and a member budget is compared against the plan's default.
         if (apiKeyService != null && entitlementGuard != null) {
-            com.vectorbea.api.routes.ApiKeyRoutes(ds, apiKeyService, entitlementGuard).register(router)
+            com.vectorbea.api.routes.ApiKeyRoutes(ds, apiKeyService, entitlementGuard, auditLog).register(router)
         }
 
         // Billing. Registered unconditionally when there is a database — an
@@ -561,19 +825,17 @@ fun main() {
     } else log.warn("FailureIncidentRoutes/DurableRunRoutes/AgentIterationRoutes disabled — no database")
 
     // 7b. Cron scheduler — fires due workflow schedules onto the queue
-    val workflowScheduler = if (scheduleRepo != null && workflowRepo != null &&
-        runRepo != null && runEventRepo != null && workflowQueue != null) {
+    val workflowScheduler = if (scheduleRepo != null && runIngress != null) {
         com.vectorbea.api.schedule.WorkflowScheduler(
             schedules = scheduleRepo,
-            workflowRepo = workflowRepo,
-            runRepo = runRepo,
-            eventRepo = runEventRepo,
-            queue = workflowQueue,
-            classResolver = executionClassResolver,
-            dataSource = ds,
+            /* THE SAME instance the API and the webhooks use. Before this, the
+               scheduler created runs itself and skipped every plan check in the
+               product — quota, member spend, admission and metering all lived in
+               a route handler it could not call. */
+            ingress = runIngress,
         ).also { it.start() }
     } else {
-        log.warn("WorkflowScheduler disabled — requires database + queue")
+        log.warn("WorkflowScheduler disabled — requires database, queue and run ingress")
         null
     }
 
@@ -584,6 +846,10 @@ fun main() {
     Runtime.getRuntime().addShutdownHook(Thread {
         log.info("Shutdown signal received — stopping server...")
         workflowScheduler?.stop()
+        /* Before the queue and the pool close. A consumer mid-batch would
+           otherwise create a run against a closing datasource, and the message
+           would be neither acked nor run — lost, quietly, on every deploy. */
+        eventTriggerRunner?.stop()
         billingScheduler?.stop()
         server.stop(delaySeconds = 5)
         database?.close()

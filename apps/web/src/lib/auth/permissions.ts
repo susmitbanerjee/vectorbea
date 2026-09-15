@@ -48,6 +48,7 @@ export type Capability =
   | "member.view"
   | "member.manage"
   | "settings.edit"
+  | "apikey.manage"
   | "workspace.danger";
 
 /**
@@ -83,6 +84,20 @@ const REQUIRED: Record<Capability, WorkspaceRole> = {
   "member.view": "viewer",
   "member.manage": "admin",
   "settings.edit": "admin",
+
+  /*
+   * Minting, rotating and revoking a key. Mirrors `RbacGuard`, which holds all
+   * four of those routes to `WORKSPACE_WRITE` — admin and owner.
+   *
+   * The floor is not arbitrary and the API's own comment says why: a key acts
+   * as somebody, and an admin may mint one that acts as NOBODY, whose spend is
+   * charged to the workspace and to no member's cap. Below admin, that is a way
+   * around the budget a host set for a guest. Listing the keys is a read and is
+   * NOT gated here — being unable to see which credentials exist in a workspace
+   * you belong to helps nobody.
+   */
+  "apikey.manage": "admin",
+
   "workspace.danger": "owner",
 };
 

@@ -228,8 +228,8 @@ function Edges({ layout }: { layout: ReturnType<typeof layoutFlow> }) {
           fill="none"
           markerEnd="url(#flow-arrow)"
           className={cn(
-            "stroke-border-strong",
-            e.dimmed && "stroke-border-subtle opacity-60",
+            "stroke-fg-muted",
+            e.dimmed && "stroke-fg-disabled opacity-60",
           )}
           strokeWidth={e.edge.traversed === true ? 2 : 1}
           /* Dashed carries "this did not happen" without relying on the dimming,

@@ -45,6 +45,7 @@ class RunRoutesTest {
     private lateinit var eventRepo: StubRunEventRepository
     private lateinit var workflowRepo: StubWorkflowRepository
     private lateinit var queue: CapturingQueue
+    private lateinit var idempotency: InMemoryIdempotency
 
     @BeforeEach
     fun setUp() {
@@ -54,6 +55,12 @@ class RunRoutesTest {
         queue = CapturingQueue()
 
         router = Router()
+        /*
+         * The route is an adapter over `RunIngress` now, so the unit test builds
+         * one from the same stubs. Testing the route without it would test an
+         * adapter with nothing to adapt.
+         */
+        idempotency = InMemoryIdempotency()
         RunRoutes(
             runRepo = runRepo,
             eventRepo = eventRepo,
@@ -62,6 +69,14 @@ class RunRoutesTest {
             eventBus = null,
             lock = null,
             redis = null,
+            runIngress = com.vectorbea.api.ingress.RunIngress(
+                runRepo = runRepo,
+                eventRepo = eventRepo,
+                workflowRepo = workflowRepo,
+                queue = queue,
+                dataSource = null,
+                idempotency = idempotency,
+            ),
         ).register(router)
 
         // Pre-populate workflow
@@ -78,6 +93,23 @@ class RunRoutesTest {
         ),
         body = toJson(body),
     ))
+
+    /**
+     * A GET that the SSE router will match.
+     *
+     * `findSseRoute` takes the whole request now, because a POST SSE route has
+     * to see `Accept: text/event-stream` to know whether the caller wants a
+     * stream or an ordinary response. GET routes do not need the header, so this
+     * deliberately does not send one — which is also the assertion that they
+     * still match without it.
+     */
+    private fun sseRequest(path: String) = Request(
+        method = "GET", path = path, requestId = "test",
+        headers = mapOf(
+            "x-workspace-id" to workspaceId.toString(),
+            "x-environment-id" to environmentId.toString(),
+        ),
+    )
 
     private fun get(path: String) = router.dispatch(Request(
         method = "GET", path = path, requestId = "test",
@@ -163,19 +195,45 @@ class RunRoutesTest {
 
     @Test
     fun `idempotent trigger returns existing run on second call`() {
-        // No Redis in test — idempotency check returns null → two runs created
-        // (Redis-backed idempotency is tested via integration test)
-        val resp1 = post(
-            "/api/workflows/$workflowId/run",
-            mapOf("input" to emptyMap<String, Any>(), "idempotencyKey" to "key-1"),
-        )
-        assertEquals(202, resp1.status)
-        // Without Redis, second call creates a second run (expected in unit test)
-        val resp2 = post(
-            "/api/workflows/$workflowId/run",
-            mapOf("input" to emptyMap<String, Any>(), "idempotencyKey" to "key-1"),
-        )
-        assertEquals(202, resp2.status)
+        /*
+         * THIS TEST USED TO ASSERT THE BUG. Its comment read "Without Redis,
+         * second call creates a second run (expected in unit test)" — and that
+         * was true, and it was the defect: idempotency was a Redis GET/SETEX in
+         * an optional dependency, so with Redis absent the guarantee silently
+         * evaporated. The acceptance criterion is that a retry returns the
+         * original, so that is what it asserts now.
+         */
+        val body = mapOf("input" to emptyMap<String, Any>(), "idempotencyKey" to "key-1")
+
+        val first = post("/api/workflows/$workflowId/run", body)
+        assertEquals(202, first.status)
+        val firstId = fromJson<Map<String, Any?>>(first.body)["runId"]
+
+        val second = post("/api/workflows/$workflowId/run", body)
+        assertEquals(202, second.status)
+        val secondBody = fromJson<Map<String, Any?>>(second.body)
+
+        assertEquals(firstId, secondBody["runId"],
+            "a retry with the same key started a second run")
+        assertEquals(true, secondBody["idempotencyHit"],
+            "the response does not say it was a duplicate, so a caller cannot tell " +
+                "a retry that worked from a retry that ran twice")
+        assertEquals(1, runRepo.created.size, "two run rows exist for one logical run")
+        assertEquals(1, queue.enqueued.size, "the run was enqueued twice")
+    }
+
+    @Test
+    fun `reusing an idempotency key for a different request is refused`() {
+        post("/api/workflows/$workflowId/run",
+            mapOf("input" to mapOf("a" to 1), "idempotencyKey" to "key-2"))
+
+        val second = post("/api/workflows/$workflowId/run",
+            mapOf("input" to mapOf("a" to 2), "idempotencyKey" to "key-2"))
+
+        assertEquals(409, second.status,
+            "the same key with a different body returned ${second.status}. Silently " +
+                "returning the first run tells the caller their second request " +
+                "happened when it did not.")
     }
 
     // ── GET /api/runs ─────────────────────────────────────────────────────────
@@ -276,7 +334,7 @@ class RunRoutesTest {
 
     @Test
     fun `SSE stream route is registered`() {
-        val sseMatch = router.findSseRoute("GET", "/api/runs/${UUID.randomUUID()}/stream")
+        val sseMatch = router.findSseRoute(sseRequest("/api/runs/${UUID.randomUUID()}/stream"))
         assertNotNull(sseMatch, "SSE route must be registered")
     }
 
@@ -296,7 +354,7 @@ class RunRoutesTest {
         }
 
         // SSE handler throws ApiError.NotFound — HttpServer catches it but in unit test we see it
-        val sseMatch = router.findSseRoute("GET", "/api/runs/$runId/stream")!!
+        val sseMatch = router.findSseRoute(sseRequest("/api/runs/$runId/stream"))!!
         val enrichedReq = Request(
             method = "GET", path = "/api/runs/$runId/stream",
             pathParams = mapOf("id" to runId.toString()),
@@ -329,7 +387,7 @@ class RunRoutesTest {
             override fun isConnected() = true
         }
 
-        val sseMatch = router.findSseRoute("GET", "/api/runs/${run.id}/stream")!!
+        val sseMatch = router.findSseRoute(sseRequest("/api/runs/${run.id}/stream"))!!
         val enrichedReq = Request(
             method = "GET", path = "/api/runs/${run.id}/stream",
             pathParams = mapOf("id" to run.id.toString()),
@@ -360,7 +418,7 @@ class RunRoutesTest {
             override fun isConnected() = true
         }
 
-        val sseMatch = router.findSseRoute("GET", "/api/runs/${run.id}/stream")!!
+        val sseMatch = router.findSseRoute(sseRequest("/api/runs/${run.id}/stream"))!!
         val enrichedReq = Request(
             method = "GET", path = "/api/runs/${run.id}/stream",
             pathParams = mapOf("id" to run.id.toString()),
@@ -544,3 +602,45 @@ private class FakeDs : javax.sql.DataSource by object : javax.sql.DataSource {
     override fun <T : Any?> unwrap(iface: Class<T>?) = throw java.sql.SQLException("stub")
     override fun isWrapperFor(iface: Class<*>?) = false
 } {}
+
+/**
+ * An in-memory [com.vectorbea.api.ingress.IdempotencyStore].
+ *
+ * The real one is a table with a primary key doing the work, and its behaviour
+ * under concurrency is asserted against Postgres in the integration tier. This
+ * exists so the ROUTE's contract — a retry returns the original, a reused key
+ * with a different body is a 409 — is checked without a database, because those
+ * two answers are what a caller sees and they should not be reachable only
+ * through infrastructure.
+ */
+class InMemoryIdempotency : com.vectorbea.api.ingress.IdempotencyStore(FakeDs()) {
+    private data class Row(var runId: java.util.UUID?, val fingerprint: String)
+    private val rows = java.util.concurrent.ConcurrentHashMap<String, Row>()
+
+    override fun claim(
+        workspaceId: java.util.UUID,
+        key: String,
+        fingerprint: String,
+        triggerType: String,
+    ): Claim {
+        val existing = rows.putIfAbsent("$workspaceId|$key", Row(null, fingerprint))
+            ?: return Claim.Won(key)
+        if (existing.fingerprint != fingerprint) {
+            throw com.vectorbea.api.errors.ApiError.Conflict(
+                "This idempotency key was already used for a different request. " +
+                    "Use a new key, or resend the original request unchanged."
+            )
+        }
+        return existing.runId?.let { Claim.AlreadyRan(it) } ?: Claim.InFlight
+    }
+
+    override fun complete(workspaceId: java.util.UUID, key: String, runId: java.util.UUID) {
+        rows["$workspaceId|$key"]?.runId = runId
+    }
+
+    override fun release(workspaceId: java.util.UUID, key: String) {
+        rows.remove("$workspaceId|$key")
+    }
+
+    override fun sweepExpired(limit: Int): Int = 0
+}

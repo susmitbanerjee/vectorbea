@@ -137,6 +137,51 @@ open class SecretService(
         return "$DIRECT_PREFIX${Base64.getEncoder().encodeToString(combined)}"
     }
 
+    // ── The worker's own encrypted columns ───────────────────────────────────
+
+    /**
+     * Encrypt [plaintext] for a table the WORKER owns, bound to [workspaceId].
+     *
+     * ── WHY THIS EXISTS AND WHAT IT IS NOT ──────────────────────────────────
+     * The worker reads credentials and does not write them: `encrypted_secrets`
+     * belongs to the API, and a second writer of that table would be a second
+     * opinion about a wire format, which is the exact failure the shared
+     * [Encryption] object was extracted to prevent.
+     *
+     * This pair is narrower. It seals a value for a worker-owned table —
+     * `connection_oauth_tokens` today — using the same key, the same format and
+     * the same workspace binding, so a blob moved between tenants' rows fails to
+     * authenticate rather than decrypting. It never touches `encrypted_secrets`.
+     *
+     * Returns null rather than throwing when no key is configured. The caller is
+     * a cache: without a key it degrades to memory-only, which is correct in a
+     * development process and is checked at startup in production.
+     */
+    fun sealForWorkspace(plaintext: String, workspaceId: java.util.UUID): String? {
+        val key = keyBytes ?: return null
+        return try {
+            Encryption.encrypt(
+                plaintext, key, WORKER_KEY_VERSION,
+                workspaceId.toString().toByteArray(Charsets.UTF_8),
+            )
+        } catch (e: Exception) {
+            log.warn("[secrets] seal failed: {}", e.javaClass.simpleName)
+            null
+        }
+    }
+
+    /** The inverse of [sealForWorkspace]. Null on any failure, never throws. */
+    fun openForWorkspace(token: String?, workspaceId: java.util.UUID): String? {
+        if (token.isNullOrBlank()) return null
+        val key = keyBytes ?: return null
+        return try {
+            Encryption.decrypt(token, key, workspaceId.toString().toByteArray(Charsets.UTF_8))
+        } catch (e: Exception) {
+            log.warn("[secrets] open failed: {}", e.javaClass.simpleName)
+            null
+        }
+    }
+
     // ── Internal ──────────────────────────────────────────────────────────────
 
     private fun decrypt(base64Combined: String, context: String): SecretValue {
@@ -227,6 +272,15 @@ open class SecretService(
         }
 
     companion object {
+        /**
+         * Key version stamped on blobs the worker writes.
+         *
+         * Matches `EncryptedSecretService`'s default. Both services read every
+         * version; only the writer's own is stamped, and keeping them equal means
+         * a rotation changes one constant in each rather than a migration.
+         */
+        private const val WORKER_KEY_VERSION = "1"
+
         private const val DIRECT_PREFIX = "aes256gcm:"
         private const val ALGORITHM     = "AES/GCM/NoPadding"
         private const val IV_LENGTH     = 12

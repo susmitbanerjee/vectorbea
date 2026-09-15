@@ -114,7 +114,10 @@ Full baseline and migration order: `/docs/audit/CURRENT-STATE.md`.
 Design docs: docs/AGENT-HARNESS-ARCHITECTURE.md, docs/AGENT-TRACE-AND-DEBUGGER.md,
 docs/AGENT-BRAIN-EXECUTION.md, docs/AGENTIC-WORKFLOW-EXECUTION-FLOW.md,
 docs/PLANS-AND-ENTITLEMENTS.md, docs/RETENTION.md,
-docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md.
+docs/SHARED-WORKSPACE-LIMITS.md, docs/BILLING.md, docs/HTTP-TOOLS.md,
+docs/WAITS-AND-SIGNALS.md, docs/INGRESS.md, docs/RESULT-DELIVERY.md,
+docs/SRE-AND-INCIDENT-RESPONSE.md, docs/ENTERPRISE-CONNECTIVITY.md,
+docs/SKILLS.md.
 Read the relevant sections before changing runtime code. The docs explain WHY
 each guard exists; most were written after a production bug.
 
@@ -179,6 +182,149 @@ each guard exists; most were written after a production bug.
    data. Webhooks are verified over the RAW body, deduplicated on the provider's
    event id, ordered by the PROVIDER's timestamp, and an unrecognised type is
    stored and ignored — never inferred. See docs/BILLING.md.
+14. A tool's definition changes only through a VERSION. `agents.allowed_tool_ids`
+   grants a tool by uuid, so an id whose behaviour changed underneath it is a
+   grant to something nobody reviewed. A spec re-import writes `tool_versions`
+   rows in `review_state = 'pending'` and NEVER touches `tools` —
+   `ToolVersionRepository.apply` is the only writer of the live definition, it
+   takes a person, and it records who. The rule is never-mutate, not "not when
+   granted": a grant can be added a minute after an import. A credential never
+   appears in `http_spec_json` — auth strategies name FIELDS of the connection's
+   secret, and `SpecSecretScan` rejects a document that inlines one, because
+   that column is read by the list endpoint, rendered in a form, snapshotted
+   into every version and shown in re-import diffs. See docs/HTTP-TOOLS.md.
+15. A run parks through the WAIT PRIMITIVE and nothing else. Approval, async
+   tools, signals and the agent's own WAIT action are kinds of one thing —
+   invariant 9 applied to suspension. A second parking mechanism means a second
+   timeout policy, a second reconciler sweep and a second way for a run to be
+   stuck forever, and only one of those would be tested. Every wait carries a
+   deadline (clamped, never absent), resolves by compare-and-set on
+   `status = 'waiting'` so a redelivered callback resolves it exactly once, and
+   is keyed by a derivation that survives re-execution. Waiting consumes no
+   wall-clock budget because a wait ends the tick, not because anything is
+   subtracted afterwards. A new kind is not done until the reconciler sweeps it —
+   `WaitReconciliationTest` walks the enum, so it fails until then. The
+   approval gate is the one kind still parking through its own mechanism; that
+   migration is a stop-and-ask, and docs/WAITS-AND-SIGNALS.md §12 says what it
+   should look like. See docs/WAITS-AND-SIGNALS.md.
+
+16. A run starts through RUN INGRESS and nothing else. API, webhook, schedule,
+   event and MCP are adapters that say who is asking and what for; the rate
+   limit, the plan quota, the fair placement, the admission decision, the
+   metering and the events happen once, in `RunIngress`. This is not tidiness:
+   the sequence used to live in a route handler, so `WorkflowScheduler` could
+   not call it and reimplemented the half it remembered — and scheduled runs
+   skipped every plan check in the product, for free, until somebody read the
+   two functions side by side. A run started five different ways differs in
+   `trigger_type` and in nothing else, and `IngressAcceptanceTest` reads the
+   rows back to prove it. Idempotency is claimed BEFORE the checks and released
+   by every refusal, because a run that was refused did not happen and its key
+   must still work. See docs/INGRESS.md.
+
+17. DELIVERY IS A SECOND AXIS, NOT A RUN STATUS. A run that produced the right
+   answer and could not deliver it did not fail: its output is correct, its cost
+   was real, and retrying the RUN would re-execute every side effect. So
+   `agent_runs.delivery_status` is its own column, on the LIST response as well
+   as the detail one, and the UI shows both facts at once. Delivery happens
+   after the terminal transition, so it has its own retry, its own dead-letter
+   queue (`run_deliveries.status = 'dead'`, redeliverable in place) and its own
+   loop — `onTerminalTransition` INSERTs a row and returns, because that
+   function is on the completion path and somebody else's HTTP does not belong
+   on it. The idempotency key a receiver deduplicates on is DERIVED from
+   `(run, target, sequence)`, so every retry and every operator redelivery
+   carries the key the first attempt carried; a per-attempt key would make each
+   retry a new event to them and our logs would still say "delivered". A
+   destination is a TOOL — it reuses that tool's connection, credential,
+   approval policy and audit trail — and a caller blocked on a sync or streamed
+   run is NOT a delivery target, because it has no endpoint to retry against.
+   See docs/RESULT-DELIVERY.md.
+
+18. A RUN IS A SINGLETON ON ITS DEDUP KEY, AND THE INDEX SAYS SO. Two alerts
+   for one service must not start two incident runs, and the case that matters —
+   two arriving in the same second — is exactly the one a read-then-write loses,
+   because it is what a flapping check produces.
+   `agent_runs_dedup_live_unique` is the enforcement; the lookup in `RunIngress`
+   exists only so a policy can be acted on and the holding run named, and the
+   index's refusal is translated into the same answer that lookup would have
+   given. This is a DIFFERENT question from idempotency: a `dedup_key` asks "is
+   something already working on this thing" and is freed when the run ends,
+   while an `idempotency_key` asks "is this the same request" and expires on a
+   clock. The dedup check sits BEFORE the idempotency claim, because a `join`
+   starts no run and burning a key on it would make the caller's own retry look
+   like a duplicate. `cancellation_requested` is NOT live for this purpose — a
+   run on its way out has no claim on the key, and treating it as live makes
+   `supersede` lose the race to the run it has just cancelled, every time.
+   Priority weights the fair-queue clock as well as ordering the claim, because
+   `priority DESC` alone is a strict lane and a trickle of Sev1s would starve
+   batch work completely; and a requested priority is clamped to the workspace's
+   plan ceiling, because a field any caller can set to 100 orders nothing.
+   Cancelling a run walks `parent_run_id` DOWNWARDS and takes each descendant
+   through the same terminal CAS — one bulk UPDATE would be one statement and
+   would leak every child's waits, budget, children and deliveries.
+   See docs/SRE-AND-INCIDENT-RESPONSE.md.
+
+19. WHAT LEAVES THE CUSTOMER'S PERIMETER IS AN ALLOW-LIST, ENFORCED AT OUR
+   END. A self-hosted runner exists so a customer can tell their own security
+   review that prompts and tool results never leave their network. Everything
+   else about it — the pool, the token, the lease — is plumbing;
+   `RunnerReport` is the sentence they are buying, and it has to be true by
+   construction rather than by care. An ALLOW-LIST because a deny-list is a list
+   of the leaks somebody thought of: an unnamed field that gets dropped is a
+   degraded feature, and an unnamed field that passes through is their data in
+   our database. AT OUR END because a runner is software the customer deploys
+   and may be an old build — a guarantee that depends on the remote side having
+   redacted correctly is a hope with a version number. Titles and summaries are
+   payloads: a summary is generated from the thing it summarises. A run's OUTPUT
+   has no policy that admits it. A run pinned to a pool must be unclaimable
+   through BOTH doors — `PostgresClaim` carries `runner_pool_id IS NULL`, and
+   `RunIngress` does not enqueue it, because the Redis path never reads
+   `agent_runs` and would hand it to a platform worker through the side the
+   claim predicate cannot see. `payloads_withheld` is set at CREATION and stored
+   rather than derived, because the Debug tab has to say "withheld by policy"
+   while the run is still going and years after the pool is deleted — an empty
+   panel reads as a product that lost your data.
+   See docs/ENTERPRISE-CONNECTIVITY.md.
+
+20. A CUSTOMER'S PRICE IS NOT OUR LIST PRICE, AND EGRESS IS NOT A GLOBAL
+   SWITCH. `connections.provider` says WHOSE capacity, credential, breaker and
+   price; `connections.protocol` says what the wire looks like. Conflating them
+   worked only while every connection pointed at the vendor it was named after.
+   An enterprise runs a negotiated rate, so `connection_model_prices` overrides
+   per CONNECTION (the credential is what the contract attaches to), quotes
+   input and output SEPARATELY (output is 3-5x input, so a blend is right at one
+   ratio only), and resolves LONGEST-PATTERN-FIRST so a catch-all cannot
+   silently override the specific rates configured before it. The list path is
+   untouched, because generalising it would move every historical figure on
+   every dashboard. Reaching a private address is per connection, off by
+   default, and USELESS WITHOUT AN ALLOW-LIST — `private_allowed` with no
+   `allowed_hosts` reaches nothing, refused by the schema and by the guard,
+   because "allow private" and "these three hostnames" are one decision and
+   splitting them is how a temporary allowance becomes a permanent hole. Cloud
+   metadata addresses are refused under EVERY policy. There is no
+   `insecureSkipVerify` anywhere in the TLS path and the omission is the
+   feature. See docs/ENTERPRISE-CONNECTIVITY.md.
+
+21. A SKILL GRANTS COMPETENCE, AND NOTHING ELSE. It is a named, versioned
+   bundle granted per agent like a tool — so it inherits the tool discipline
+   rather than inventing one: the check is runtime code against a database, the
+   VERSION is the unit of change, the lookup is workspace-scoped and fails
+   closed, and the text is sanitized at the write boundary. What it must never
+   acquire is a way to widen anything. `validateToolAllowed` and
+   `validateAgentAllowed` take NO skill as input and would behave identically if
+   the feature were deleted; the worst a malicious skill can do is waste a
+   prompt, and `SkillInjectionTest` asserts that with text saying the opposite of
+   the grant. Granting a skill whose required tools the agent lacks is REFUSED AT
+   SAVE, with the missing list, because otherwise the failure lands at iteration
+   four of a production run and reads as a model that hallucinated a tool — and
+   the same check runs again per activation, dropping the skill, because a tool
+   can be revoked a minute after the grant. Composition is ordered (after the
+   agent's own instructions, before observations — that position is the
+   precedence claim, not a rendering choice) and bounded, and EVERY CUT IS
+   RECORDED: an agent that "ignored" a skill it was never shown is the hardest
+   failure here to diagnose, so the budget is ordinary and the bookkeeping is the
+   feature. One composer, shared by the save path and the run path — a second
+   implementation makes the save-time warning a lie, which is invariant 16's
+   lesson. See docs/SKILLS.md.
 
 ### Conventions
 
@@ -198,8 +344,30 @@ Ask before proceeding if a change would touch:
 - the run status state machine or the status CAS
 - run lease acquisition or renewal
 - the event sequence assignment
-- idempotency key derivation
+- idempotency key derivation, including `RunWait.keyFor` and the callback
+  token derived from it
+- the order of checks in `RunIngress.start`, or where the idempotency claim
+  sits within it — including where the DEDUP check sits relative to it
+- the status list in `agent_runs_dedup_live_unique`, `RunDedup.LIVE_STATUSES`
+  or `SignalStore.LIVE_STATUSES`. All three must agree; if they do not, a
+  `join` can be told a run holds the key and then be refused a signal by that
+  same run, which is an alert silently dropped
+- `RunDelivery.keyFor`, or anything else a receiver deduplicates on — a wrong
+  guess produces duplicate side effects in somebody else's system, where we
+  cannot see them
+- `RunnerReport.ALLOWED_EVENT_FIELDS`, or anything else that widens what a
+  self-hosted runner may send us — every addition has to be a number, an
+  identifier or an enum, and a field that can carry a fragment of a prompt or a
+  tool result breaks a commitment a customer made to their own security review
+- the `runner_pool_id IS NULL` predicate in `PostgresClaim`, or the ingress
+  branch that declines to enqueue a pinned run. Either one alone lets a
+  customer's prompts execute on our infrastructure, silently
 - anything that alters what happens on resume
+- the position of the skills block in the system prompt, or anything that lets
+  a skill reach `allowed_tool_ids`, `can_delegate_to` or an output schema. The
+  first is a precedence decision the model reads as authority; the second turns
+  a bundle of prose into a permission, which is the one thing skills are
+  defined as not being
 
 These are the places where a plausible-looking change causes duplicate side
 effects in production. A wrong guess here is expensive; a question is cheap.

@@ -5,7 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { contracts } from "@vectorbea/shared";
 import {
   Brain, ArrowsClockwise, Wrench, ArrowsSplit, SealCheck, Broadcast,
-  MagnifyingGlass, CheckCircle, WarningCircle, ArrowRight, ArrowLeft, Plus,
+  MagnifyingGlass, CheckCircle, WarningCircle, ArrowRight, ArrowLeft, Plus, Plugs,
 } from "@phosphor-icons/react/dist/ssr";
 
 import { cn } from "~/lib/cn";
@@ -23,11 +23,13 @@ import {
   Modal, ModalBody, ModalDivider, ModalFooter, ModalHeader, ModalLayout,
   ModalNote, ModalRail, ModalSection, ModalStepBar, type ModalStep,
 } from "~/components/ui/modal";
+import { toast } from "sonner";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiMutation } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
 import { SummaryList, SummaryRow, ConnectionPicker } from "./create-atoms";
+import { AgentSkillPicker, attachSkills, type SkillSelection } from "./skills-view";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    REGISTER AN AGENT
@@ -100,6 +102,9 @@ const STEPS: ModalStep[] = [
   { id: "model", label: "Model", summary: "Connection, model and limits" },
   { id: "instructions", label: "Instructions", summary: "The system prompt" },
   { id: "grants", label: "Grants", summary: "Which tools it may call" },
+  /* Skills sit after grants because a skill that uses a tool can only apply to
+     an agent that holds it — picking tools first is what lets that work. */
+  { id: "skills", label: "Skills", summary: "How it should work" },
   { id: "review", label: "Review", summary: "Check, then register" },
 ];
 
@@ -118,6 +123,15 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
   const [step, setStep] = React.useState(0);
   const [connections, setConnections] = React.useState<contracts.Connection[]>([]);
   const [tools, setTools] = React.useState<contracts.Tool[]>([]);
+  /*
+   * Names for the MCP servers tools were discovered from.
+   *
+   * Built from the FULL connection page, before `connections` is narrowed to
+   * LLM providers — an MCP server is not an LLM connection and would not
+   * survive that filter, leaving the grant list showing twelve rows called
+   * `mcp-1a2b3c4d.*` with nothing to say whose they are.
+   */
+  const [serverNames, setServerNames] = React.useState<Map<string, string>>(new Map());
   const [loadingRefs, setLoadingRefs] = React.useState(true);
 
   const [name, setName] = React.useState("");
@@ -135,6 +149,8 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
 
   const [grants, setGrants] = React.useState<string[]>([]);
   const [toolQuery, setToolQuery] = React.useState("");
+  const [skills, setSkills] = React.useState<SkillSelection>({ skillIds: [], librarySlugs: [] });
+  const skillCount = skills.skillIds.length + skills.librarySlugs.length;
 
   React.useEffect(() => {
     if (!open) return;
@@ -145,11 +161,13 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
       .then(([connectionPage, toolPage]) => {
         if (!alive) return;
         setConnections(connectionPage.items.filter((connection) => connection.type === "llm"));
+        setServerNames(new Map(connectionPage.items.map((c) => [c.id, c.name])));
         setTools(toolPage.items);
       })
       .catch(() => {
         if (!alive) return;
         setConnections([]);
+        setServerNames(new Map());
         setTools([]);
       })
       .finally(() => { if (alive) setLoadingRefs(false); });
@@ -201,10 +219,51 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
   const visibleTools = React.useMemo(() => {
     const query = toolQuery.trim().toLowerCase();
     if (!query) return tools;
-    return tools.filter((tool) =>
-      `${tool.name} ${tool.description ?? ""} ${tool.type} ${tool.riskLevel}`.toLowerCase().includes(query),
-    );
-  }, [tools, toolQuery]);
+    return tools.filter((tool) => {
+      const server = tool.mcpServerConnectionId
+        ? serverNames.get(tool.mcpServerConnectionId) ?? "" : "";
+      return `${tool.name} ${tool.description ?? ""} ${tool.type} ${tool.riskLevel} ${server}`
+        .toLowerCase().includes(query);
+    });
+  }, [tools, toolQuery, serverNames]);
+
+  /**
+   * The grant list, grouped by where each tool came from.
+   *
+   * Locally-authored tools first, then one group per MCP server. The grouping
+   * exists because a discovered tool is named `mcp-1a2b3c4d.search` and a flat
+   * list of forty of those, from three servers, is unreadable — the namespacing
+   * in `syncTools` keeps them distinct and this is where that distinction gets
+   * used.
+   *
+   * The group is a HEADING, never a checkbox. A tri-state control at the server
+   * level is exactly the affordance that would teach the wrong model — that a
+   * server is a thing you grant. It is not, and there is no field in the schema
+   * that could make it one.
+   */
+  const toolGroups = React.useMemo(() => {
+    const local: contracts.Tool[] = [];
+    const byServer = new Map<string, contracts.Tool[]>();
+    for (const tool of visibleTools) {
+      const serverId = tool.mcpServerConnectionId;
+      if (!serverId) { local.push(tool); continue; }
+      const bucket = byServer.get(serverId);
+      if (bucket) bucket.push(tool); else byServer.set(serverId, [tool]);
+    }
+    return [
+      ...(local.length > 0
+        ? [{ id: "local", label: "Your tools", isMcp: false, items: local }]
+        : []),
+      ...[...byServer.entries()]
+        .map(([serverId, items]) => ({
+          id: serverId,
+          label: serverNames.get(serverId) ?? "Unknown server",
+          isMcp: true,
+          items,
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    ];
+  }, [visibleTools, serverNames]);
 
   /* ── Create ─────────────────────────────────────────────────────────────── */
   const create = useApiMutation<contracts.Agent, void>({
@@ -233,7 +292,28 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
         { workspaceId: scope.workspaceId, environmentId: null },
       );
     },
-    onSuccess: (agent) => {
+    onSuccess: async (agent) => {
+      const readScope = { workspaceId: scope.workspaceId, environmentId: null };
+      /* Skills attach AFTER the agent exists — a grant needs an agent id. A
+         failure here never undoes the agent: it is created, and the toast says
+         which skills did not attach and why, in the API's own words. */
+      if (skillCount > 0) {
+        try {
+          const { attached, refused } = await attachSkills(api, agent.id, skills, readScope);
+          void queryClient.invalidateQueries({ queryKey: [...queryKeys.env(scope.workspaceId, null), "skills"] });
+          void queryClient.invalidateQueries({ queryKey: [...queryKeys.env(scope.workspaceId, null), "agent-skills", agent.id] });
+          if (refused.length > 0) {
+            toast.warning(
+              `${agent.name} was created with ${attached.length} skill${attached.length === 1 ? "" : "s"}. ` +
+              `Not added: ${refused.map((r) => `${r.name} (${r.reason})`).join("; ")}`,
+            );
+          } else {
+            toast.success(`${agent.name} created with ${attached.length} skill${attached.length === 1 ? "" : "s"}.`);
+          }
+        } catch {
+          toast.warning(`${agent.name} was created, but its skills couldn't be added. Add them from its Skills tab.`);
+        }
+      }
       void queryClient.invalidateQueries({
         queryKey: queryKeys.agents.all({ workspaceId: scope.workspaceId, environmentId: null }),
       });
@@ -250,6 +330,7 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
       setConnectionId(null); setModelName(""); setTemperature(0.1);
       setMaxTokens("4096"); setMaxIterations("10");
       setInstructions(""); setGrants([]); setToolQuery("");
+      setSkills({ skillIds: [], librarySlugs: [] });
       create.reset();
     }, 200);
     return () => window.clearTimeout(timer);
@@ -260,6 +341,23 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
     setGrants((current) => (granted ? [...new Set([...current, id])] : current.filter((item) => item !== id)));
   }
 
+  /**
+   * Grant or revoke every tool in one group at once.
+   *
+   * This is a CONVENIENCE OVER N CHECKBOXES and nothing more: it writes N
+   * individual tool ids into `allowedToolIds`, which is the only thing that
+   * list can hold. It does not create a server-level grant, because there is
+   * nothing in the schema to create one in — and the button says "12", not
+   * "this server", so what somebody is doing matches what is stored.
+   */
+  function toggleGroup(ids: string[], granted: boolean) {
+    setGrants((current) => {
+      if (granted) return [...new Set([...current, ...ids])];
+      const removing = new Set(ids);
+      return current.filter((item) => !removing.has(item));
+    });
+  }
+
   const railSteps: ModalStep[] = STEPS.map((entry, index) => ({
     ...entry,
     value:
@@ -267,7 +365,8 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
         : index === 1 ? (trimmedModel || (spec.needsModel ? undefined : "Not model-backed"))
           : index === 2 ? (trimmedInstructions ? `${trimmedInstructions.length} characters` : undefined)
             : index === 3 ? (grants.length > 0 ? `${grants.length} tool${grants.length === 1 ? "" : "s"}` : "No grants")
-              : undefined,
+              : index === 4 ? (skillCount > 0 ? `${skillCount} skill${skillCount === 1 ? "" : "s"}` : "No skills")
+                : undefined,
   }));
 
   const error = stepErrors[step];
@@ -564,7 +663,34 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                           </Text>
                         </div>
                       ) : (
-                        visibleTools.map((tool) => {
+                        toolGroups.map((group) => {
+                          const ids = group.items.map((tool) => tool.id);
+                          const allGranted = ids.every((id) => grants.includes(id));
+                          return (
+                        <div key={group.id}>
+                          {/* A heading, never a checkbox. See `toggleGroup`. */}
+                          <div className="bg-surface-sunken border-subtle sticky top-0 z-raised flex items-center justify-between gap-2 border-b px-3 py-1.5">
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              {group.isMcp ? (
+                                <Icon icon={Plugs} size="sm" decorative className="text-fg-muted shrink-0" />
+                              ) : null}
+                              <Text variant="caption" tone="secondary" className="truncate">
+                                {group.label}
+                                {group.isMcp ? <span className="text-fg-muted"> · MCP</span> : null}
+                              </Text>
+                            </span>
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => toggleGroup(ids, !allGranted)}
+                            >
+                              {allGranted
+                                ? `Clear all ${ids.length}`
+                                : `Select all ${ids.length}`}
+                            </Button>
+                          </div>
+                          <div className="divide-subtle divide-y">
+                        {group.items.map((tool) => {
                           const granted = grants.includes(tool.id);
                           return (
                             <label
@@ -604,6 +730,10 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                               </span>
                             </label>
                           );
+                        })}
+                          </div>
+                        </div>
+                          );
                         })
                       )}
                     </div>
@@ -624,6 +754,16 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
           ) : null}
 
           {step === 4 ? (
+            <div className="grid gap-4">
+              <ModalNote title="Skills shape how the agent works">
+                Pick reusable instructions — a writing style, a design eye, a tighter token budget. They apply
+                every time this agent runs, after its own instructions, and never add permissions.
+              </ModalNote>
+              <AgentSkillPicker value={skills} onChange={setSkills} />
+            </div>
+          ) : null}
+
+          {step === 5 ? (
             <div className="grid gap-4">
               <ModalSection title="What will be registered">
                 <SummaryList>
@@ -651,6 +791,9 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                     {grantedTools.length === 0
                       ? "No tools granted"
                       : grantedTools.map((tool) => tool.name).join(", ")}
+                  </SummaryRow>
+                  <SummaryRow label="Skills" onEdit={() => setStep(4)}>
+                    {skillCount === 0 ? "None" : `${skillCount} skill${skillCount === 1 ? "" : "s"}`}
                   </SummaryRow>
                 </SummaryList>
               </ModalSection>
@@ -693,6 +836,10 @@ export function CreateAgentDialog({ open, onOpenChange, onCreated }: CreateAgent
                 {grants.length === 0
                   ? "No grants yet — the agent can be created and granted tools later."
                   : `${grants.length} of ${tools.length} tools granted.`}
+              </Text>
+            ) : step === 4 ? (
+              <Text variant="caption" tone="muted">
+                {skillCount === 0 ? "Optional — skills can be added later from the agent's Skills tab." : `${skillCount} skill${skillCount === 1 ? "" : "s"} selected.`}
               </Text>
             ) : null
           }

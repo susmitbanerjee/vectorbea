@@ -3,7 +3,7 @@
   "build": {
     "builder": "DOCKERFILE",
     "dockerfilePath": "apps/api-kotlin/Dockerfile",
-    "watchPatterns": ["apps/api-kotlin/**", "packages/observability-kotlin/**", "packages/graph-kotlin/**"]
+    "watchPatterns": ["apps/api-kotlin/**", "packages/observability-kotlin/**", "packages/graph-kotlin/**", "packages/skills-kotlin/**"]
   },
   "deploy": {
     "restartPolicyType": "ON_FAILURE",

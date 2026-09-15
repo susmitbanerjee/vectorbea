@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { HttpSpecEditor } from "./http-spec-editor";
+import * as http from "~/lib/tools/http-spec";
 import { useQueryClient } from "@tanstack/react-query";
 import type { contracts } from "@vectorbea/shared";
 import {
@@ -27,7 +29,11 @@ import { useApi } from "~/lib/api/api-provider";
 import { useApiMutation } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
 import { useScope } from "~/lib/workspace/workspace-provider";
-import { SummaryList, SummaryRow, ConnectionPicker } from "./create-atoms";
+import { SummaryList, SummaryRow, ConnectionPicker, providerDisplayName } from "./create-atoms";
+import { ToolAppPicker } from "./tool-app-picker";
+import { ToolTestMessage } from "./tool-test-message";
+import { CreateConnectionDialog } from "~/components/app/connectivity/create-connection-dialog";
+import { providerLabel, type ProviderId } from "~/components/ui/provider-logo";
 import {
   SqlBuilder, generateSql, EMPTY_BUILDER,
   type SqlBuilderValue,
@@ -78,13 +84,23 @@ const TOOL_TYPES: {
   icon: typeof Globe;
   /** Connection types this adapter accepts, mirroring `compatibleConnectionTypes`. */
   connectionTypes: string[] | "any" | "none";
+  /**
+   * Why this adapter cannot be registered here, when it cannot.
+   *
+   * `ToolNodeExecutor` dispatches http, database and mcp; `code`, `builtin`,
+   * `llm_generate` and `custom` fall to "not yet supported by the worker". The
+   * dialog used to register them anyway, and the tool failed on its first call
+   * inside somebody's run. MCP tools are not registered by hand at all —
+   * connecting the server discovers them.
+   */
+  unavailable?: string;
 }[] = [
-  { value: "http", label: "HTTP API", description: "Call a REST or JSON endpoint through a registered HTTP connection.", icon: Globe, connectionTypes: ["http"] },
+  { value: "http", label: "HTTP API", description: "Call a REST or JSON endpoint. A connection is optional — attach one for a credential or a private host.", icon: Globe, connectionTypes: ["http"] },
   { value: "database", label: "Database", description: "Run a parameterised SQL template against a database connection.", icon: Database, connectionTypes: ["database"] },
-  { value: "llm_generate", label: "LLM generation", description: "Generate text with a model, billed to an LLM connection.", icon: Sparkle, connectionTypes: ["llm"] },
-  { value: "code", label: "Code", description: "Run sandboxed code in the worker. No external credentials.", icon: Code, connectionTypes: "none" },
-  { value: "builtin", label: "Built-in", description: "A capability the platform ships with — hashing, formatting, maths.", icon: Cube, connectionTypes: "none" },
-  { value: "custom", label: "Custom / MCP", description: "An MCP server or a bespoke adapter. Any connection type, or none.", icon: PuzzlePiece, connectionTypes: "any" },
+  { value: "llm_generate", label: "LLM generation", description: "Generate text with a model, billed to an LLM connection.", icon: Sparkle, connectionTypes: ["llm"], unavailable: "Not available yet. Give an agent a model instead — it writes the text and passes it to a tool." },
+  { value: "code", label: "Code", description: "Run sandboxed code in the worker. No external credentials.", icon: Code, connectionTypes: "none", unavailable: "Not available yet — runs cannot execute code tools." },
+  { value: "builtin", label: "Built-in", description: "A capability the platform ships with — hashing, formatting, maths.", icon: Cube, connectionTypes: "none", unavailable: "Not available yet — runs cannot execute built-in tools." },
+  { value: "custom", label: "MCP server", description: "Tools from a Model Context Protocol server.", icon: PuzzlePiece, connectionTypes: "any", unavailable: "Connect the server under Connections, then MCP server. Its tools are registered for you." },
 ];
 
 const RISK_TIERS: { value: RiskLevel; label: string; markerClassName: string; blurb: string }[] = [
@@ -93,8 +109,6 @@ const RISK_TIERS: { value: RiskLevel; label: string; markerClassName: string; bl
   { value: "high", label: "High", markerClassName: "bg-risk-high", blurb: "Writes to a system of record, or spends money. Approval on by default." },
   { value: "critical", label: "Critical", markerClassName: "bg-risk-critical", blurb: "Irreversible, or externally visible. Always gated, always audited." },
 ];
-
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
 /** So a catalogue default can raise the risk tier without ever lowering one. */
 const RISK_ORDER: Record<RiskLevel, number> = { low: 0, medium: 1, high: 2, critical: 3 };
@@ -159,13 +173,13 @@ function OperationParams({
   return (
     <div className="grid gap-4">
       <ModalSection
-        title="Fixed when the tool is registered"
-        description="The agent cannot change these. Anything here is a bound the engine enforces on every call."
+        title="Set once"
+        description="Every run uses these. An agent or workflow step cannot change them."
       >
         {fixed.length === 0 ? (
-          <ModalNote tone="warning" title="Nothing is fixed">
-            Every parameter is chosen by the agent at call time. That is legitimate for a read, and
-            worth a second look for anything that writes.
+          <ModalNote tone="warning" title="Everything is chosen on each run">
+            That is fine for reading. For a tool that posts or changes something, consider setting
+            where it goes here.
           </ModalNote>
         ) : (
           <div className="grid gap-3">
@@ -195,7 +209,7 @@ function OperationParams({
                 {param.bindable ? (
                   <div className="flex justify-end">
                     <Button size="xs" variant="ghost" onClick={() => onBinding(param.name, "input")}>
-                      Let the agent choose
+                      Let each run choose instead
                     </Button>
                   </div>
                 ) : null}
@@ -208,13 +222,12 @@ function OperationParams({
       <ModalDivider />
 
       <ModalSection
-        title="Supplied on every call"
-        description="These become the tool's input schema. The agent, or an earlier node, provides them."
+        title="Filled in on each run"
+        description="The agent, or the workflow step that uses this tool, provides these every time."
       >
         {perCall.length === 0 ? (
-          <ModalNote title="Nothing is left to the caller">
-            Every value is fixed, so this tool does exactly one thing with exactly one set of
-            arguments. That is often the safest tool there is.
+          <ModalNote title="Nothing is filled in on each run">
+            Every value is set once, so this tool always does exactly the same thing.
           </ModalNote>
         ) : (
           <ul className="grid gap-1.5">
@@ -234,7 +247,7 @@ function OperationParams({
                       className="shrink-0"
                       onClick={() => onBinding(param.name, "config")}
                     >
-                      Fix this value
+                      Set it once instead
                     </Button>
                   ) : null}
                 </div>
@@ -268,22 +281,33 @@ function missingBoundParam(
   for (const param of operation.params) {
     if (!param.required || bindingOf(param) !== "config") continue;
     if (!values[param.name]?.trim()) {
-      return `${operation.label} needs ${param.label.toLowerCase()} — it is fixed when the tool is registered, not chosen per call.`;
+      return param.bindable
+        ? `Enter the ${param.label.toLowerCase()}, or let each run choose it.`
+        : `Enter the ${param.label.toLowerCase()}.`;
     }
   }
   return null;
 }
 
-function validUrl(value: string): boolean {
-  try {
-    const url = new URL(value.trim());
-    return (url.protocol === "http:" || url.protocol === "https:") && url.host !== "";
-  } catch {
-    return false;
-  }
-}
-
 const EMPTY_SCHEMA = '{\n  "type": "object",\n  "properties": {}\n}';
+
+/**
+ * The path when the tool starts from an app (Slack, Teams…).
+ *
+ * The long path asks for an adapter, a connection, a contract and a policy
+ * because a hand-built tool genuinely has all four. Picking "Slack → Post a
+ * message" has already answered the first three, and walking somebody through
+ * them again — the same operation list on the Contract step, a JSON schema they
+ * did not write — is what made registering a message tool feel like writing one.
+ * What is left is where it posts, what it is called, a test, and the approval
+ * decision; the risk tier and timeout keep their catalogue defaults and sit
+ * under "More options".
+ */
+const APP_STEPS: ModalStep[] = [
+  { id: "app", label: "App", summary: "Where it posts and what it does" },
+  { id: "details", label: "Details", summary: "Channel, message and name" },
+  { id: "review", label: "Test and register", summary: "Send a test, then save" },
+];
 
 const STEPS: ModalStep[] = [
   { id: "capability", label: "Capability", summary: "What it is and what it talks to" },
@@ -295,12 +319,14 @@ const STEPS: ModalStep[] = [
 
 export interface CreateToolDialogProps {
   open: boolean;
+  presetConnectionId?: string | null;
+  presetHttpSpec?: http.SpecDocument;
   onOpenChange: (open: boolean) => void;
   /** Called after a successful create, with the persisted tool. */
   onCreated?: (tool: contracts.Tool) => void;
 }
 
-export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDialogProps) {
+export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnectionId, presetHttpSpec }: CreateToolDialogProps) {
   const api = useApi();
   const scope = useScope();
   const queryClient = useQueryClient();
@@ -313,7 +339,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
   const [type, setType] = React.useState<ToolType>("http");
-  const [connectionId, setConnectionId] = React.useState<string | null>(null);
+  const [httpSpec, setHttpSpec] = React.useState<http.SpecDocument>(presetHttpSpec ?? http.emptySpec);
+  const [connectionId, setConnectionId] = React.useState<string | null>(presetConnectionId ?? null);
 
   const [method, setMethod] = React.useState<string>("GET");
   const [url, setUrl] = React.useState("");
@@ -422,7 +449,18 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   /* ── Derived ────────────────────────────────────────────────────────────── */
   const spec = TOOL_TYPES.find((candidate) => candidate.value === type)!;
-  const requiresConnection = type === "http" || type === "database" || type === "llm_generate";
+  /*
+   * Mirrors `toolRequiresConnection` on the API side, and `http` is
+   * deliberately not in it.
+   *
+   * A connection gives an HTTP tool a base URL and a credential. The spec
+   * carries its own absolute URL, so a public endpoint needs neither — and
+   * `HttpToolResolver` has always run a connection-less tool as PUBLIC egress
+   * with no secret, which is strictly less reach, not more. Asking for one
+   * anyway made "register a tool for this public API" a dead end whose only
+   * exit was inventing an empty connection.
+   */
+  const requiresConnection = type === "database" || type === "llm_generate";
 
   const compatible = React.useMemo(() => {
     if (spec.connectionTypes === "none") return [];
@@ -452,6 +490,10 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   );
   const operation = React.useMemo(() => operationById(operationId) ?? null, [operationId]);
   const usesCatalogue = operations.length > 0;
+  /* A channel webhook's URL is its credential and the only place it may post —
+     the worker refuses to send it anywhere else — so a hand-written request has
+     nothing to offer and is not shown. */
+  const webhookConnection = selectedConnection?.authType === "webhook_url";
 
   /** The binding in force for a parameter: the operator's choice, else the catalogue's. */
   const bindingOf = React.useCallback(
@@ -462,11 +504,62 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   /* Switching connection invalidates an operation belonging to the previous
      provider — a Slack operation on a Gmail connection would post a request
      Gmail has never heard of. */
+  const pendingOperation = React.useRef<string | null>(null);
   React.useEffect(() => {
-    setOperationId(null);
+    setOperationId(pendingOperation.current ?? (presetHttpSpec ? CUSTOM_REQUEST : null));
+    pendingOperation.current = null;
     setOperationValues({});
     setBindings({});
-  }, [connectionId]);
+  }, [connectionId, presetHttpSpec]);
+
+  /* ── Starting from an app ───────────────────────────────────────────────── */
+  const [connectProvider, setConnectProvider] = React.useState<ProviderId | null>(null);
+  /* True while the tool was started from the app picker, which switches the
+     wizard to the short path. Leaving it — a hand-built adapter, an app that is
+     not connected — switches back. */
+  const [fromApp, setFromApp] = React.useState(false);
+  const [moreOptions, setMoreOptions] = React.useState(false);
+  /* The name and description this dialog filled in, so choosing a different
+     operation replaces them — and a name the operator typed is never touched. */
+  const autoName = React.useRef("");
+  const autoDescription = React.useRef("");
+  const latest = React.useRef({ name, description });
+  latest.current = { name, description };
+
+  function chooseApp(connection: contracts.Connection, next: ProviderOperation) {
+    setFromApp(true);
+    setType("http");
+    setValidation(null);
+    if (connection.id === connectionId) {
+      setOperationId(next.id);
+    } else {
+      pendingOperation.current = next.id;
+      setConnectionId(connection.id);
+    }
+    /* Read through refs, not updater functions: an updater with a side effect
+       runs twice under StrictMode, and the second run saw the ref it had just
+       moved and kept the previous app's name. */
+    if (!latest.current.name.trim() || latest.current.name === autoName.current) {
+      autoName.current = `${next.label} (${providerLabel(next.provider)})`;
+      setName(autoName.current);
+    }
+    if (!latest.current.description.trim() || latest.current.description === autoDescription.current) {
+      autoDescription.current = next.description;
+      setDescription(next.description);
+    }
+  }
+
+  /** An app with no connection was picked: the previous app's choice no longer stands. */
+  function clearApp() {
+    setFromApp(false);
+    if (!operation) return;
+    setOperationId(null);
+    setConnectionId(null);
+    if (latest.current.name === autoName.current) setName("");
+    if (latest.current.description === autoDescription.current) setDescription("");
+    autoName.current = "";
+    autoDescription.current = "";
+  }
 
   /* Choosing an operation seeds the request it issues. The method and path are
      the vendor's, not the operator's, so they are set rather than asked for. */
@@ -519,7 +612,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   const trimmedName = name.trim();
   const parsedExtra = parseObject(extraConfig);
-  const parsedInput = parseObject(inputSchema);
+  const customHttp = type === "http" && !operation;
+  const parsedInput = customHttp ? http.inputSchema(httpSpec) : parseObject(inputSchema);
   const parsedOutput = parseObject(outputSchema);
 
   /**
@@ -544,7 +638,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   const config = React.useMemo<Record<string, unknown>>(() => {
     const base: Record<string, unknown> = { ...(parsedExtra ?? {}) };
-    if (type === "http") {
+    if (type === "http" && operation) {
       base.method = method;
       base.url = operation ? operationUrl : url.trim();
       if (operation) {
@@ -552,6 +646,9 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
            months, can say WHICH operation this is rather than reverse-engineering
            it from a URL. */
         base.operationId = operation.id;
+        /* A body whose shape is the vendor's rather than the parameters by
+           name — a Teams Adaptive Card. Filled at any depth by the worker. */
+        if (operation.bodyTemplate) base.body = operation.bodyTemplate;
         /* Parameters bound at registration. Not secrets — those are refused by
            `validateConfigJsonNotContainsSecrets` and live on the connection. */
         const bound: Record<string, string> = {};
@@ -589,8 +686,19 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
   const timeoutValue = Number(timeoutMs);
   const timeoutValid = Number.isInteger(timeoutValue) && timeoutValue > 0;
 
-  const stepErrors: (string | null)[] = [
-    !trimmedName ? "Give the tool a name — it is what an agent grant refers to." : null,
+  const appMode = fromApp && type === "http";
+  const steps = appMode ? APP_STEPS : STEPS;
+  const stepId = steps[Math.min(step, steps.length - 1)]!.id;
+  const nameError = !trimmedName ? "Give the tool a name — it is what an agent grant refers to." : null;
+
+  const appStepErrors: (string | null)[] = [
+    !operation ? "Pick an app and what the tool does there." : null,
+    nameError ?? (operation ? missingBoundParam(operation, operationValues, bindingOf) : null),
+    !timeoutValid ? "Timeout must be a whole number of milliseconds above zero." : null,
+  ];
+
+  const longStepErrors: (string | null)[] = [
+    nameError,
     requiresConnection && !connectionId
       ? `A ${spec.label.toLowerCase()} tool runs as a connection. Pick one, or the API will refuse the create.`
       : null,
@@ -598,8 +706,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       ? "Pick what this tool does. Every option is one call to the connected account."
       : type === "http" && operation
         ? missingBoundParam(operation, operationValues, bindingOf)
-        : type === "http" && !validUrl(url)
-          ? "Enter the full endpoint URL, including https://."
+        : type === "http" && http.specProblems(httpSpec).length > 0
+          ? http.specProblems(httpSpec)[0]!
       : type === "database" && !handWritten && generated.problem
         ? generated.problem
         : type === "database" && !sqlTemplate.trim()
@@ -618,6 +726,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     !timeoutValid ? "Timeout must be a whole number of milliseconds above zero." : null,
     null,
   ];
+  const stepErrors = appMode ? appStepErrors : longStepErrors;
 
   /**
    * The furthest step the operator may jump to: the first one carrying an error,
@@ -628,9 +737,11 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
    * submits a body the API rejects.
    */
   const firstBroken = stepErrors.findIndex((entry) => entry !== null);
-  const reachableIndex = firstBroken === -1 ? STEPS.length - 1 : firstBroken;
+  const reachableIndex = firstBroken === -1 ? steps.length - 1 : firstBroken;
 
-  const complete = reachableIndex === STEPS.length - 1;
+  const complete = firstBroken === -1;
+  const validationKey = JSON.stringify({ type, connectionId, config, httpSpec, inputSchema, outputSchema });
+  React.useEffect(() => { setValidation(null); }, [validationKey]);
 
   /* ── Validate against the API, without writing ──────────────────────────── */
   async function validate() {
@@ -638,7 +749,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     setValidation(null);
     try {
       const result = await api.tools.testDraft(
-        { type, connectionId, config, inputSchema: parsedInput ?? {}, outputSchema: parsedOutput ?? {} },
+        { type, connectionId, config, ...(type === "http" && !operation ? { httpSpec } : {}), inputSchema: parsedInput ?? {}, outputSchema: parsedOutput ?? {} },
         { workspaceId: scope.workspaceId, environmentId: null },
       );
       setValidation({ valid: result.valid, message: result.message });
@@ -662,6 +773,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
           type,
           connectionId,
           config,
+          ...(type === "http" && !operation ? { httpSpec } : {}),
           inputSchema: parsedInput ?? {},
           outputSchema: parsedOutput ?? {},
           riskLevel: risk,
@@ -689,7 +801,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
     // Deferred so the exit animation does not play against a blanked form.
     const timer = window.setTimeout(() => {
       setStep(0);
-      setName(""); setDescription(""); setType("http"); setConnectionId(null);
+      setName(""); setDescription(""); setType("http"); setConnectionId(null); setHttpSpec(http.emptySpec());
       setMethod("GET"); setUrl(""); setSqlTemplate(""); setWrites(false);
       setExtraConfig("{}"); setInputSchema(EMPTY_SCHEMA); setOutputSchema(EMPTY_SCHEMA);
       setBuilder(EMPTY_BUILDER); setHandWritten(false);
@@ -697,6 +809,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
       setRisk("low"); setRequiresApproval(false); setApprovalTouched(false);
       setTimeoutMs("10000"); setIdempotency("input_hash"); setLifecycle("active");
       setValidation(null);
+      autoName.current = ""; autoDescription.current = ""; pendingOperation.current = null;
+      setFromApp(false); setMoreOptions(false);
       create.reset();
     }, 200);
     return () => window.clearTimeout(timer);
@@ -705,19 +819,33 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
 
   /* Changing the adapter invalidates a connection chosen for the old one. */
   function chooseType(next: ToolType) {
+    setFromApp(false);
     setType(next);
     setConnectionId(null);
     setValidation(null);
   }
 
-  const railSteps: ModalStep[] = STEPS.map((entry, index) => ({
+  const fixedValues: Record<string, string> = {};
+  for (const param of operation?.params ?? []) {
+    const value = operationValues[param.name]?.trim();
+    if (bindingOf(param) === "config" && value) fixedValues[param.name] = value;
+  }
+  const appLabel = selectedConnection ? providerDisplayName(selectedConnection) : "the app";
+
+  const railSteps: ModalStep[] = appMode ? APP_STEPS.map((entry, index) => ({
+    ...entry,
+    value:
+      index === 0 ? (operation ? `${operation.label} (${appLabel})` : undefined)
+        : index === 1 ? (trimmedName || undefined)
+          : undefined,
+  })) : STEPS.map((entry, index) => ({
     ...entry,
     value:
       index === 0 ? (trimmedName || undefined)
         : index === 1 ? (connectionId ? connections.find((c) => c.id === connectionId)?.name : requiresConnection ? undefined : "None needed")
           : index === 2
         ? (operation ? operation.label
-          : type === "http" ? `${method} endpoint`
+          : type === "http" ? `${http.method(httpSpec)} endpoint`
             : type === "database" ? "SQL template" : undefined)
             : index === 3 ? `${RISK_TIERS.find((tier) => tier.value === risk)?.label} risk${requiresApproval ? " · gated" : ""}`
               : undefined,
@@ -750,8 +878,21 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
         }
       >
         <ModalBody ref={bodyRef}>
-          {step === 0 ? (
+          {stepId === "capability" || stepId === "app" ? (
             <div className="grid gap-4">
+              <ToolAppPicker
+                connections={connections}
+                connectionId={type === "http" && operation ? connectionId : null}
+                operationId={type === "http" ? operationId : null}
+                onChoose={chooseApp}
+                onClear={clearApp}
+                onConnect={setConnectProvider}
+              />
+
+              {!appMode ? (
+              <>
+              <ModalDivider />
+
               <ModalSection
                 title="Identity"
                 description="The name is what appears in an agent's grant list and in every audit line."
@@ -796,23 +937,29 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                   />
                 </Field>
               </ModalSection>
+              </>
+              ) : null}
 
               <ModalDivider />
 
               <ModalSection
-                title="Adapter"
-                description="How the engine executes it. This cannot be changed after registration."
+                title="Or build your own"
+                description="For any other API or a database. How the engine executes it cannot be changed after registration."
               >
                 <OptionCards
                   label="Adapter type"
                   columns={3}
-                  value={type}
+                  /* An app chosen above is an HTTP tool underneath, but showing
+                     "HTTP API" as selected beside it reads as two choices. */
+                  value={type === "http" && operation ? null : type}
                   onValueChange={(value) => chooseType(value as ToolType)}
                   options={TOOL_TYPES.map((entry) => ({
                     value: entry.value,
                     label: entry.label,
                     description: entry.description,
                     icon: entry.icon,
+                    disabled: Boolean(entry.unavailable),
+                    disabledReason: entry.unavailable,
                     badge:
                       entry.connectionTypes !== "none" && entry.connectionTypes !== "any" ? (
                         <Text variant="caption" tone="muted">
@@ -825,7 +972,44 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
             </div>
           ) : null}
 
-          {step === 1 ? (
+          {stepId === "details" && operation ? (
+            <div className="grid gap-4">
+              <ModalSection title="Name" description="How this tool appears when you give it to an agent or add it to a workflow.">
+                <Field label="Tool name" labelHidden required>
+                  <Input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder="Post daily code review"
+                    maxLength={255}
+                    autoComplete="off"
+                  />
+                </Field>
+              </ModalSection>
+
+              <ModalDivider />
+
+              <OperationParams
+                operation={operation}
+                values={operationValues}
+                onValue={(paramName, value) =>
+                  setOperationValues((current) => ({ ...current, [paramName]: value }))
+                }
+                bindings={bindings}
+                onBinding={(paramName, binding) =>
+                  setBindings((current) => ({ ...current, [paramName]: binding }))
+                }
+              />
+
+              {webhookConnection ? (
+                <ModalNote title={`Posts to the channel ${selectedConnection?.name ?? "this connection"} was set up for`}>
+                  A {appLabel} webhook belongs to one channel. To post somewhere else, connect that
+                  channel as another {appLabel} connection.
+                </ModalNote>
+              ) : null}
+            </div>
+          ) : null}
+
+          {stepId === "connection" ? (
             <div className="grid gap-4">
               <ModalSection
                 title="Connection"
@@ -834,10 +1018,23 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                     ? `A ${spec.label.toLowerCase()} tool executes as a stored credential. Only ${
                         spec.connectionTypes === "any" ? "workspace" : (spec.connectionTypes as string[])[0]
                       } connections are compatible.`
-                    : "This adapter runs inside the worker and needs no external credential."
+                    : type === "http"
+                      ? "Optional. Pick one to inherit its base URL, its credential and its allowed hosts — or leave it as None for a public endpoint the tool calls on its own."
+                      : "This adapter runs inside the worker and needs no external credential."
                 }
               >
-                {requiresConnection || spec.connectionTypes === "any" ? (
+                {/*
+                  CAN take one, not MUST take one.
+
+                  This read `requiresConnection || connectionTypes === "any"`,
+                  which was correct while http required a connection and became
+                  wrong the moment it stopped: an HTTP tool then fell to the
+                  "no connection required" branch and the picker disappeared
+                  altogether — so a Slack connection, sitting right there in the
+                  registry, could not be attached to a tool at all. Optional and
+                  unofferable are not the same thing.
+                */}
+                {spec.connectionTypes !== "none" ? (
                   <ConnectionPicker
                     label="Connection"
                     connections={compatible}
@@ -860,7 +1057,11 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                       );
                     }}
                     allowNone={!requiresConnection}
-                    noneDescription="Run without credentials."
+                    noneDescription={
+                      type === "http"
+                        ? "Call a public endpoint. No credential, no private egress, no host widening."
+                        : "Run without credentials."
+                    }
                     emptyTitle={`No compatible ${spec.label.toLowerCase()} connection`}
                     emptyBody={
                       <>
@@ -882,16 +1083,22 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                   Secrets live on the connection and are referenced by id. A tool config containing a
                   key is rejected by the API, so rotating a credential never means editing a tool.
                 </ModalNote>
+              ) : type === "http" && !connectionId ? (
+                <ModalNote title="Without a connection this tool is public-only">
+                  It reaches exactly what anyone on the internet can reach: no credential is sent,
+                  private and link-local addresses are refused, and it cannot be widened to an
+                  internal host. Attach a connection later if any of that changes.
+                </ModalNote>
               ) : null}
             </div>
           ) : null}
 
-          {step === 2 ? (
+          {stepId === "contract" ? (
             <div className="grid gap-4">
               {type === "http" && usesCatalogue ? (
                 <ModalSection
                   title="What this tool does"
-                  description={`One call to the connected ${selectedConnection?.provider ?? "account"}. Everything below is the request Vectorbea will issue — you are choosing the capability, not writing the endpoint.`}
+                  description={`One call to the connected ${selectedConnection ? providerDisplayName(selectedConnection) : "account"}. Everything below is the request Vectorbea will issue — you are choosing the capability, not writing the endpoint.`}
                 >
                   <OptionCards
                     label="Operation"
@@ -917,12 +1124,12 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                           <Text variant="caption" tone="disabled">reads</Text>
                         ),
                       })),
-                      {
+                      ...(webhookConnection ? [] : [{
                         value: CUSTOM_REQUEST,
                         label: "Custom request",
                         description:
                           "Write the method and URL by hand. The catalogue covers the common calls, not every call the API has.",
-                      },
+                      }]),
                     ]}
                   />
                 </ModalSection>
@@ -944,43 +1151,18 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                   />
                   <ModalNote title="The request this becomes">
                     <span className="font-code text-mono-sm break-all">
-                      {method} {operationUrl}
+                      {method} {webhookConnection && !operationUrl ? "the channel's webhook URL" : operationUrl}
                     </span>
                   </ModalNote>
                 </>
               ) : null}
 
               {type === "http" && (!usesCatalogue || operationId === CUSTOM_REQUEST) ? (
-                <ModalSection title="Endpoint" description="The request the adapter issues on every call.">
-                  <div className="grid gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
-                    <Field label="Method" required>
-                      <Select
-                        value={method}
-                        onValueChange={setMethod}
-                        options={HTTP_METHODS.map((verb) => ({ value: verb, label: verb }))}
-                      />
-                    </Field>
-                    <Field
-                      label="URL"
-                      required
-                      description="Template placeholders like {customerId} are bound from the input schema."
-                      error={url.trim() !== "" && !validUrl(url) ? "That is not a valid http or https URL." : undefined}
-                    >
-                      <Input
-                        mono
-                        value={url}
-                        onChange={(event) => setUrl(event.target.value)}
-                        placeholder="https://api.example.com/customers/{customerId}"
-                        spellCheck={false}
-                      />
-                    </Field>
-                  </div>
-                  {method !== "GET" ? (
-                    <ModalNote tone="warning" title={`${method} is a write`}>
-                      Consider a risk tier of high or above so the approval gate is on by default.
-                    </ModalNote>
-                  ) : null}
-                </ModalSection>
+                <HttpSpecEditor
+                  value={httpSpec}
+                  onChange={setHttpSpec}
+                  connectionBaseUrl={String(selectedConnection?.config?.baseUrl ?? selectedConnection?.config?.url ?? "")}
+                />
               ) : null}
 
               {type === "database" ? (
@@ -1039,6 +1221,8 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 </>
               ) : null}
 
+              {operation ? null : (
+              <>
               <ModalSection
                 title={type === "http" || type === "database" ? "Additional configuration" : "Configuration"}
                 description="Merged into the stored config. Credentials are rejected — they belong on the connection."
@@ -1068,13 +1252,13 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 }
               >
                 <div className="grid gap-3 lg:grid-cols-2">
-                  <Field label="Input schema">
+                  <Field label="Input schema" description={customHttp ? "Generated from the HTTP inputs above. Bound values are excluded." : undefined}>
                     <CodeEditor
-                      value={inputSchema}
+                      value={customHttp ? JSON.stringify(parsedInput, null, 2) : inputSchema}
                       onValueChange={setInputSchema}
                       minRows={8}
                       aria-label="Input schema"
-                      disabled={schemasAreGenerated}
+                      disabled={schemasAreGenerated || customHttp}
                     />
                   </Field>
                   <Field label="Output schema">
@@ -1088,10 +1272,12 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                   </Field>
                 </div>
               </ModalSection>
+              </>
+              )}
             </div>
           ) : null}
 
-          {step === 3 ? (
+          {stepId === "policy" ? (
             <div className="grid gap-4">
               <ModalSection
                 title="Risk tier"
@@ -1161,7 +1347,95 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
             </div>
           ) : null}
 
-          {step === 4 ? (
+          {stepId === "review" && appMode && operation ? (
+            <div className="grid gap-4">
+              <ModalSection title="Your tool">
+                <SummaryList>
+                  <SummaryRow label="Name" onEdit={() => setStep(1)}>{trimmedName}</SummaryRow>
+                  <SummaryRow label="Does" onEdit={() => setStep(0)}>{`${operation.label} in ${appLabel}`}</SummaryRow>
+                  <SummaryRow label="Runs as" onEdit={() => setStep(0)}>{selectedConnection?.name ?? "—"}</SummaryRow>
+                  {operation.params.filter((param) => bindingOf(param) === "config").map((param) => (
+                    <SummaryRow key={param.name} label={param.label} onEdit={() => setStep(1)}>
+                      {fixedValues[param.name] ?? "Not set"}
+                    </SummaryRow>
+                  ))}
+                  {operation.params.some((param) => bindingOf(param) === "input") ? (
+                    <SummaryRow label="Each run fills in" onEdit={() => setStep(1)}>
+                      {operation.params.filter((param) => bindingOf(param) === "input").map((param) => param.label).join(", ")}
+                    </SummaryRow>
+                  ) : null}
+                </SummaryList>
+              </ModalSection>
+
+              {operation.sendsTestMessage ? (
+                <ToolTestMessage
+                  connectionId={connectionId}
+                  operation={operation}
+                  fixedValues={fixedValues}
+                  bindingOf={bindingOf}
+                  toolName={trimmedName}
+                  appLabel={appLabel}
+                />
+              ) : null}
+
+              <ModalSection title="Approval">
+                <Checkbox
+                  checked={requiresApproval}
+                  onCheckedChange={(value) => { setApprovalTouched(true); setRequiresApproval(value === true); }}
+                  description={operation.writes
+                    ? "A run pauses before each call until someone approves it. Leave off for a scheduled job that should run unattended."
+                    : "A run pauses before each call until someone approves it."}
+                >
+                  Ask a person to approve each time
+                </Checkbox>
+                <div>
+                  <Button size="xs" variant="ghost" onClick={() => setMoreOptions((current) => !current)} aria-expanded={moreOptions}>
+                    {moreOptions ? "Hide more options" : "More options"}
+                  </Button>
+                </div>
+                {moreOptions ? (
+                  <div className="grid gap-3">
+                    <Field label="Risk" description={RISK_TIERS.find((tier) => tier.value === risk)?.blurb}>
+                      <Segmented
+                        label="Risk tier"
+                        value={risk}
+                        onValueChange={(value) => setRisk(value as RiskLevel)}
+                        options={RISK_TIERS.map(({ value, label, markerClassName }) => ({ value, label, markerClassName }))}
+                      />
+                    </Field>
+                    <Field
+                      label="Timeout"
+                      description="Milliseconds. A call that takes longer is abandoned."
+                      error={!timeoutValid ? "Must be a whole number above zero." : undefined}
+                    >
+                      <Input
+                        mono
+                        type="number"
+                        min={1}
+                        step={100}
+                        value={timeoutMs}
+                        onChange={(event) => setTimeoutMs(event.target.value)}
+                        suffix={<Text variant="caption" tone="muted">ms</Text>}
+                      />
+                    </Field>
+                  </div>
+                ) : null}
+              </ModalSection>
+
+              {create.error ? (
+                <ModalNote tone="danger" title="The tool was not registered">
+                  {create.error.message}
+                  {create.error.requestId ? (
+                    <span className="mt-1 flex items-center gap-1.5">
+                      Request <MonoId value={create.error.requestId} head={8} tail={4} />
+                    </span>
+                  ) : null}
+                </ModalNote>
+              ) : null}
+            </div>
+          ) : null}
+
+          {stepId === "review" && !appMode ? (
             <div className="grid gap-4">
               <ModalSection title="What will be registered">
                 <SummaryList>
@@ -1174,7 +1448,9 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                   </SummaryRow>
                   {type === "http" ? (
                     <SummaryRow label="Endpoint" mono onEdit={() => setStep(2)}>
-                      {method} {url.trim()}
+                      {operation
+                        ? `${method} ${webhookConnection && !operationUrl ? "the channel's webhook URL" : operationUrl}`
+                        : http.requestSummary(httpSpec)}
                     </SummaryRow>
                   ) : null}
                   {type === "database" ? (
@@ -1235,6 +1511,17 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 )}
               </ModalSection>
 
+              {operation?.sendsTestMessage ? (
+                <ToolTestMessage
+                  connectionId={connectionId}
+                  operation={operation}
+                  fixedValues={fixedValues}
+                  bindingOf={bindingOf}
+                  toolName={trimmedName}
+                  appLabel={appLabel}
+                />
+              ) : null}
+
               {create.error ? (
                 <ModalNote tone="danger" title="The tool was not registered">
                   {create.error.message}
@@ -1256,7 +1543,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
                 <Icon icon={WarningCircle} size="sm" decorative className="text-status-waiting mt-px" />
                 <Text variant="caption" tone="muted" className="leading-snug">{error}</Text>
               </span>
-            ) : step === STEPS.length - 1 ? (
+            ) : step === steps.length - 1 ? (
               <span className="flex items-center gap-1.5">
                 <Icon icon={CheckCircle} size="sm" decorative className="text-status-success" />
                 <Text variant="caption" tone="muted">Ready to register.</Text>
@@ -1280,7 +1567,7 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
             </Button>
           )}
 
-          {step < STEPS.length - 1 ? (
+          {step < steps.length - 1 ? (
             <Button
               variant="primary"
               size="sm"
@@ -1305,6 +1592,18 @@ export function CreateToolDialog({ open, onOpenChange, onCreated }: CreateToolDi
           )}
         </ModalFooter>
       </ModalLayout>
+
+      <CreateConnectionDialog
+        open={connectProvider !== null}
+        onOpenChange={(next) => { if (!next) setConnectProvider(null); }}
+        presetProvider={connectProvider}
+        onCreated={(connection) => {
+          setConnections((current) => [connection, ...current.filter((c) => c.id !== connection.id)]);
+          const first = operationsFor(connection.provider)[0];
+          if (first) chooseApp(connection, first);
+          setConnectProvider(null);
+        }}
+      />
     </Modal>
   );
 }

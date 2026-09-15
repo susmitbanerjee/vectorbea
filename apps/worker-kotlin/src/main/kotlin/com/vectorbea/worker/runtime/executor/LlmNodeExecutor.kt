@@ -104,6 +104,23 @@ class LlmNodeExecutor(
      * we asked. See [LlmResponse.cacheReadTokens].
      */
     private val promptCacheEnabled: Boolean = PROMPT_CACHE_ENABLED,
+    /**
+     * What a call costs, and whose price says so.
+     *
+     * Defaults to a pricing object with no database, which resolves to the
+     * platform's list price — exactly the pre-V070 behaviour, and what the unit
+     * tests that construct this executor directly want. Production supplies one
+     * backed by a DataSource so a customer's negotiated rate is found.
+     */
+    private val pricing: com.vectorbea.worker.pricing.ModelPricing =
+        com.vectorbea.worker.pricing.ModelPricing(null),
+    /**
+     * Where the prompt and the response of each call are recorded for the Debug tab.
+     * Null records nothing; production passes
+     * [com.vectorbea.worker.events.StepIoCapture.storeFor], which is null unless
+     * TRACE_STEP_IO_ENABLED.
+     */
+    private val callPayloads: com.vectorbea.worker.events.PayloadStore? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -112,6 +129,18 @@ class LlmNodeExecutor(
     companion object {
         const val DEFAULT_TIMEOUT_MS         = 60_000L
         const val DEFAULT_MAX_RESPONSE_BYTES = 1_048_576L // 1 MB
+
+        /**
+         * The wire shapes this executor can speak.
+         *
+         * Three, and deliberately not more: an enterprise gateway that is not
+         * one of these is not a gateway we can talk to, and saying so at
+         * configuration time is better than discovering it inside a run. A
+         * value outside this set falls back to inference rather than being
+         * refused, because a typo in a config field must not take a working
+         * connection down.
+         */
+        val PROTOCOLS = setOf("openai", "anthropic", "gemini")
 
         /**
          * Anthropic prompt caching. Off until measured — see the note on
@@ -219,6 +248,55 @@ class LlmNodeExecutor(
         val temperature = (cfg["temperature"] as? Number)?.toDouble()
         val maxTokens   = (cfg["maxTokens"] as? Number)?.toInt()
         val baseUrl     = resolved.record.configJson["baseUrl"] as? String
+        val protocol    = protocolFor(resolved.record)
+
+        /*
+         * ── THE LLM PATH HAD NO EGRESS CHECK AT ALL ─────────────────────
+         * `HttpNodeExecutor` and `HttpToolResolver` both run `SsrfGuard` over the
+         * URL they are about to call. This executor never did — `baseUrl` came
+         * out of `config_json` and went straight into a request. A workspace
+         * member can write a connection, so a `baseUrl` of
+         * `http://169.254.169.254` reached the cloud metadata service with the
+         * connection's own Authorization header attached.
+         *
+         * It went unnoticed because until now every LLM connection pointed at a
+         * vendor: the field existed for Azure OpenAI and nobody typed anything
+         * else into it. Making customer-hosted gateways a supported thing (V070)
+         * turns that from a field nobody uses into the field the feature is
+         * built on, so the check has to exist before the encouragement does.
+         *
+         * The DEFAULT policy still blocks every private address. A customer whose
+         * gateway is genuinely internal sets `egress_policy = private_allowed`
+         * and names the host, which is one deliberate decision recorded against
+         * the connection — not a side effect of typing a URL.
+         */
+        if (baseUrl != null) {
+            try {
+                com.vectorbea.worker.connector.SsrfGuard.checkUrl(
+                    baseUrl, resolved.record.allowedHosts, resolved.record.egressPolicy)
+            } catch (e: com.vectorbea.worker.connector.UnresolvableHostException) {
+                /*
+                 * Not blocked — unreachable. Letting the request proceed produces
+                 * the provider's own connection error, which names the real
+                 * problem; refusing here would report a DNS outage as a security
+                 * misconfiguration and send the reader to the wrong screen.
+                 *
+                 * Safe by construction: a name with no address reaches nothing,
+                 * so there is no private address to have protected.
+                 */
+                log.warn("[llm] could not resolve the model endpoint for connection {}: {}",
+                    connectionId, e.message)
+            } catch (e: com.vectorbea.worker.connector.SsrfException) {
+                emitEvent(context, node.id, EventType.NODE_FAILED, "failed",
+                    title = "Model endpoint blocked",
+                    summary = e.message?.take(200))
+                return NodeResult.Failed(
+                    "The model endpoint configured on this connection was refused: ${e.message}. " +
+                        "If it is a gateway inside your own network, set the connection's egress " +
+                        "policy to `private_allowed` and list the host.",
+                    retryable = false)
+            }
+        }
 
         emitEvent(context, node.id, EventType.LLM_CALL_STARTED, "running",
             title = "LLM call started",
@@ -277,7 +355,7 @@ class LlmNodeExecutor(
                 tokensIn = response?.tokensIn,
                 tokensOut = response?.tokensOut,
                 latencyMs = System.currentTimeMillis() - startMs,
-                costUsd = response?.let { costUsdFor(it, model, provider) },
+                costUsd = response?.let { costUsdFor(it, model, provider, connectionId) },
                 attemptNumber = context.attemptGroup,
                 callIndex = 0,
                 outcome = outcome,
@@ -438,7 +516,7 @@ class LlmNodeExecutor(
             // alternative is burning the full timeout to rediscover it, once
             // per run, while holding a permit each time.
             circuit?.beforeCall(connectionId)
-            callProvider(provider, model, baseUrl, String(apiKeyChars), messages,
+            callProvider(provider, protocol, model, baseUrl, String(apiKeyChars), messages,
                 temperature, maxTokens, timeoutMs, maxRespBytes, capture, outputSchema,
                 hadLease = lease != null,
                 cachePrefix = cfg[CFG_CACHE_PREFIX] == true)
@@ -546,7 +624,7 @@ class LlmNodeExecutor(
         }
 
         val durationMs = System.currentTimeMillis() - startMs
-        val estimatedCostUsd = costUsdFor(result, model, provider)
+        val estimatedCostUsd = costUsdFor(result, model, provider, connectionId)
         // ---- Verify the citations before anything is returned -----------------
         //
         // Before the output leaves this executor, not after: a fabricated citation
@@ -678,6 +756,10 @@ class LlmNodeExecutor(
                     append("}")
                 },
                 tokensIn = result.tokensIn, tokensOut = result.tokensOut,
+                /* What the model was asked and what it answered, when step I/O
+                   capture is on. Only for a span that exists: no tracer, no record. */
+                inputRef = llmSpan?.let { captureCallText(context, renderPromptText(messages)) },
+                outputRef = llmSpan?.let { captureCallText(context, result.content) },
             )
         }
 
@@ -795,6 +877,8 @@ class LlmNodeExecutor(
 
     private fun callProvider(
         provider: String,
+        /** The wire shape — see [protocolFor]. Usually implied by [provider]. */
+        protocol: String,
         model: String,
         baseUrl: String?,
         apiKey: String,
@@ -819,10 +903,38 @@ class LlmNodeExecutor(
          * OpenAI and Gemini cache without being asked and have nothing to opt into.
          */
         cachePrefix: Boolean,
-    ): LlmResponse = when (provider) {
+    ): LlmResponse = when (protocol) {
         "anthropic" -> callAnthropic(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease, cachePrefix)
         "gemini"    -> callGemini(model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
         else        -> callOpenAiCompatible(provider, model, baseUrl, apiKey, messages, temperature, maxTokens, timeoutMs, maxResponseBytes, capture, outputSchema, hadLease)
+    }
+
+    /**
+     * The wire shape to speak to this connection.
+     *
+     * ── WHY THIS IS NOT JUST `provider` ANY MORE ──────────────────────
+     * They answer different questions, and conflating them worked only while
+     * every connection pointed at the vendor whose name it carried:
+     *
+     *   provider  — WHOSE capacity, credential, breaker and price. A customer's
+     *               gateway is genuinely its own pool of all four.
+     *   protocol  — what the request body looks like.
+     *
+     * An enterprise gateway called `acme-ai` speaking OpenAI's format used to
+     * reach the OpenAI branch by falling off the end of a `when` — right by
+     * accident, and silently wrong the day that default changed.
+     *
+     * Unset infers from the provider, which reproduces the previous behaviour
+     * exactly for every connection that predates V070.
+     */
+    internal fun protocolFor(record: com.vectorbea.worker.connector.ConnectionRecord): String {
+        val declared = (record.configJson["protocol"] as? String)?.lowercase()?.trim()
+        if (declared != null && declared in PROTOCOLS) return declared
+        return when (record.provider.lowercase()) {
+            "anthropic" -> "anthropic"
+            "gemini" -> "gemini"
+            else -> "openai"
+        }
     }
 
     // ── OpenAI-compatible ─────────────────────────────────────────────────────
@@ -843,11 +955,21 @@ class LlmNodeExecutor(
     ): LlmResponse {
         val url = (baseUrl?.trimEnd('/') ?: "https://api.openai.com") + "/v1/chat/completions"
 
+        /* OpenAI's reasoning models (o1, o3, o4-mini, gpt-5…) refuse `max_tokens`
+           and any non-default `temperature` with HTTP 400 before doing anything,
+           so an agent configured with one of them failed on its first call.
+           They take `max_completion_tokens`, which also covers the hidden
+           reasoning tokens — hence the floor, or the reasoning alone uses the
+           allowance and the visible answer comes back empty. */
+        val reasoningModel = isOpenAiReasoningModel(provider, baseUrl, model)
         val body = buildMap<String, Any> {
             put("model", model)
             put("messages", messages)
-            temperature?.let { put("temperature", it) }
-            maxTokens?.let { put("max_tokens", it) }
+            if (!reasoningModel) temperature?.let { put("temperature", it) }
+            maxTokens?.let {
+                if (reasoningModel) put("max_completion_tokens", maxOf(it, REASONING_MIN_COMPLETION_TOKENS))
+                else put("max_tokens", it)
+            }
             // Layer 0. `strict: true` is the whole point - without it json_schema is
             // advisory and the model may still return prose.
             outputSchema?.let { put("response_format", ConstrainedDecoding.openAiResponseFormat(it)) }
@@ -1083,7 +1205,9 @@ class LlmNodeExecutor(
         val result = try {
             WorkerMetrics.timeBlocking {
                 OutboundHttp.send(reqBuilder, totalCallMs = timeoutMs,
-                    maxResponseBytes = maxResponseBytes, httpClient = httpClient)
+                    maxResponseBytes = maxResponseBytes, httpClient = httpClient,
+                    /* Non-streaming: the headers arrive with the finished answer. */
+                    headersTimeoutMs = timeoutMs)
             }
         } catch (e: OutboundHttp.TotalCallTimeoutException) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(timeoutMs, provider, "timeout")
@@ -1149,8 +1273,13 @@ class LlmNodeExecutor(
 
         if (result.statusCode !in 200..299) {
             WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "http_error")
-            // Never log the response body raw — it may echo the request including prompt content
-            throw LlmCallException("LLM API returned HTTP ${result.statusCode}")
+            // Never log the response body raw — it may echo the request including prompt content.
+            // The provider's own error MESSAGE is kept, redacted and capped: "LLM API
+            // returned HTTP 400" alone gave nobody anything to act on, and the message
+            // is where "Unsupported parameter: 'max_tokens'" or "model not found" lives.
+            val detail = providerErrorDetail(result.body)
+            throw LlmCallException(
+                "LLM API returned HTTP ${result.statusCode}" + (detail?.let { ": $it" } ?: ""))
         }
 
         WorkerMetrics.llmCallDurationSeconds.observeMs(result.durationMs, provider, "ok")
@@ -1299,6 +1428,29 @@ class LlmNodeExecutor(
         }
     }
 
+    // ── Call capture ──────────────────────────────────────────────────────────
+
+    /** A payload ref for [text], or null. Never throws: a lost record must not fail the call. */
+    private fun captureCallText(context: RuntimeContext, text: String?): String? {
+        val store = callPayloads ?: return null
+        if (text.isNullOrBlank()) return null
+        return runCatching {
+            store.capture(context.workspaceId, text, com.vectorbea.worker.events.PayloadStore.TEXT)?.ref
+        }.getOrNull()
+    }
+
+    /** The messages as a person reads them: each role as a heading over its text. */
+    private fun renderPromptText(messages: List<Map<String, Any>>): String =
+        messages.joinToString("\n\n") { m ->
+            val role = (m["role"] as? String ?: "message").uppercase()
+            val content = when (val c = m["content"]) {
+                is String -> c
+                null -> ""
+                else -> runCatching { mapper.writeValueAsString(c) }.getOrDefault(c.toString())
+            }
+            "$role:\n$content"
+        }
+
     // ── Message construction ──────────────────────────────────────────────────
 
     private fun buildMessages(
@@ -1381,12 +1533,25 @@ class LlmNodeExecutor(
      * OpenAI and Gemini because the provider folds them in. So each is REPLACED
      * at its own multiplier, never added.
      */
-    private fun costUsdFor(result: LlmResponse, model: String, provider: String): Double? {
+    private fun costUsdFor(
+        result: LlmResponse,
+        model: String,
+        provider: String,
+        connectionId: java.util.UUID?,
+    ): Double? {
         val total = result.tokenCount ?: return null
-        return estimateCostUsd(
-            effectiveBillableTokens(
-                total, result.cacheReadTokens, result.cacheWriteTokens, provider),
-            model)
+        return pricing.costUsd(
+            connectionId = connectionId,
+            provider = provider,
+            model = model,
+            usage = com.vectorbea.worker.pricing.ModelPricing.Usage(
+                totalTokens = total,
+                tokensIn = result.tokensIn,
+                tokensOut = result.tokensOut,
+                cacheReadTokens = result.cacheReadTokens,
+                cacheWriteTokens = result.cacheWriteTokens,
+            ),
+        )
     }
 
     /**
@@ -1405,48 +1570,23 @@ class LlmNodeExecutor(
      * what we believe the total is, and a negative fresh count would flip the
      * sign of the bill.
      */
+    /**
+     * Tokens to bill, with cached input replaced at its own rate.
+     *
+     * Delegates to [com.vectorbea.worker.pricing.ModelPricing], which is now the
+     * one place that answers "what does this cost" — the list table used to live
+     * here as well, and two price tables in two files is how a customer's
+     * dashboard comes to disagree with their invoice. Kept as a method because
+     * it is the seam `PromptCacheTest` exercises, and that test is the reason the
+     * cache arithmetic is right.
+     */
     internal fun effectiveBillableTokens(
         total: Int,
         cacheRead: Int?,
         cacheWrite: Int?,
         provider: String,
-    ): Int {
-        val read  = (cacheRead ?: 0).coerceIn(0, total)
-        val write = (cacheWrite ?: 0).coerceIn(0, total - read)
-        val fresh = (total - read - write).coerceAtLeast(0)
-
-        /* Anthropic publishes 0.1x for a read; OpenAI and Gemini discount a cached
-           prefix by half. Per provider because getting it wrong is a silent 5x on
-           the cached fraction, which on an agent loop is most of the prompt. */
-        val readMultiplier  = if (provider == "anthropic") 0.10 else 0.50
-        /* Anthropic only. The other two neither charge for nor report a write, so
-           `write` is always 0 there and this multiplier never applies. */
-        val writeMultiplier = 1.25
-
-        return (fresh + (read * readMultiplier) + (write * writeMultiplier))
-            .toInt().coerceAtLeast(0)
-    }
-
-    private fun estimateCostUsd(tokens: Int, model: String): Double {
-        val usdPerMillion = when {
-            model.contains("gpt-4o-mini", ignoreCase = true) -> 0.60   // $0.60/M
-            model.contains("gpt-4o",  ignoreCase = true)    -> 5.00   // $5.00/M
-            model.contains("gpt-4.1-mini", ignoreCase = true)-> 0.40
-            model.contains("gpt-4.1", ignoreCase = true)    -> 2.00
-            model.contains("gpt-4",   ignoreCase = true)    -> 30.00  // gpt-4 turbo
-            model.contains("gpt-3.5", ignoreCase = true)    -> 0.50
-            model.contains("claude-3-5-haiku", ignoreCase = true) -> 0.80
-            model.contains("claude-3-5", ignoreCase = true) -> 3.00
-            model.contains("claude-3-haiku", ignoreCase = true) -> 0.25
-            model.contains("claude-3-opus",  ignoreCase = true) -> 15.00
-            model.contains("claude",  ignoreCase = true)    -> 3.00
-            model.contains("gemini-1.5-flash", ignoreCase = true) -> 0.075
-            model.contains("gemini-1.5-pro",   ignoreCase = true) -> 3.50
-            model.contains("gemini",  ignoreCase = true)    -> 1.00
-            else                                             -> 2.00   // safe default
-        }
-        return (tokens / 1_000_000.0) * usdPerMillion
-    }
+    ): Int = com.vectorbea.worker.pricing.ModelPricing
+        .effectiveBillableTokens(total, cacheRead, cacheWrite, provider)
 
     /** A JSON string literal for a span attribute value. Escapes, never truncates. */
     private fun jsonAttr(v: String?): String =
@@ -1561,3 +1701,41 @@ class LlmNodeExecutor(
 }
 
 private class LlmCallException(message: String) : Exception(message)
+
+/** Floor for `max_completion_tokens` on a reasoning model: reasoning spends from the same allowance. */
+internal const val REASONING_MIN_COMPLETION_TOKENS = 8192
+
+private val OPENAI_REASONING_MODEL = Regex("""^(o\d|gpt-5)""")
+
+/** A reasoning model on OpenAI itself. OpenAI-compatible hosts keep the classic parameters. */
+internal fun isOpenAiReasoningModel(provider: String, baseUrl: String?, model: String): Boolean {
+    val onOpenAi = provider.equals("openai", ignoreCase = true) &&
+        (baseUrl.isNullOrBlank() || baseUrl.contains("api.openai.com", ignoreCase = true))
+    return onOpenAi && OPENAI_REASONING_MODEL.containsMatchIn(model.trim().lowercase().substringAfterLast('/'))
+}
+
+/**
+ * The provider's error message from a non-2xx body, safe to put in a run's failure.
+ *
+ * OpenAI, Anthropic and Gemini all nest it at `error.message` (Anthropic and Gemini
+ * add a type or status beside it). Only that field is read — never the body — then
+ * anything credential-shaped is masked and it is capped, because a message can quote
+ * a fragment of the request.
+ */
+internal fun providerErrorDetail(body: String?): String? {
+    if (body.isNullOrBlank()) return null
+    val error = runCatching {
+        (com.fasterxml.jackson.module.kotlin.jacksonObjectMapper().readValue(body, Map::class.java)["error"])
+    }.getOrNull()
+    val message = when (error) {
+        is Map<*, *> -> error["message"] as? String
+        is String -> error
+        else -> null
+    }?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val code = (error as? Map<*, *>)?.let { (it["code"] ?: it["type"] ?: it["status"])?.toString() }
+    return (message.take(300)
+        .replace(Regex("""sk-[A-Za-z0-9_-]+"""), "[REDACTED-KEY]")
+        .replace(Regex("""eyJ[A-Za-z0-9._-]{20,}"""), "[REDACTED-JWT]")
+        .replace(Regex("""[A-Za-z0-9+/]{40,}={0,2}"""), "[REDACTED]")) +
+        (code?.takeIf { it.isNotBlank() && it.length < 60 }?.let { " ($it)" } ?: "")
+}

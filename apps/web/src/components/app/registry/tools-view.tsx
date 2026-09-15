@@ -6,8 +6,10 @@ import { useSearchParamWriter } from "~/lib/url/use-search-param-writer";
 import Link from "next/link";
 import type { Route } from "next";
 import { useWorkspaceRole } from "~/lib/workspace/workspace-provider";
+import { ProviderLogo } from "~/components/ui/provider-logo";
 import { PageContainer, PageHeader } from "~/components/ui/page";
 import { Text } from "~/components/ui/text";
+import { Icon } from "~/components/ui/icon";
 import { Button } from "~/components/ui/button";
 import { DataTable, type DataColumn, type TableStatus } from "~/components/data/table/data-table";
 import { useTablePreferences, useSelection } from "~/components/data/table/table-state";
@@ -23,6 +25,8 @@ import { RegistryRowActions, type RegistryActionHandlers } from "./row-actions";
 import { DestructiveConfirmDialog } from "~/components/ui/destructive-confirm-dialog";
 import { useToolsData } from "./use-registry-data";
 import { CreateToolDialog } from "./create-tool-dialog";
+import { ImportSpecDialog } from "./import-spec-dialog";
+import { PendingChangesButton, ToolChangesDialog } from "./tool-changes-view";
 import { useApi } from "~/lib/api/api-provider";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -54,6 +58,10 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
   /* Creation is URL-synced so `/tools/new` can redirect here and the dialog is
      linkable — "open the register form for me" is a link, not a set of clicks. */
   const creating = params.get("create") === "1";
+  /* Same reason: "import this API document" is a link somebody pastes into a
+     ticket, and the review queue is a place a notification points at. */
+  const importing = params.get("import") === "1";
+  const reviewing = params.get("changes") === "1";
   const detailTab = params.get("tab") ?? "overview";
 
   const sort = React.useMemo(
@@ -97,6 +105,8 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       latency: (t) => t.p95LatencyMs,
       failing: (t) => (t.lastError ? "true" : "false"),
       policy: (t) => (policyFindings(t).length > 0 ? "violation" : "ok"),
+      source: (t) => (t.mcpServerId ? "mcp" : "local"),
+      server: (t) => t.mcpServerName ?? "",
     }, searchText);
     return tools.filter(predicate);
   }, [deferred, searchText, tools]);
@@ -108,6 +118,7 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
       type: (t) => t.type,
       risk: (t) => RISK_ORDER[t.risk],
       connection: (t) => t.connection ?? "",
+      source: (t) => t.mcpServerName ?? "",
       calls: (t) => t.calls30d,
       rate: (t) => t.successRate,
       latency: (t) => t.p95LatencyMs,
@@ -186,6 +197,38 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
     {
       id: "type", header: "Type", width: 116, minWidth: 92, sortValue: (t) => t.type, skeletonWidth: 70,
       cell: (tool) => <Text variant="caption" tone="secondary" className="truncate">{TOOL_TYPE_LABEL[tool.type]}</Text>,
+    },
+    {
+      /*
+       * WHERE it came from. Locally-authored tools show an em dash; a discovered
+       * one shows its server.
+       *
+       * This column is not decoration. `McpDiscovery.syncTools` namespaces a
+       * discovered tool as `mcp-1a2b3c4d.search`, precisely so two servers'
+       * `search` tools stay distinguishable — and a table that shows those names
+       * without saying whose server they are leaves that thought half-finished
+       * and the rows unreadable.
+       */
+      id: "source", header: "Source", width: 148, minWidth: 104,
+      sortValue: (t) => t.mcpServerName ?? "", skeletonWidth: 96,
+      cell: (tool) => (
+        tool.mcpServerId ? (
+          <span className="flex min-w-0 items-center gap-1.5">
+            {/* The vendor, not a generic plug — a registry with forty rows from
+                three servers is read by its marks long before its text. */}
+            <ProviderLogo
+              provider={`${tool.mcpServerName ?? ""} ${tool.mcpToolName ?? ""}`}
+              fallbackLabel={tool.mcpServerName ?? "MCP"}
+              size={13}
+              decorative
+              className="shrink-0"
+            />
+            <Text variant="caption" tone="secondary" className="truncate">{tool.mcpServerName}</Text>
+          </span>
+        ) : (
+          <Text variant="caption" tone="disabled">{EMPTY}</Text>
+        )
+      ),
     },
     {
       /* Risk leads, and it is drawn with bars as well as colour — the tier has
@@ -299,6 +342,7 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
     violations: tools.filter((t) => policyFindings(t).length > 0).length,
     failing: tools.filter((t) => t.lastError !== null).length,
     critical: tools.filter((t) => t.risk === "critical" || t.risk === "high").length,
+    discovered: tools.filter((t) => t.mcpServerId !== null && t.mcpServerId !== undefined).length,
   }), [tools]);
 
   const quickFilters: QuickFilter[] = [
@@ -307,6 +351,12 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
     { id: "failing", label: "Has an error", query: "failing:true", count: counts.failing, tone: "failed" },
     { id: "writes", label: "Database writes", query: "type:db-write" },
     { id: "slow", label: "Over 1s p95", query: "latency:>1000" },
+    /* Only offered once there is something to filter TO. A chip reading "0" for
+       every workspace that has never connected a server is a permanent piece of
+       furniture advertising a feature they are not using. */
+    ...(counts.discovered > 0
+      ? [{ id: "discovered", label: "From MCP servers", query: "source:mcp", count: counts.discovered } as QuickFilter]
+      : []),
   ];
 
   const applyQuery = (query: string) => {
@@ -322,15 +372,31 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         title="Tools"
         description="Every registered tool, riskiest first — what it can do, what it is allowed to do, and how often it works."
         actions={
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!canBuild}
-            title={canBuild ? undefined : "Creating a tool needs the developer role or higher. Ask an owner or admin."}
-            onClick={() => setParams({ create: "1" })}
-          >
-            New tool
-          </Button>
+          <div className="flex items-center gap-2">
+            <PendingChangesButton onOpen={() => setParams({ changes: "1" })} />
+            {/* Import sits BESIDE New tool rather than inside it. Importing a
+                document is how most tools should be registered — the parameters,
+                body encoding, auth and response shape all come out correct —
+                and burying it one level down makes hand-writing the default. */}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!canBuild}
+              title={canBuild ? undefined : "Importing tools needs the developer role or higher. Ask an owner or admin."}
+              onClick={() => setParams({ import: "1" })}
+            >
+              Import from an API document
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!canBuild}
+              title={canBuild ? undefined : "Creating a tool needs the developer role or higher. Ask an owner or admin."}
+              onClick={() => setParams({ create: "1" })}
+            >
+              New tool
+            </Button>
+          </div>
         }
       />
 
@@ -391,6 +457,17 @@ export function ToolsView({ forceState }: { forceState?: TableStatus }) {
         open={creating}
         onOpenChange={(next) => setParams({ create: next ? "1" : null })}
         onCreated={(tool) => setParams({ create: null, tool: tool.id, tab: null })}
+      />
+
+      <ImportSpecDialog
+        open={importing}
+        onOpenChange={(next) => setParams({ import: next ? "1" : null })}
+        onImported={() => void data.refetch?.()}
+      />
+
+      <ToolChangesDialog
+        open={reviewing}
+        onOpenChange={(next) => setParams({ changes: next ? "1" : null })}
       />
 
       <ToolDetail

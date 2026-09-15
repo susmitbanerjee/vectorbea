@@ -67,6 +67,7 @@ export function toUiRun(run: contracts.RunSummary, incident?: contracts.FailureI
     tokens: run.totalTokens ?? 0,
     nodes,
     incidentId: run.incidentId ?? incident?.id,
+    delivery: run.deliveryStatus,
   };
 }
 
@@ -128,6 +129,12 @@ function toStatus(status: contracts.RunStatus): RunStatus {
     case "waiting_for_approval":
     case "awaiting_approval":
     case "paused": return "awaiting-approval";
+    /* Parked on a machine, not a person. Rendering these as "Awaiting approval"
+       would send somebody hunting for an approval queue; rendering them as
+       "Queued" would send them scaling idle workers. */
+    case "waiting_for_event":
+    case "waiting_for_timer":
+    case "yielded": return "waiting";
     case "cancelled":
     case "cancellation_requested":
     case "continued_as_new": return "cancelled";

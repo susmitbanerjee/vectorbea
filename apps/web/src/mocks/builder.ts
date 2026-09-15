@@ -5,6 +5,7 @@ import { CONNECTIONS, TOOLS, AGENTS } from "./fixtures";
 import type { NodeKind } from "./domain";
 import type { BuilderEdge, BuilderGraph } from "~/lib/workflows/builder-graph";
 import type { ProviderId } from "~/components/ui/provider-logo";
+import { customStepTimeoutMs } from "~/lib/workflows/step-timeouts";
 
 /* ══════════════════════════════════════════════════════════════════════════════
    THE BUILDER'S GRAPH MODEL
@@ -190,18 +191,17 @@ export interface NodeChrome {
 }
 
 const DEFAULT_RETRY_ATTEMPTS = 3;
-const DEFAULT_TIMEOUT_MS = 30_000;
 
 /**
  * The chrome badges on a node.
  *
  * Only NON-DEFAULT policies are shown. A canvas that labels every node "3
- * retries, 30s timeout" has labelled nothing — the badge exists to say "this one
+ * retries, 120s timeout" has labelled nothing — the badge exists to say "this one
  * is different", and it can only do that if the ordinary case is silent.
  */
 export function nodeChrome(node: VersionNode, edges: BuilderEdge[], nodes: VersionNode[]): NodeChrome {
   const retry = node.config.retry as { attempts?: number; backoff?: string } | undefined;
-  const timeout = node.config.timeoutMs;
+  const timeout = customStepTimeoutMs(node.kind, node.config.timeoutMs);
 
   const downstream = edges.filter((e) => e.source === node.id).map((e) => e.target);
   const precedesGate = downstream.some(
@@ -212,9 +212,7 @@ export function nodeChrome(node: VersionNode, edges: BuilderEdge[], nodes: Versi
     retry: retry && typeof retry.attempts === "number" && retry.attempts !== DEFAULT_RETRY_ATTEMPTS
       ? `${retry.attempts}×`
       : null,
-    timeout: typeof timeout === "number" && timeout !== DEFAULT_TIMEOUT_MS
-      ? `${Math.round(timeout / 1000)}s`
-      : null,
+    timeout: timeout === null ? null : `${Math.round(timeout / 1000)}s`,
     precedesGate,
     commits: node.kind === "checkpoint",
   };

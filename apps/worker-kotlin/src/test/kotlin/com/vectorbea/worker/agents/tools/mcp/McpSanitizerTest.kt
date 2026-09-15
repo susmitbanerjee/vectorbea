@@ -1,4 +1,5 @@
 package com.vectorbea.worker.agents.tools.mcp
+import com.vectorbea.mcp.McpSanitizer
 
 import com.vectorbea.worker.agents.brain.runtime.AgentSafetyGuard
 import com.vectorbea.worker.agents.brain.runtime.ToolNotAllowedException

@@ -6,6 +6,7 @@ import { Text } from "~/components/ui/text";
 import {
   layout,
   joinGroups,
+  type ActivationSkill,
   type Constellation,
   type ConstellationEdge,
   type PlacedEdge,
@@ -52,6 +53,7 @@ const STATUS_FILL: Record<string, string> = {
   running: "fill-status-live/20 stroke-status-live",
   waiting_for_approval: "fill-status-waiting/20 stroke-status-waiting",
   waiting_for_child: "fill-status-waiting/20 stroke-status-waiting",
+  waiting_for_event: "fill-status-waiting/20 stroke-status-waiting",
   /*
    * HANDED OFF IS ITS OWN STATE, and deliberately neither green nor red.
    *
@@ -63,9 +65,9 @@ const STATUS_FILL: Record<string, string> = {
    * allowed near status, because the point is that there is no status.
    */
   handed_off: "fill-brand/10 stroke-brand",
-  cancelled: "fill-surface-raised stroke-border-subtle",
-  superseded: "fill-surface-raised stroke-border-subtle",
-  pending: "fill-surface-raised stroke-border-subtle",
+  cancelled: "fill-surface-raised stroke-fg-disabled",
+  superseded: "fill-surface-raised stroke-fg-disabled",
+  pending: "fill-surface-raised stroke-fg-disabled",
 };
 
 /** `handed_off` is neither success nor failure, and the legend says so. */
@@ -75,6 +77,10 @@ const STATUS_LABEL: Record<string, string> = {
   running: "Running",
   waiting_for_approval: "Waiting for a person",
   waiting_for_child: "Waiting on its children",
+  /* Named for what it is waiting on, not just that it is waiting. "Waiting" on
+     its own tells an operator nothing they can act on; this says the run is
+     fine and the answer is coming from somewhere else. */
+  waiting_for_event: "Waiting for an external event",
   handed_off: "Handed off — neither success nor failure",
   cancelled: "Cancelled",
   superseded: "Superseded",
@@ -82,10 +88,10 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const KIND_STYLE: Record<string, string> = {
-  DELEGATE: "stroke-border-strong",
+  DELEGATE: "stroke-fg-muted",
   TRANSFER: "stroke-brand",
   BROADCAST: "stroke-status-live",
-  RETURN: "stroke-border-subtle",
+  RETURN: "stroke-fg-disabled",
   ESCALATE: "stroke-status-waiting",
 };
 
@@ -93,17 +99,34 @@ export function AgentsView({
   constellation,
   onSelectActivation,
   selectedActivationId,
+  renderNodeDetail,
   className,
 }: {
   constellation: Constellation;
   onSelectActivation?: (activationId: string) => void;
   selectedActivationId?: string | null;
+  /** What the selected agent received and returned. Without it, selecting only highlights. */
+  renderNodeDetail?: (node: PlacedNode) => React.ReactNode;
   className?: string;
 }) {
   const l = React.useMemo(() => layout(constellation), [constellation]);
   const groups = React.useMemo(() => joinGroups(constellation.edges), [constellation.edges]);
   const [hovered, setHovered] = React.useState<PlacedEdge | null>(null);
+  const [picked, setPicked] = React.useState<string | null>(null);
   const guard = constellation.loopGuard;
+
+  /* Opens on the agent most worth reading — the failure, else the first — so the
+     panel under the graph has an answer before anyone clicks. */
+  const selectedId = selectedActivationId ?? picked
+    ?? l.nodes.find((n) => n.isRootCause)?.id
+    ?? l.nodes.find((n) => n.status === "failed")?.id
+    ?? l.nodes[0]?.id
+    ?? null;
+  const selectedNode = l.nodes.find((n) => n.id === selectedId) ?? null;
+  const select = (id: string) => {
+    setPicked(id);
+    onSelectActivation?.(id);
+  };
 
   /*
    * ── THE PATH THAT ENDED IN THE FAILURE ──────────────────────────────────
@@ -147,16 +170,6 @@ export function AgentsView({
 
   const blocked = l.nodes.filter((n) => n.blocked);
 
-  /*
-   * Say what is NOT in the picture, and only when something is missing.
-   *
-   * A derived single-agent run is complete — one agent, no handoffs to draw,
-   * nothing to warn about, so nothing is said. With two or more derived nodes
-   * the edges between them genuinely were not recorded, and silence would let a
-   * reader conclude the agents never handed off to each other.
-   */
-  const missingEdges = constellation.derived === true && l.nodes.length > 1;
-
   return (
     <div className={cn("grid gap-3", className)}>
       {/*
@@ -166,20 +179,6 @@ export function AgentsView({
         common "why is nothing happening" question, and burying the answer inside
         a node somebody has to find first is how it stays unanswered. It leads.
       */}
-      {missingEdges ? (
-        <div className="rounded-lg border border-subtle bg-surface-raised p-3">
-          <Text variant="label" tone="secondary" className="block">
-            Handoffs are not shown for this run
-          </Text>
-          <Text variant="body-sm" tone="secondary" className="mt-1 block max-w-[70ch]">
-            Each agent below is drawn from its own step record, which is complete
-            — the timings and the cost are what the run actually spent. What was
-            not recorded is which agent handed to which, so the connections
-            between them are absent rather than empty.
-          </Text>
-        </div>
-      ) : null}
-
       {blocked.length > 0 ? (
         <div className="rounded-lg border border-subtle bg-surface-raised p-3">
           <Text variant="label" tone="secondary" className="block">
@@ -195,6 +194,22 @@ export function AgentsView({
           </ul>
         </div>
       ) : null}
+
+      {/*
+        WHICH SKILLS EACH AGENT WAS WORKING WITH.
+
+        ── WHY THIS IS A PANEL AND NOT A TOOLTIP ────────────────────────────
+        A skill changes how an agent behaves, so "why did this agent do that"
+        and "which skills did it have" are the same question — and a tooltip is
+        the wrong place for an answer somebody needs to read next to the output.
+        A granted skill is also not the same as an ACTIVE one: it can be dropped
+        because the budget ran out or because the tool it needs was revoked, and
+        both cases produce an agent that looks like it ignored its instructions.
+
+        So every activation that composed anything gets a row, and the rows that
+        lost something say so first.
+      */}
+      <SkillsPanel nodes={l.nodes} />
 
       {/* The cycles, with the guard that is supposed to catch them. */}
       {l.loops.length > 0 ? (
@@ -233,6 +248,10 @@ export function AgentsView({
         </div>
       ) : null}
 
+      {renderNodeDetail && l.nodes.length > 1 ? (
+        <Text variant="caption" tone="secondary">Select an agent to see what it received and returned.</Text>
+      ) : null}
+
       <div className="overflow-auto rounded-lg border border-subtle bg-surface-raised">
         <svg
           width={l.width}
@@ -269,6 +288,13 @@ export function AgentsView({
             );
           })}
 
+          {/* Run order between agent steps. Plain arrows with no label: these are
+              "ran next", not recorded handoffs, so they claim nothing more. */}
+          {l.sequence.map((q) => (
+            <line key={`seq-${q.from}-${q.to}`} x1={q.x1} y1={q.y1} x2={q.x2} y2={q.y2}
+                  markerEnd="url(#cst-arrow)" strokeWidth={1.5} className="stroke-fg-muted" />
+          ))}
+
           {l.edges.map((e) => (
             <g key={e.id}
                onMouseEnter={() => setHovered(e)}
@@ -278,7 +304,7 @@ export function AgentsView({
                 markerEnd="url(#cst-arrow)"
                 strokeWidth={e.cyclic ? 2.5 : pathEdge(e) ? 2.5 : 1.5}
                 strokeDasharray={e.cyclic ? "6 4" : undefined}
-                className={cn(KIND_STYLE[e.kind] ?? "stroke-border-strong",
+                className={cn(KIND_STYLE[e.kind] ?? "stroke-fg-muted",
                   e.cyclic && "stroke-status-waiting",
                   pathEdge(e) && "stroke-status-failed")}
               />
@@ -352,7 +378,7 @@ export function AgentsView({
           {l.nodes.map((n) => (
             <g key={n.id}
                className="cursor-pointer"
-               onClick={() => onSelectActivation?.(n.id)}
+               onClick={() => select(n.id)}
                tabIndex={0}
                role="button"
                aria-label={
@@ -364,7 +390,7 @@ export function AgentsView({
                onKeyDown={(ev) => {
                  if (ev.key === "Enter" || ev.key === " ") {
                    ev.preventDefault();
-                   onSelectActivation?.(n.id);
+                   select(n.id);
                  }
                }}>
               {/* THE ROOT-CAUSE RING, outside the node so it reads as a mark ON
@@ -375,10 +401,10 @@ export function AgentsView({
               ) : null}
               <circle
                 cx={n.x} cy={n.y} r={n.r}
-                strokeWidth={selectedActivationId === n.id ? 3 : 1.5}
+                strokeWidth={selectedId === n.id ? 3 : 1.5}
                 strokeDasharray={n.blocked ? "4 3" : undefined}
                 className={cn(
-                  STATUS_FILL[n.status] ?? "fill-surface-raised stroke-border-subtle",
+                  STATUS_FILL[n.status] ?? "fill-surface-raised stroke-fg-disabled",
                   n.blocked && "opacity-50",
                 )}
               />
@@ -394,7 +420,10 @@ export function AgentsView({
                 {`${n.agentName} — ${STATUS_LABEL[n.status] ?? n.status}\n` +
                  `${n.tokens.toLocaleString()} tokens · ${n.iterations} iteration(s)` +
                  (n.blockedReason ? `\n${n.blockedReason}` : "") +
-                 (n.stopReason ? `\nStopped: ${n.stopReason}` : "")}
+                 (n.stopReason ? `\nStopped: ${n.stopReason}` : "") +
+                 (activeSkills(n).length > 0
+                   ? `\nSkills: ${activeSkills(n).map(skillLabel).join(", ")}`
+                   : "")}
               </title>
             </g>
           ))}
@@ -409,13 +438,139 @@ export function AgentsView({
         child misunderstood or the request was wrong. Both arrive with the graph,
         so this is instant rather than a request per hover.
       */}
-      {hovered ? <EdgeDetail edge={hovered} /> : (
-        <Text variant="caption" tone="secondary">
-          Hover a handoff to see the contract sent and the output returned.
-        </Text>
-      )}
+      {hovered ? <EdgeDetail edge={hovered} />
+        : renderNodeDetail && selectedNode ? renderNodeDetail(selectedNode)
+          : l.edges.length > 0 ? (
+            <Text variant="caption" tone="secondary">
+              Hover a handoff to see the contract sent and the output returned.
+            </Text>
+          ) : null}
     </div>
   );
+}
+
+/**
+ * The skills each activation actually ran with.
+ *
+ * ── THE LIST IS OF WHAT WAS COMPOSED, NOT OF WHAT WAS GRANTED ──────────────
+ * Those differ in two ways that both produce the same symptom — an agent that
+ * appears to have ignored its instructions — and neither is visible anywhere
+ * else:
+ *
+ *   · the prompt budget ran out, so a skill was cut short or left out entirely;
+ *   · a tool the skill requires was revoked after the grant was saved, so the
+ *     loader dropped the skill rather than teach the agent to call something
+ *     the runtime would refuse.
+ *
+ * Both are stated here, first, and in the agent's own row. A reader who has
+ * just looked at a disappointing output should not have to go and diff a grant
+ * table to find out the agent never saw half of it.
+ *
+ * The VERSION is on every chip because an unpinned grant follows the skill's
+ * current version — so "which text did this run see" is only answerable with a
+ * number beside the name.
+ */
+function SkillsPanel({ nodes }: { nodes: PlacedNode[] }) {
+  const withSkills = nodes.filter((n) => (n.skills?.length ?? 0) > 0);
+  /* Nothing composed: either the feature is off or no agent here holds a skill.
+     Both are correctly silent — a panel explaining that a feature flag is off
+     tells a person reading their own run about our deployment configuration. */
+  if (withSkills.length === 0) return null;
+
+  const degraded = withSkills.filter((n) =>
+    (n.skills ?? []).some((s) => !s.included || s.truncated),
+  );
+
+  return (
+    <div className="rounded-lg border border-subtle bg-surface-raised p-3">
+      <div className="flex flex-wrap items-baseline gap-x-2">
+        <Text variant="label" tone="secondary">Skills in play</Text>
+        {degraded.length > 0 ? (
+          <Text variant="caption" tone="secondary">
+            {degraded.length} agent{degraded.length === 1 ? "" : "s"} did not receive
+            every skill granted to {degraded.length === 1 ? "it" : "them"}
+          </Text>
+        ) : null}
+      </div>
+
+      <ul className="mt-2 grid gap-2">
+        {withSkills.map((n) => (
+          <li key={n.id} className="grid gap-1">
+            <Text variant="body-sm" tone="max">{n.agentName}</Text>
+            <div className="flex flex-wrap gap-1.5">
+              {(n.skills ?? []).map((s) => (
+                <SkillChip key={`${s.slug}-${s.version}`} skill={s} />
+              ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * One skill, and what the budget did to it.
+ *
+ * Three states, and they are deliberately not three shades of the same colour:
+ *
+ *   · composed whole — quiet. The ordinary case should not compete for
+ *     attention with the two that need it.
+ *   · cut short — the waiting ramp. The agent saw part of it, which is a
+ *     degraded run rather than a broken one.
+ *   · never sent — the failed ramp, struck through. The agent did not see it at
+ *     all, and every conclusion drawn from its absence is wrong.
+ *
+ * Never the brand ramp for any of them (rule 11): this is status.
+ */
+function SkillChip({ skill }: { skill: ActivationSkill }) {
+  const tone = !skill.included
+    ? "border-status-failed-border bg-status-failed-subtle text-status-failed"
+    : skill.truncated
+      ? "border-status-waiting-border bg-status-waiting-subtle text-status-waiting"
+      : "border-subtle bg-surface text-fg-secondary";
+
+  const note = !skill.included
+    ? "never sent — no room left in the prompt"
+    : skill.truncated
+      ? "cut short to fit the prompt"
+      : skill.examplesDropped
+        ? "sent without its worked examples"
+        : null;
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-baseline gap-1.5 rounded-sm border px-1.5 py-0.5",
+        tone,
+      )}
+      title={
+        `${skill.slug} version ${skill.version}` +
+        (skill.provenance === "first_party" ? " · platform skill" : " · written in this workspace") +
+        (note ? ` · ${note}` : "") +
+        (skill.included ? ` · ${skill.chars} characters of the prompt` : "")
+      }
+    >
+      <span
+        className={cn("font-code text-[11px]", !skill.included && "line-through")}
+      >
+        {skill.slug}
+      </span>
+      {/* The version is a number in a row of numbers, so it is tabular. */}
+      <span className="font-code text-[10px] tabular opacity-80">v{skill.version}</span>
+      {note ? <span className="font-ui text-[10px]">{note}</span> : null}
+    </span>
+  );
+}
+
+/** The skills an activation actually received, in composition order. */
+function activeSkills(n: PlacedNode): ActivationSkill[] {
+  return (n.skills ?? []).filter((s) => s.included);
+}
+
+/** `research-brief v3`, with a marker when the budget cut it. */
+function skillLabel(s: ActivationSkill): string {
+  return `${s.slug} v${s.version}${s.truncated ? " (cut short)" : ""}`;
 }
 
 function EdgeDetail({ edge }: { edge: ConstellationEdge }) {

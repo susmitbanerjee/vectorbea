@@ -244,6 +244,14 @@ export const TOOL_FIELDS: FieldSpec[] = [
   { key: "latency", kind: "number", description: "p95 latency in ms, e.g. >1000", numeric: true, phrase: (v, w) => `p95 latency ${w} ${v}ms` },
   { key: "failing", kind: "enum", description: "Has a recorded last error", values: ["true", "false"], phrase: (v) => (v === "true" ? "with a recorded error" : "with no recorded error") },
   { key: "policy", kind: "enum", description: "Policy contradicts the risk tier", values: ["ok", "violation"], phrase: (v) => (v === "violation" ? "whose policy contradicts its risk tier" : "whose policy matches its tier") },
+  /*
+   * WHERE a tool came from, which is a different question from what it IS.
+   * `type:mcp` says it speaks the protocol; `source:mcp` says a remote server
+   * advertised it and we did not write it. The distinction matters when a
+   * server is about to be removed and somebody needs the list.
+   */
+  { key: "source", kind: "enum", description: "Locally authored, or discovered from an MCP server", values: ["local", "mcp"], phrase: (v) => (v === "mcp" ? "discovered from an MCP server" : "authored in this workspace") },
+  { key: "server", kind: "text", description: "Discovered from this MCP server", phrase: (v) => `from the ${v} server` },
 ];
 
 export const TOOL_QUERY: QuerySchema = {

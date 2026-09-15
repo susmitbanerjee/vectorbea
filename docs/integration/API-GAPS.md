@@ -270,6 +270,13 @@ over TLS, but tokens in URLs land in access logs and proxy logs. A short-lived
 single-use stream ticket (`POST /api/runs/:id/stream-ticket`) would remove the
 exposure. Decision: **(c) accept and document** for now.
 
+The API side of that decision was never built: `AuthMiddleware` read only the
+header, so with JWT auth on every stream was refused with 401 and the run page
+showed "reconnecting…" while ordinary requests worked. `AuthMiddleware.streamQueryToken`
+now accepts `access_token` on `GET /api/runs/:id/stream` and
+`GET /api/runs/:id/trace/stream` only, never a `vb_` API key, and the request log
+records the path without the query string. The ticket remains the better fix.
+
 ### 6.2 Control (P10)
 
 | # | Need | State | Decision |

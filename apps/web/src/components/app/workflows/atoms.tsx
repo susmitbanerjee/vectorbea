@@ -66,6 +66,7 @@ const RUN_TONE: Record<RunStatus, string> = {
   running: "text-status-live",
   queued: "text-status-queued",
   "awaiting-approval": "text-status-waiting",
+  waiting: "text-status-waiting",
   cancelled: "text-status-cancelled",
 };
 
@@ -75,6 +76,7 @@ const RUN_LABEL: Record<RunStatus, string> = {
   running: "Running",
   queued: "Queued",
   "awaiting-approval": "Awaiting approval",
+  waiting: "Waiting",
   cancelled: "Cancelled",
 };
 

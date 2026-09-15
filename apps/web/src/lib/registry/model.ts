@@ -51,6 +51,19 @@ export interface ToolRecord {
   recentFailures: { runId: string; at: string; message: string }[]; versions: SchemaVersion[];
   usedBy: Reference[]; usedByAgents: string[]; hasUsageData?: boolean;
   connectionStatus?: string; connectionLatencyMs?: number | null;
+  /**
+   * Where this tool came from.
+   *
+   * `null` for a locally-authored one. For a discovered one, the MCP server's
+   * connection id and name — which the registry NEEDS, because discovery
+   * namespaces tool names as `mcp-1a2b3c4d.search` so two servers' `search`
+   * tools stay distinguishable. A table that shows those names without saying
+   * whose server they are leaves that thought half-finished.
+   */
+  mcpServerId?: string | null;
+  mcpServerName?: string | null;
+  /** What the server calls it. `name` is namespaced; this is not. */
+  mcpToolName?: string | null;
 }
 
 export function policyForRisk(risk: RiskLevel): RiskPolicy {

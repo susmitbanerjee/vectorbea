@@ -27,6 +27,11 @@ import { appQuery } from "@/lib/server/app-db";
 
 /** The actions this app records. Mirrors `AuditLog.Action` in the Kotlin API. */
 export const AuditAction = {
+  /* Sessions. Mirrors `AuditLog.Action` in the Kotlin API, which has named
+     these since it was written — sign-in happens here, in the OAuth callback,
+     so this is the side that has to record them. */
+  LOGIN: "auth.login",
+  LOGOUT: "auth.logout",
   SETTINGS_UPDATE: "settings.update",
   MEMBER_INVITE: "member.invite",
   MEMBER_INVITE_REVOKE: "member.invite_revoke",
@@ -135,7 +140,19 @@ export async function recordUserScopedAuditEvent(
       [userId],
     );
     await Promise.all(
-      workspaces.map((row) => recordAuditEvent({ ...event, workspaceId: row.workspace_id })),
+      workspaces.map((row) =>
+        recordAuditEvent({
+          /* The actor DEFAULTS to the person this event is scoped to.
+             `userId` is already the answer to "who did this" — leaving
+             `actor_id` null produced rows saying an unnamed user signed out,
+             which is a row that costs storage and answers nothing. An explicit
+             `actorId` on the event still wins, for the case where a person acts
+             on somebody else's behalf. */
+          actorId: userId,
+          ...event,
+          workspaceId: row.workspace_id,
+        }),
+      ),
     );
   } catch (error) {
     console.error(

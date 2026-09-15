@@ -196,6 +196,22 @@ open class RunEventStore(
         // Parked: the thread stops here and resumes from a different message.
         EventType.RUN_YIELDED, EventType.RUN_REENQUEUED, EventType.RUN_RESUMED,
         EventType.APPROVAL_REQUESTED, EventType.AGENT_APPROVAL_REQUESTED,
+        /* A wait is a park: the thread stops here and the run resumes from a
+           different message, which is precisely the condition this set is for.
+           A dropped RUN_WAIT_STARTED would leave a run that is visibly parked
+           with nothing on its timeline saying why — and a dropped
+           RUN_WAIT_TIMED_OUT would leave the acceptance criterion ("times out
+           with a legible reason") true in the database and false on screen. */
+        EventType.RUN_WAIT_STARTED, EventType.RUN_WAIT_RESOLVED,
+        EventType.RUN_WAIT_TIMED_OUT, EventType.SIGNAL_DELIVERED,
+        /* A delivery that ran out of attempts is the run's real outcome from the
+           customer's side, and it is the only record that it happened at all —
+           the run itself already said SUCCEEDED. Dropping it would leave a run
+           reported as delivered that was not, which is the failure this whole
+           feature exists to prevent. The intermediate attempts are not here:
+           they are frequent, they are recoverable, and the dead one summarises
+           them. */
+        EventType.DELIVERY_DEAD,
         /* Handed to a successor run. `RUN_CONTINUED_AS_NEW` was already here and
            the three transitions that produce it were not, which made the boundary
            legible from one side only. RECOMMENDED stays out: it is advice, not a
@@ -377,6 +393,85 @@ open class RunEventStore(
          * one.
          */
         RUN_RESUMED("RUN_RESUMED"),
+
+        /**
+         * The run parked on a wait — an async tool, a signal, an agent's own
+         * decision to wait. Approvals keep [APPROVAL_REQUESTED]; these are the
+         * three kinds that are not a person deciding.
+         *
+         * The pair with [RUN_WAIT_RESOLVED] is what lets the timeline draw a
+         * labelled wait SPAN rather than an unexplained gap between two ticks —
+         * which is what a six-minute render looks like without them.
+         */
+        RUN_WAIT_STARTED("RUN_WAIT_STARTED"),
+        RUN_WAIT_RESOLVED("RUN_WAIT_RESOLVED"),
+
+        /**
+         * The wait's deadline passed with nothing arriving.
+         *
+         * Its own type rather than a RESOLVED with a flag, because the timeline
+         * grades severity by name and "the provider never called back" is not the
+         * same event as "the render finished". It is also the acceptance
+         * criterion: a callback that never comes must produce a legible reason,
+         * not a permanently parked run.
+         */
+        RUN_WAIT_TIMED_OUT("RUN_WAIT_TIMED_OUT"),
+
+        /** A signal was accepted for this run. Recorded when it arrives. */
+        SIGNAL_RECEIVED("SIGNAL_RECEIVED"),
+
+        /**
+         * The run actually took delivery — at a step boundary, or by being
+         * resumed from a matching wait.
+         *
+         * Separate from [SIGNAL_RECEIVED] because the gap between them is the
+         * interesting number during an incident review: "the second alert arrived
+         * at 03:14 and the run saw it at 03:19" is a different story from "the run
+         * never saw it".
+         */
+        SIGNAL_DELIVERED("SIGNAL_DELIVERED"),
+
+        /**
+         * Result delivery, after the run is terminal.
+         *
+         * ── ON THE RUN'S TIMELINE, NOT A SEPARATE LOG ───────────────────────
+         * A run that produced the right answer and failed to deliver it is not a
+         * success from the customer's side, and a delivery status kept somewhere
+         * else is a status nobody looks at. These events sit on the same timeline
+         * as the run's execution, after it, so "what happened to my result" is
+         * answered where the question is asked.
+         *
+         * They arrive AFTER `RUN_SUCCEEDED`, which is correct and worth knowing:
+         * the sequence is monotonic and a reader paging with `?afterSequence=`
+         * will see them arrive minutes or hours later, as retries land.
+         */
+        /**
+         * An agent loop stopped because the run was cancelled.
+         *
+         * Distinct from `RUN_CANCELLED`, which is the run's own transition. This
+         * one says WHERE it stopped — which iteration, in which step — and that
+         * is the difference between "we cancelled it" and "we cancelled it and it
+         * kept spending for another four minutes".
+         */
+        AGENT_CANCELLED("AGENT_CANCELLED"),
+
+        /**
+         * A person sent free-text guidance into a running agent.
+         *
+         * Its own type rather than a generic signal event, because "who told
+         * this agent to change course, and when" is the first question asked
+         * about a run that did something surprising — and an answer that
+         * requires correlating a signal row with an iteration number is an
+         * answer nobody finds.
+         */
+        AGENT_GUIDANCE_RECEIVED("AGENT_GUIDANCE_RECEIVED"),
+
+        DELIVERY_QUEUED("DELIVERY_QUEUED"),
+        DELIVERY_ATTEMPTED("DELIVERY_ATTEMPTED"),
+        DELIVERY_SUCCEEDED("DELIVERY_SUCCEEDED"),
+        DELIVERY_FAILED("DELIVERY_FAILED"),
+        /** Out of attempts. The one that must never be dropped. */
+        DELIVERY_DEAD("DELIVERY_DEAD"),
         // Scheduling-fairness signals. NOTE: these are operational and HIGH-FREQUENCY
         // under load — they are exposed ONLY via metrics/logs (WorkerMetrics.tenantThrottled
         // / poolSaturated) and MUST NOT be appendEvent'd to run_events per poll.

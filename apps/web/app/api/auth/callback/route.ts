@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { AUTH_COOKIE_NAME } from "@/lib/auth/cookies";
+import { AuditAction, recordUserScopedAuditEvent } from "@/lib/server/audit-write";
 import { signToken } from "@/lib/auth/jwt";
 import { upsertOAuthUser } from "@/lib/auth/oauth-upsert";
 
@@ -110,6 +111,32 @@ export async function GET(request: NextRequest) {
 
   // ── 3. Issue our own JWT ──────────────────────────────────────────────────
   const ourToken = await signToken({ sub: jwtSub, email });
+
+  /*
+   * ── THE GOVERNANCE TRAIL ────────────────────────────────────────────────
+   * `auth.login` has been a named action since the audit log was written and
+   * nothing ever recorded one — so "who has been signing in to this workspace"
+   * had no answer, which is the first question on every access review.
+   *
+   * Recorded once per workspace the account belongs to, because the log is read
+   * per tenant: the workspace whose Members list shows this person is the
+   * workspace whose audit log should be able to say when they last signed in.
+   *
+   * Awaited, unlike most audit writes, because the response that follows is a
+   * REDIRECT — the function returns and the request ends, so a floating promise
+   * would be cancelled before it reached the database often enough to matter.
+   *
+   * A FAILED sign-in is deliberately not recorded here. Every failure path
+   * above returns before an identity exists, so there is no workspace to file
+   * it against; `auth.login_failed` needs a credential flow that knows who was
+   * being attempted, and this one does not.
+   */
+  await recordUserScopedAuditEvent(jwtSub, {
+    action: AuditAction.LOGIN,
+    targetType: "session",
+    after: { email, provider: "oauth" },
+    request,
+  });
 
   // ── 4. Redirect with our JWT cookie ──────────────────────────────────────
   const destination = explicitNext?.startsWith("/") ? explicitNext : "/control";

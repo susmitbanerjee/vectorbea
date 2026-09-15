@@ -9,6 +9,7 @@ import {
   SIZES, cellPath, crackPath, notchPath, collapseNodes, ribbonSummary, stateLabel,
   type RibbonSize, type Segment,
 } from "./geometry";
+import { cellRingPath } from "./geometry-ring";
 import { claimAnimation, useAnimationClaimant, BLOOM_DURATION_MS } from "./animation-coordinator";
 
 /* ══════════════════════════════════════════════════════════════════════════════
@@ -291,9 +292,8 @@ function Cell({
           70px one, which reads as the wrong cell being gated. */}
       {segment.state === "gated" && detail ? (
         <path
-          d={cellPath(width + 4, height + 4)}
+          d={cellRingPath(width, height, 2)}
           fill="var(--status-waiting)"
-          transform="translate(-2 -2)"
           className={reduceMotion ? "opacity-10" : "animate-[ink-gate-breathe_2600ms_ease-in-out_infinite]"}
         />
       ) : null}

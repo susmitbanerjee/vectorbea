@@ -52,6 +52,15 @@ class ApiKeyService(
         val workspaceId: UUID,
         val actsAsUserId: UUID?,
         val name: String,
+        /**
+         * This key's own ceiling, or null to be held only to the plan's.
+         *
+         * Carried out of `authenticate` rather than looked up again at the rate
+         * check: a second read could see a different row, and a limit that
+         * disagrees with the identity it was resolved with is worse than no
+         * limit at all.
+         */
+        val rateLimitPerMinute: Int? = null,
     )
 
     data class Created(
@@ -132,7 +141,8 @@ class ApiKeyService(
                     WHERE token_hash = ?
                       AND revoked_at IS NULL
                       AND (expires_at IS NULL OR expires_at > now())
-                RETURNING id, workspace_id, acts_as_user_id, name"""
+                      AND (rotation_grace_until IS NULL OR rotation_grace_until > now())
+                RETURNING id, workspace_id, acts_as_user_id, name, rate_limit_per_minute"""
             ).use { st ->
                 st.setString(1, hash(presented))
                 st.executeQuery().use { rs ->
@@ -142,6 +152,8 @@ class ApiKeyService(
                         workspaceId = rs.getObject("workspace_id", UUID::class.java),
                         actsAsUserId = rs.getObject("acts_as_user_id", UUID::class.java),
                         name = rs.getString("name"),
+                        rateLimitPerMinute = rs.getInt("rate_limit_per_minute")
+                            .takeIf { !rs.wasNull() },
                     )
                 }
             }
@@ -213,8 +225,134 @@ class ApiKeyService(
     fun rateLimitPerMinute(workspaceId: UUID): Int =
         guard?.resolve(workspaceId)?.setting(EntitlementKeys.API_RATE_LIMIT_PER_MINUTE)?.toInt() ?: 0
 
+    /**
+     * Mint a replacement for [keyId], and start the clock on the old one.
+     *
+     * ── ROTATION IS TWO LIVE KEYS, BRIEFLY ─────────────────────────
+     * Anything else is an outage. The old key has to keep working while the new
+     * one reaches every deployment that uses it — a fleet, a CI system, somebody
+     * else's cron — and those do not all redeploy at once.
+     *
+     * And the overlap has to END, or this is not rotation, it is "make another
+     * key". `rotation_grace_until` is what makes it finite, [authenticate]
+     * enforces it, and the default is 24 hours because that is long enough for a
+     * deploy and short enough that a leaked key is not live for a week.
+     *
+     * The new key carries the old one's `acts_as_user_id` and per-key limit, so
+     * it is held to exactly the same caps. A rotation that quietly widened a
+     * key's reach would be the most inviting way to escalate one.
+     */
+    fun rotate(
+        workspaceId: UUID,
+        keyId: UUID,
+        byUserId: UUID?,
+        graceSeconds: Long = DEFAULT_ROTATION_GRACE_SECONDS,
+    ): Created? {
+        val old = dataSource.connection.use { c ->
+            c.prepareStatement(
+                """SELECT name, acts_as_user_id, rate_limit_per_minute
+                     FROM api_keys
+                    WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL"""
+            ).use { st ->
+                st.setObject(1, keyId); st.setObject(2, workspaceId)
+                st.executeQuery().use { rs ->
+                    if (!rs.next()) null else Triple(
+                        rs.getString("name"),
+                        rs.getObject("acts_as_user_id", UUID::class.java),
+                        rs.getInt("rate_limit_per_minute").takeIf { !rs.wasNull() },
+                    )
+                }
+            }
+        } ?: return null
+
+        val (name, actsAs, perKeyLimit) = old
+        val secret = mint()
+        val id = UUID.randomUUID()
+        val prefix = secret.take(PREFIX_LENGTH)
+
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            try {
+                c.prepareStatement(
+                    """INSERT INTO api_keys
+                         (id, workspace_id, name, prefix, token_hash, acts_as_user_id,
+                          created_by_user_id, rotated_from_id, rate_limit_per_minute)
+                       VALUES (?,?,?,?,?,?,?,?,?)"""
+                ).use { st ->
+                    st.setObject(1, id); st.setObject(2, workspaceId)
+                    st.setString(3, name); st.setString(4, prefix)
+                    st.setString(5, hash(secret)); st.setObject(6, actsAs)
+                    st.setObject(7, byUserId); st.setObject(8, keyId)
+                    if (perKeyLimit != null) st.setInt(9, perKeyLimit)
+                    else st.setNull(9, java.sql.Types.INTEGER)
+                    st.executeUpdate()
+                }
+                /* The grace window on the OLD key, in the SAME transaction as the
+                   new key's insert. A crash between the two would otherwise either
+                   expire a key with no replacement, or mint a replacement nobody
+                   knows to switch to. */
+                c.prepareStatement(
+                    "UPDATE api_keys SET rotation_grace_until = now() + make_interval(secs => ?) " +
+                        "WHERE id = ? AND workspace_id = ?"
+                ).use { st ->
+                    st.setDouble(1, graceSeconds.toDouble())
+                    st.setObject(2, keyId); st.setObject(3, workspaceId)
+                    st.executeUpdate()
+                }
+                c.commit()
+            } catch (e: Exception) {
+                runCatching { c.rollback() }
+                throw e
+            } finally {
+                runCatching { c.autoCommit = true }
+            }
+        }
+
+        log.info("[apikey] rotated {} -> {} for workspace {} (grace {}s)",
+            keyId, id, workspaceId, graceSeconds)
+        return Created(id, name, prefix, secret, null)
+    }
+
+    /**
+     * Set this key's own ceiling.
+     *
+     * ── WHY PER KEY AND NOT PER WORKSPACE ──────────────────────────
+     * The limit was per workspace, so one runaway integration consumed the
+     * budget of every other key in the workspace — including the one an operator
+     * was using to investigate it. A per-key ceiling contains the blast radius to
+     * the thing that is misbehaving.
+     *
+     * Null removes it and the plan limit applies alone. The plan limit is always
+     * the ceiling: a per-key value above it is clamped, because an admin must not
+     * be able to sell themselves more throughput by adding keys.
+     */
+    fun setRateLimit(workspaceId: UUID, keyId: UUID, perMinute: Int?): Boolean {
+        val planCeiling = rateLimitPerMinute(workspaceId)
+        val effective = perMinute?.let {
+            if (planCeiling > 0) it.coerceIn(1, planCeiling) else it.coerceAtLeast(1)
+        }
+        return dataSource.connection.use { c ->
+            c.prepareStatement(
+                "UPDATE api_keys SET rate_limit_per_minute = ? WHERE id = ? AND workspace_id = ?"
+            ).use { st ->
+                if (effective != null) st.setInt(1, effective)
+                else st.setNull(1, java.sql.Types.INTEGER)
+                st.setObject(2, keyId); st.setObject(3, workspaceId)
+                st.executeUpdate() > 0
+            }
+        }
+    }
+
     private companion object {
         const val PREFIX = "vb_"
+
+        /**
+         * How long a rotated key keeps working.
+         *
+         * Long enough for a deploy to reach a fleet; short enough that a key
+         * rotated because it leaked is not live for a week.
+         */
+        const val DEFAULT_ROTATION_GRACE_SECONDS = 24L * 60 * 60
         const val PREFIX_LENGTH = 12
         private val RANDOM = SecureRandom()
 

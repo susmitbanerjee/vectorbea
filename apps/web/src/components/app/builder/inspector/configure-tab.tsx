@@ -3,7 +3,7 @@
 import * as React from "react";
 import { cn } from "~/lib/cn";
 import { Text } from "~/components/ui/text";
-import { Input } from "~/components/ui/input";
+import { Input, Textarea } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Switch } from "~/components/ui/choice";
 import { Button } from "~/components/ui/button";
@@ -304,6 +304,62 @@ function ToolConfig({ node, set, setMany }: {
 
 /* ── Agent ────────────────────────────────────────────────────────────────── */
 
+/**
+ * The step's own budget, written to `config.budget` — the only place the worker
+ * reads a total-token ceiling from (`AgentNodeExecutor.stepBudget`). Empty fields
+ * keep the defaults: 16,384 tokens, and the agent's own tool-call and cost limits.
+ */
+function StepLimits({ config, setMany }: {
+  config: Record<string, unknown>;
+  setMany: (patch: Record<string, unknown>) => void;
+}) {
+  const budget = (config.budget ?? {}) as Record<string, unknown>;
+  const setBudget = (key: string, raw: string) => {
+    const value = raw.trim() === "" ? undefined : Math.max(1, Math.round(Number(raw)));
+    const next = { ...budget, [key]: Number.isFinite(value) ? value : undefined };
+    for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+    setMany({ budget: Object.keys(next).length > 0 ? next : null });
+  };
+  const cost = typeof budget.maxCostCents === "number" ? String(budget.maxCostCents / 100) : "";
+
+  return (
+    <Section
+      title="Limits for this step"
+      help="The step stops when it reaches any of these. An agent that reads code or long results needs a larger token budget."
+    >
+      <div className="grid grid-cols-3 gap-2">
+        <Field label="Total tokens" help="Across every reply and tool result. Default 16,384.">
+          <Input
+            type="number" min={1000} step={1000}
+            value={typeof budget.maxTotalTokens === "number" ? String(budget.maxTotalTokens) : ""}
+            onChange={(e) => setBudget("maxTotalTokens", e.target.value)}
+            placeholder="16384"
+            className="h-7 text-body-sm"
+          />
+        </Field>
+        <Field label="Tool calls" help="Default: the agent's limit.">
+          <Input
+            type="number" min={1}
+            value={typeof budget.maxToolCalls === "number" ? String(budget.maxToolCalls) : ""}
+            onChange={(e) => setBudget("maxToolCalls", e.target.value)}
+            placeholder="5"
+            className="h-7 text-body-sm"
+          />
+        </Field>
+        <Field label="Cost ($)" help="Default: the agent's limit.">
+          <Input
+            type="number" min={0.01} step={0.05}
+            value={cost}
+            onChange={(e) => setBudget("maxCostCents", e.target.value === "" ? "" : String(Number(e.target.value) * 100))}
+            placeholder="0.50"
+            className="h-7 text-body-sm"
+          />
+        </Field>
+      </div>
+    </Section>
+  );
+}
+
 function AgentConfig({ node, set, setMany }: {
   node: VersionNode;
   set: (k: string, v: unknown) => void;
@@ -312,7 +368,7 @@ function AgentConfig({ node, set, setMany }: {
   const registry = useBuilderRegistry();
   const config = node.config as Record<string, unknown>;
   const agent = resolveAgent(config, registry);
-  const override = String(config.taskOverride ?? "");
+  const override = String(config.taskInstruction ?? config.taskOverride ?? "");
 
   /* Named an agent that is not here. Same reasoning as the tool picker: this is
      the only place the operator can learn why the step will fail. */
@@ -378,26 +434,25 @@ function AgentConfig({ node, set, setMany }: {
 
       <Section
         title="Task instruction"
-        help="Leave empty to use the agent's registered task. Anything written here applies to THIS STEP ONLY and does not change the agent."
+        help="What this step should do. Leave empty to use the agent's own instructions."
       >
-        <Input
+        {/* Written as `taskInstruction`, the key the worker reads. It used to be
+            `taskOverride`, which nothing read — so the instruction typed here was
+            ignored. Both are read back, and the old key is cleared on edit. */}
+        <Textarea
           value={override}
-          onChange={(e) => set("taskOverride", e.target.value)}
-          placeholder="Uses the agent's default task"
-          className="h-7 text-body-sm"
+          onChange={(e) => setMany({ taskInstruction: e.target.value, taskOverride: null })}
+          placeholder="e.g. Review these changes and list the risky ones."
+          minRows={2}
+          maxRows={6}
+          className="text-body-sm"
         />
-        {override ? (
-          <div className="border-status-waiting-border bg-status-waiting-subtle mt-1.5 rounded-sm border px-2 py-1">
-            <Text variant="caption" tone="inherit" className="text-status-waiting">
-              Overriding the agent&apos;s default task
-            </Text>
-            <Text variant="caption" tone="secondary" className="mt-0.5 block leading-snug">
-              Other workflows using {agent?.name ?? "this agent"} are unaffected. The override lives
-              on this node and travels with the version.
-            </Text>
-          </div>
-        ) : null}
+        <Text variant="caption" tone="muted" className="mt-1 block">
+          Data from earlier steps is passed with it — add that on the Inputs tab.
+        </Text>
       </Section>
+
+      <StepLimits config={config} setMany={setMany} />
 
       <Section title="Generation" help="How the model is sampled for this step.">
         <div className="grid grid-cols-2 gap-2">

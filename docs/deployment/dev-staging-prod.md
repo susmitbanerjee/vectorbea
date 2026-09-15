@@ -22,12 +22,40 @@ source of truth.
 | Service   | Prod                      | Staging                       |
 | --------- | ------------------------- | ----------------------------- |
 | Web       | `vectorbea.com`           | `dev.vectorbea.com`           |
-| API       | `api.vectorbea.com`       | `api-dev.vectorbea.com`       |
+| API       | `api.vectorbea.com`       | `devapi.vectorbea.com`        |
 | Telemetry | `telemetry.vectorbea.com` | `telemetry-dev.vectorbea.com` |
 
-Worker has no public domain (it consumes the Redis queue). Adjust the staging
-subdomains if you prefer `staging-*` — just keep them consistent with the env
-vars below.
+Worker has no public domain (it consumes the Redis queue).
+
+**The public API hosts serve the run API and nothing else.** `api.vectorbea.com`
+(prod) and `devapi.vectorbea.com` (staging) are what the product prints: the
+workflow "Run it from anywhere" snippet, the API keys page and webhook URLs. Both
+the API (`PublicUrls.apiBase`) and the web app (`getPublicApiBaseUrl`) derive
+them from the environment tag — `VECTORBEA_ENV=prod` → `api`, anything else →
+`devapi`. The Railway `*.up.railway.app` hostname is never printed.
+
+A request arriving on either host reaches only (`PublicHostGate`):
+
+| | |
+|---|---|
+| `POST /api/workflows/:id/run` | start a run |
+| `GET /api/runs/:id` | read its status and output |
+| `POST /api/hooks/:token` | webhook trigger |
+| `POST /api/tool-callbacks/:token`, `GET /api/delivery-payloads/:token` | mid-run callbacks and large results |
+| `GET /healthz`, `/health`, `/version` | health |
+
+Everything else answers 404 on those hosts. Two consequences:
+
+- **The web app must NOT use them.** `NEXT_PUBLIC_VECTORBEA_API_URL` stays the
+  Railway service domain (or a separate, unpublished custom domain) — the app
+  needs the whole API.
+- **MCP sign-in does not use them either.** Its OAuth redirect is the web app's
+  own `/mcp/oauth/callback`, so it works even before these DNS records exist.
+
+Override the printed host only if a deployment fronts the API somewhere else:
+`PUBLIC_API_BASE_URL` on the API and `NEXT_PUBLIC_PUBLIC_API_BASE_URL` on the web,
+to the same value. Extra hostnames that should get the run-API-only treatment go
+in `PUBLIC_API_HOSTS` (comma-separated).
 
 ---
 
@@ -111,6 +139,10 @@ TELEMETRY_ENABLED=true
 TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
 TELEMETRY_INTERNAL_TOKEN=<shared internal token>
 CORS_ALLOWED_ORIGINS=https://vectorbea.com             # staging → https://dev.vectorbea.com
+APP_URL=https://vectorbea.com                          # staging → https://dev.vectorbea.com
+# PUBLIC_API_BASE_URL is derived from VECTORBEA_ENV (api / devapi.vectorbea.com); set only to override
+MCP_DISCOVERY_ENABLED=true      # connecting MCP servers: probe, sign-in, discovery
+MESSAGING_WEBHOOKS_ENABLED=true # "Send test message" for Teams / Google Chat / Discord; set on the worker too
 ```
 
 **`worker` service**
@@ -126,6 +158,10 @@ WORKER_LEASE_TTL_SECONDS=60
 WORKER_DEFAULT_NODE_TIMEOUT_MS=120000
 WORKER_MAX_RUN_DURATION_MS=600000
 WORKER_MAX_BRANCH_THREADS=16
+AGENT_SKILLS_ENABLED=true       # skills apply to agent runs; off = granted skills are ignored at run time
+MESSAGING_WEBHOOKS_ENABLED=true # Teams / Google Chat / Discord tools post; off = those calls fail naming this variable
+TRACE_STEP_IO_ENABLED=true      # Debug shows step inputs/outputs and model prompts/responses (redacted); off = not recorded
+AGENT_TOOL_RESULT_MAX_CHARS=12000 # how much of the newest tool result an agent reads; default 2000 cuts off diffs
 TELEMETRY_ENABLED=true
 TELEMETRY_INGEST_URL=https://telemetry.vectorbea.com   # staging → telemetry-dev...
 TELEMETRY_INTERNAL_TOKEN=<shared internal token>
@@ -141,9 +177,22 @@ TELEMETRY_INTERNAL_TOKEN=<shared internal token>
 
 ### 2.4 Domains
 
-For api + telemetry services: **Settings → Networking → Custom Domain**, add the
-prod/staging subdomains from §0, then create the matching CNAME records at your
-DNS provider pointing to the Railway-provided target.
+DNS for `vectorbea.com` is at **GoDaddy** (nameservers `ns25/ns26.domaincontrol.com`).
+A subdomain resolves only once BOTH halves exist:
+
+1. **Railway** → the `api` service → select the environment (`production` for
+   `api.vectorbea.com`, `staging` for `devapi.vectorbea.com`) → **Settings →
+   Networking → Custom Domain** → enter the hostname. Railway shows a **CNAME
+   target** (something like `abc123.up.railway.app`) and, for most domains, a
+   **TXT verification record** (`_railway-verify.<name>`).
+2. **GoDaddy** → My Products → `vectorbea.com` → **DNS** → **Add New Record**:
+   - Type `CNAME`, Name `api` (or `devapi`), Value = the Railway target, TTL 1 hour.
+   - Type `TXT`, Name exactly as Railway shows it, Value exactly as shown.
+3. Wait for Railway to show the domain as verified; it issues the TLS certificate
+   itself. Check with `nslookup api.vectorbea.com 8.8.8.8`.
+
+GoDaddy's Name field is the part BEFORE `.vectorbea.com` — enter `api`, not
+`api.vectorbea.com`, or the record becomes `api.vectorbea.com.vectorbea.com`.
 
 ---
 
@@ -180,13 +229,15 @@ URLs.
 
 ```
 # Production scope
-NEXT_PUBLIC_VECTORBEA_API_URL=https://api.vectorbea.com
+NEXT_PUBLIC_VECTORBEA_API_URL=https://<prod api service>.up.railway.app   # NOT api.vectorbea.com — see §0
+NEXT_PUBLIC_VECTORBEA_ENV=prod                  # picks the public API host printed in snippets
 NEXT_PUBLIC_SUPABASE_URL=<prod supabase url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<prod anon key>
 NEXT_PUBLIC_PRIVATE_BETA_MODE=true
 
 # Preview scope (staging)
-NEXT_PUBLIC_VECTORBEA_API_URL=https://api-dev.vectorbea.com
+NEXT_PUBLIC_VECTORBEA_API_URL=https://<staging api service>.up.railway.app   # NOT devapi.vectorbea.com
+NEXT_PUBLIC_VECTORBEA_ENV=dev
 NEXT_PUBLIC_SUPABASE_URL=<staging supabase url>
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<staging anon key>
 NEXT_PUBLIC_PRIVATE_BETA_MODE=true

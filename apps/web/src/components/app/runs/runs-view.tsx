@@ -29,6 +29,7 @@ import { useApi } from "~/lib/api/api-provider";
 import { useRunsData } from "./use-runs-data";
 import {
   DurableRunIcon, IncidentIcon, ApprovalGateIcon, QueueDepthIcon, WorkerIcon,
+  WaitUntilIcon,
 } from "~/components/icons/domain";
 import type { IconComponent } from "~/components/icons/types";
 
@@ -51,6 +52,9 @@ const STATUS_META: Record<RunStatus, { label: string; icon: IconComponent; class
   running: { label: "Running", icon: WorkerIcon, className: "text-status-live border-status-live-border bg-status-live-subtle" },
   queued: { label: "Queued", icon: QueueDepthIcon, className: "text-status-queued border-status-queued-border bg-status-queued-subtle" },
   "awaiting-approval": { label: "Awaiting approval", icon: ApprovalGateIcon, className: "text-status-waiting border-status-waiting-border bg-status-waiting-subtle" },
+  /* The gate glyph would say "somebody has to decide"; nobody does. `wait-until`
+     is the mark for "suspend pending a condition or time", which is the run. */
+  waiting: { label: "Waiting", icon: WaitUntilIcon, className: "text-status-waiting border-status-waiting-border bg-status-waiting-subtle" },
   cancelled: { label: "Cancelled", icon: QueueDepthIcon, className: "text-status-cancelled border-status-cancelled-border bg-status-cancelled-subtle" },
 };
 
@@ -59,6 +63,10 @@ const TRIGGER_GLYPH: Record<Run["trigger"], string> = {
   webhook: "M3 6h6M7 4l2 2-2 2",
   manual: "M6 2.6v6.8M3.4 6.6 6 9.2l2.6-2.6",
   api: "M4 3.4 2 6l2 2.6M8 3.4 10 6l-2 2.6",
+  // A message off a broker: three inbound marks converging on one point.
+  event: "M2.6 4h3M2.6 6h4.4M2.6 8h3M9.4 6l-2-1.6v3.2z",
+  // A tool call from outside: the API glyph's outbound half, plus a socket.
+  mcp: "M3 6h4.4M6.2 4.4 7.8 6l-1.6 1.6M9.4 3.6v4.8",
 };
 
 export interface RunsViewProps {
@@ -323,7 +331,16 @@ export function RunsView({ forceState, frozen: frozenProp }: RunsViewProps) {
       id: "status", header: "Status", width: 128, minWidth: 92,
       sortValue: (r) => r.status,
       skeletonWidth: 80,
-      cell: (run) => <StatusBadge status={run.status} />,
+      cell: (run) => (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <StatusBadge status={run.status} />
+          {/* The second axis. A run that produced the right answer and could not
+              deliver it is `succeeded` AND undelivered, and the list has to show
+              both — folding it into the badge would either paint a correct run
+              red or hide the failure entirely. */}
+          <UndeliveredMark delivery={run.delivery} />
+        </span>
+      ),
     },
     {
       // The point of the page.
@@ -640,6 +657,41 @@ function exportCsv(runs: Run[]) {
 }
 
 /* ── Cells ────────────────────────────────────────────────────────────────── */
+
+/**
+ * Shown only when the result did NOT get where it was going.
+ *
+ * ── AND NOTHING WHEN IT DID ─────────────────────────────────────────────────
+ * A green tick beside every successful run would be noise on the overwhelming
+ * majority of rows and would make the failing ones harder to find, which is the
+ * opposite of the point. Absence means "nothing to say"; presence always means
+ * "look at this".
+ *
+ * `partial` gets the same mark as `failed`: from the customer's side a result
+ * that reached one of three destinations did not arrive, and the run page says
+ * which one.
+ */
+function UndeliveredMark({ delivery }: { delivery?: Run["delivery"] }) {
+  if (delivery !== "failed" && delivery !== "partial") return null;
+  const label = delivery === "failed"
+    ? "The result was not delivered"
+    : "Some destinations did not receive the result";
+  return (
+    <span
+      title={label}
+      className={cn(
+        "font-ui text-caption inline-flex shrink-0 items-center gap-1 rounded-full border px-1.5 py-0.5",
+        "text-status-failed border-status-failed-border bg-status-failed-subtle",
+      )}
+    >
+      <IncidentIcon size={11} aria-hidden="true" className="shrink-0" />
+      {/* Read out by a screen reader; the title alone is not announced
+          reliably, and this row's whole meaning turns on it. */}
+      <span className="sr-only">{label}</span>
+      <span aria-hidden="true">Undelivered</span>
+    </span>
+  );
+}
 
 function StatusBadge({ status }: { status: RunStatus }) {
   const meta = STATUS_META[status];

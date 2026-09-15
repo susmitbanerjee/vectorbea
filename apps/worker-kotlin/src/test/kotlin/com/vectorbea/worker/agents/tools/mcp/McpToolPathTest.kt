@@ -1,4 +1,6 @@
 package com.vectorbea.worker.agents.tools.mcp
+import com.vectorbea.mcp.McpClient
+import com.vectorbea.mcp.McpTransport
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.vectorbea.graph.WorkflowGraph
@@ -59,12 +61,14 @@ class McpToolPathTest {
         var failWith: Exception? = null
         val calls = mutableListOf<String>()
 
-        fun send(req: HttpRequest, total: Long, maxBytes: Long): com.vectorbea.worker.net.OutboundHttp.Result {
+        fun send(req: HttpRequest, total: Long, maxBytes: Long): McpTransport.Response {
+            failWith?.let { calls += req.uri().toString(); throw it }
+            when (rpcMethodOf(req)) {
+                "initialize" -> return McpTransport.Response(200, FAKE_INITIALIZE_REPLY)
+                "notifications/initialized" -> return McpTransport.Response(202, "")
+            }
             calls += req.uri().toString()
-            failWith?.let { throw it }
-            return com.vectorbea.worker.net.OutboundHttp.Result(
-                statusCode = 200, body = reply ?: "{}",
-                headers = emptyMap(), durationMs = 1)
+            return McpTransport.Response(statusCode = 200, body = reply ?: "{}")
         }
     }
 
@@ -147,7 +151,7 @@ class McpToolPathTest {
         val mcp = lazyRef.value as McpToolExecutor
         val clientField = McpToolExecutor::class.java.getDeclaredField("client")
         clientField.isAccessible = true
-        clientField.set(mcp, McpClient(httpSend = server::send))
+        clientField.set(mcp, McpClient(server::send))
     }
 
     private fun ctx() = RuntimeContext(

@@ -12,7 +12,7 @@ import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
 import { Kbd } from "~/components/ui/kbd";
 import { Canvas } from "./canvas";
-import { Palette, PALETTE, type QuickTemplate } from "./palette";
+import { Palette, PALETTE } from "./palette";
 import { Inspector } from "./inspector";
 import { NodeInspector, type NodeEdits } from "./inspector/node-inspector";
 import { TopBar, type SaveState } from "./top-bar";
@@ -30,7 +30,6 @@ import { useKeyboardGraph } from "./keyboard-graph";
 import { useWorkflowGraph, type WorkflowGraphData } from "./use-workflow-graph";
 import { BuilderRegistryProvider, useBuilderRegistry } from "./use-builder-registry";
 import type { BuilderGraph } from "~/lib/workflows/builder-graph";
-import type { Binding } from "~/mocks/io-schema";
 import { NODE_MARKS } from "~/components/icons/nodes";
 import { PageContainer } from "~/components/ui/page";
 import { ControlSkeleton } from "~/components/app/control/skeletons";
@@ -362,15 +361,6 @@ function BuilderInner({
     setPicker({ at, connectFrom: sourceId });
   }, []);
 
-  const applyTemplate = React.useCallback((template: QuickTemplate) => {
-    const base = centreOfViewport();
-    let previous: string | undefined;
-    template.kinds.forEach((kind, i) => {
-      const id = `n-new-${kind}`;
-      dispatch({ type: "addNode", kind, x: base.x + i * 260, y: base.y, connectFrom: previous });
-      previous = id;
-    });
-  }, [dispatch, centreOfViewport]);
 
   const runAutoLayout = React.useCallback(() => {
     dispatch({ type: "replaceGraph", graph: autoLayout(state.nodes, state.edges), label: "Auto-layout" });
@@ -462,11 +452,6 @@ function BuilderInner({
     ? state.nodes.find((n) => n.node.id === state.selection[0])?.node ?? null
     : null;
 
-  /* Bindings live beside the graph rather than inside each node's config: they
-     are edges in the data flow, and the reverse index on the Output tab has to
-     read every node's bindings at once to answer "who consumes this field". */
-  const [bindingsByNode, setBindingsByNode] = React.useState<Record<string, Binding[]>>({});
-
   /* Reads the graph through a ref so its identity never changes.
      As a callback depending on `state.nodes`, every commit rebuilt it, which
      re-fired the panel's autosave effect, which committed again. */
@@ -474,19 +459,6 @@ function BuilderInner({
   graphRef.current = state;
 
   const commitNodeEdits = React.useCallback((nodeId: string, edits: NodeEdits) => {
-    // Only write bindings that actually changed — an unconditional setState
-    // here produces a new object every commit and re-seeds the open panel.
-    setBindingsByNode((prev) => {
-      const before = prev[nodeId];
-      const same = before !== undefined
-        && before.length === edits.bindings.length
-        && before.every((b, i) =>
-          b.inputId === edits.bindings[i].inputId
-          && b.expression === edits.bindings[i].expression
-          && b.transform === edits.bindings[i].transform);
-      return same ? prev : { ...prev, [nodeId]: edits.bindings };
-    });
-
     const current = graphRef.current;
     const target = current.nodes.find((n) => n.node.id === nodeId);
     if (!target) return;
@@ -586,7 +558,6 @@ function BuilderInner({
             collapsed={paletteCollapsed}
             onToggle={() => setPaletteCollapsed((v) => !v)}
             onAdd={(kind, label) => addNode(kind, label)}
-            onApplyTemplate={applyTemplate}
           />
         ) : null}
 
@@ -657,7 +628,6 @@ function BuilderInner({
             node={selectedNode}
             nodes={state.nodes}
             edges={state.edges}
-            bindingsByNode={bindingsByNode}
             onCommit={commitNodeEdits}
             onClose={() => dispatch({ type: "select", ids: [] })}
             // The workspace run budget, for the timeout warning on Advanced.

@@ -49,6 +49,23 @@ class ToolNodeExecutor(
      * being called on exactly the terms an HTTP endpoint that is down does.
      */
     private val circuit: com.vectorbea.worker.net.ConnectionCircuit? = null,
+    /**
+     * Needed by the spec-driven HTTP path, for two things the legacy path never
+     * did: reading a connection's secret as a named BUNDLE (so an auth strategy
+     * can ask for `clientSecret` rather than "the secret"), and sealing a
+     * refreshed OAuth2 token into `connection_oauth_tokens`.
+     *
+     * Null keeps every existing call site compiling and degrades the spec path
+     * to what it can do without secrets — which is enough for an unauthenticated
+     * endpoint and nothing else, and says so when it is not.
+     */
+    private val secretService: com.vectorbea.worker.connector.SecretService? = null,
+    /**
+     * The exactly-once guard, so a spec-driven POST is deduplicated on redelivery
+     * exactly as `HttpNodeExecutor`'s is. Passing null disables deduplication —
+     * acceptable in unit tests, never in production.
+     */
+    private val sideEffects: com.vectorbea.worker.durable.SideEffectGuard? = null,
 ) : NodeExecutor {
 
     private val log    = logger()
@@ -60,12 +77,55 @@ class ToolNodeExecutor(
 
     private val httpExecutor    by lazy { HttpNodeExecutor(connectionResolver, eventStore) }
 
+    /**
+     * The spec-driven HTTP resolver, for tools that carry `http_spec_json`.
+     *
+     * ── WHY TWO EXECUTORS AND NOT A REWRITE IN PLACE ────────────────────────
+     * `HttpNodeExecutor` reads loose config keys (`url`, `method`, `body`) with
+     * no declared parameter mapping, one hard-coded auth header per `auth_type`,
+     * and no response extraction. Everything currently registered is written in
+     * those terms and works. Rewriting it to read a spec would mean synthesising
+     * a spec for every existing tool at execution time — a translation layer
+     * whose failures land in a customer's run rather than in a review.
+     *
+     * So the split is on DATA, not on a flag: a tool with a spec goes to
+     * [HttpToolResolver], a tool without one goes where it always went. The old
+     * path is deleted when the last tool has a spec, and not before.
+     */
+    private val httpSpecResolver by lazy {
+        com.vectorbea.worker.tools.http.HttpToolResolver(
+            connectionResolver = connectionResolver,
+            eventStore = eventStore,
+            secretService = secretService,
+            dataSource = dataSource,
+            sideEffects = sideEffects,
+            /* So an async tool can park rather than hold a worker for six
+               minutes. Built here because it needs nothing but the data source,
+               and because a resolver without one refuses async tools loudly
+               instead of running them down a path that cannot work. */
+            waitStore = com.vectorbea.worker.durable.wait.WaitStore(dataSource),
+        )
+    }
+
     /** MCP, lazily: most workspaces have no MCP server and should pay nothing. */
     private val mcpExecutor by lazy {
         com.vectorbea.worker.agents.tools.mcp.McpToolExecutor(
             connectionResolver = connectionResolver,
-            discovery = com.vectorbea.worker.agents.tools.mcp.McpDiscovery(dataSource),
+            discovery = com.vectorbea.mcp.McpDiscovery(
+                dataSource,
+                com.vectorbea.mcp.McpClient(
+                    com.vectorbea.worker.agents.tools.mcp.WorkerMcpTransport),
+            ),
             circuit = circuit,
+            /* Only when this executor can seal a credential. Without a secret
+               service a signed-in server's token is still sent — it just is not
+               refreshed, and the error on expiry says to sign in again. */
+            credentials = secretService?.let {
+                com.vectorbea.mcp.McpCredentials(
+                    com.vectorbea.mcp.McpOAuth(com.vectorbea.worker.agents.tools.mcp.WorkerMcpTransport),
+                    com.vectorbea.worker.agents.tools.mcp.WorkerMcpTokenStore(dataSource, it),
+                )
+            },
         )
     }
     private val dbReadExecutor  by lazy { DbReadNodeExecutor(connectionResolver, dbPoolManager, eventStore) }
@@ -119,6 +179,20 @@ class ToolNodeExecutor(
          *
          * Before TOOL_CALL_STARTED deliberately: a call held at a gate has not started.
          */
+        /*
+         * ── A REQUIRED INPUT THAT RESOLVED TO NOTHING ─────────────────────────
+         *
+         * A mapping that points at a field the earlier step never produced resolves
+         * to null, and the resolver drops the key. The call then went out anyway,
+         * and the failure came back in the provider's words — Slack's `no_text` —
+         * which names neither the input nor the reference that was empty. Checked
+         * before the approval gate, because asking a person to approve a call that
+         * cannot succeed wastes their decision.
+         */
+        missingRequiredInputs(tool.inputSchemaJson, resolvedInputs, tool.configJson)
+            .takeIf { it.isNotEmpty() }
+            ?.let { missing -> return NodeResult.Failed(missingInputsMessage(tool.name, missing, node.inputMapping)) }
+
         if (tool.requiresApproval) {
             approvalGate(node, tool, resolvedInputs, ctx)?.let { return it }
         }
@@ -146,7 +220,22 @@ class ToolNodeExecutor(
         val result: NodeResult = when (tool.type) {
             // Aliases for the canonical "http" type — some tools (e.g. architect-generated
             // before the type normalizer existed) may be persisted with these variants.
-            "http", "http_api", "rest_api", "api", "rest" -> httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+            "http", "http_api", "rest_api", "api", "rest" ->
+                /*
+                 * ── ONE BRANCH, DECIDED BY THE DATA ──────────────────────────
+                 *
+                 * A tool that carries `http_spec_json` executes on the resolver
+                 * that understands it; everything else executes exactly where it
+                 * did. There is no flag, no environment variable and no
+                 * per-workspace rollout switch, because all three would let the
+                 * two paths diverge for the SAME tool between one run and the
+                 * next — and "it worked yesterday" on a tool that spends money is
+                 * the failure this split exists to avoid.
+                 */
+                if (tool.httpSpecJson != null)
+                    httpSpecResolver.execute(syntheticNode, resolvedInputs, ctx)
+                else
+                    httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
 
             /*
              * ── DATABASE: A NAMED QUERY, OR A GATED FALLBACK ─────────────────
@@ -189,8 +278,12 @@ class ToolNodeExecutor(
             }
 
             "slack", "email", "crm" -> {
-                // Slack/Email/CRM tools are stored as HTTP tools under the hood
-                httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
+                // Slack/Email/CRM tools are stored as HTTP tools under the hood,
+                // and take the same spec-or-legacy split as `http` above.
+                if (tool.httpSpecJson != null)
+                    httpSpecResolver.execute(syntheticNode, resolvedInputs, ctx)
+                else
+                    httpExecutor.execute(syntheticNode, resolvedInputs, ctx)
             }
 
             else -> NodeResult.Failed(
@@ -334,6 +427,43 @@ class ToolNodeExecutor(
                               catch (_: Exception) { value.toString() }
             }
         }
+    }
+
+    /** A string that is ONE template and nothing else: its value replaces it whole. */
+    private val WHOLE_TEMPLATE = Regex("""^\{\{\s*([^}]+?)\s*\}\}$""")
+    private val ANY_TEMPLATE = Regex("""\{\{\s*([^}]+?)\s*\}\}""")
+
+    /**
+     * Resolve `{{ expr }}` templates inside a JSON-shaped value, at any depth.
+     *
+     * Returns plain values — never pre-escaped text — so the caller serialises
+     * exactly once. Null from a whole-string template drops the key.
+     */
+    internal fun resolveTemplateValue(
+        value: Any?,
+        inputs: Map<String, Any>,
+        ctx: com.vectorbea.worker.runtime.graph.RuntimeContext,
+    ): Any? = when (value) {
+        is String -> {
+            val whole = WHOLE_TEMPLATE.matchEntire(value.trim())
+            when {
+                whole != null -> resolveBodyExpr(whole.groupValues[1].trim(), inputs, ctx)
+                !value.contains("{{") -> value
+                else -> ANY_TEMPLATE.replace(value) { match ->
+                    when (val v = resolveBodyExpr(match.groupValues[1].trim(), inputs, ctx)) {
+                        null -> ""
+                        is String -> v
+                        is Number, is Boolean -> v.toString()
+                        else -> runCatching { mapper.writeValueAsString(v) }.getOrDefault(v.toString())
+                    }
+                }
+            }
+        }
+        is Map<*, *> -> value.entries
+            .associate { (k, v) -> k.toString() to resolveTemplateValue(v, inputs, ctx) }
+            .filterValues { it != null }
+        is List<*> -> value.map { resolveTemplateValue(it, inputs, ctx) }
+        else -> value
     }
 
     // ── Template expression resolver ─────────────────────────────────────────
@@ -634,6 +764,14 @@ class ToolNodeExecutor(
         val mcpToolName: String? = null,
         /** Locally-authored result contract. Overrides a server's annotations. */
         val resultContractJson: String? = null,
+        /** The tool's declared parameters, for the required-input check before a call. */
+        val inputSchemaJson: String? = null,
+        /**
+         * The declarative HTTP call (V064). Present means this tool executes on
+         * [com.vectorbea.worker.tools.http.HttpToolResolver]; absent means it
+         * executes on the legacy [HttpNodeExecutor], unchanged.
+         */
+        val httpSpecJson: String? = null,
     )
 
     private fun loadTool(toolId: UUID, workspaceId: UUID): ToolRow? = try {
@@ -642,7 +780,8 @@ class ToolNodeExecutor(
                 """SELECT id, name, type, connection_id, config_json,
                    risk_level, requires_approval, timeout_ms,
                    named_queries_json, allow_freeform_sql,
-                   mcp_server_connection_id, mcp_tool_name, result_contract_json
+                   mcp_server_connection_id, mcp_tool_name, result_contract_json,
+                   http_spec_json, input_schema_json
                    FROM tools
                    WHERE id = ? AND workspace_id = ? AND status = 'active'"""
             ).use { stmt ->
@@ -672,6 +811,8 @@ class ToolNodeExecutor(
                         mcpServerConnectionId = rs.getString("mcp_server_connection_id"),
                         mcpToolName = rs.getString("mcp_tool_name"),
                         resultContractJson = rs.getString("result_contract_json"),
+                        httpSpecJson = rs.getString("http_spec_json"),
+                        inputSchemaJson = rs.getString("input_schema_json"),
                     )
                 }
             }
@@ -705,6 +846,18 @@ class ToolNodeExecutor(
         // Inject connection ID from tool definition
         tool.connectionId?.let { result["connectionId"] = it }
 
+        /*
+         * The declarative spec, passed through verbatim.
+         *
+         * Everything below this line remaps legacy keys — `urlTemplate` to `url`,
+         * `bodyTemplate` to a resolved `body`, `sqlTemplate` to `query`. None of
+         * it applies to a spec-driven tool: `HttpToolResolver` reads the spec and
+         * the model's arguments, and derives the URL, the body and the headers
+         * itself. Handing it a pre-resolved body would be two layers deciding the
+         * same thing, and the one that lost would do so silently.
+         */
+        tool.httpSpecJson?.let { result["httpSpec"] = it }
+
         // Base from tool's stored config
         result.putAll(tool.configJson)
 
@@ -735,6 +888,24 @@ class ToolNodeExecutor(
         (tool.configJson["urlTemplate"] as? String)?.let { result["url"] = it }
         (tool.configJson["url"] as? String)?.let { result["url"] = it }
 
+        /*
+         * ── VALUES FIXED WHEN THE TOOL WAS REGISTERED ────────────────────────
+         *
+         * A catalogue tool (Slack "Post a message", Gmail "Send") lets its author
+         * fix a parameter — the channel, the recipient — and removes it from the
+         * tool's input schema, so neither an agent nor a workflow step can supply
+         * it. The registration dialog wrote those to `boundParameters` and NOTHING
+         * read them: a Slack tool with its channel fixed posted `{"text": …}` with
+         * no channel, and Slack refused every call.
+         *
+         * They are merged here, over the caller's inputs, and the order is the
+         * point: a fixed value beats a supplied one. Binding the channel is the
+         * operator deciding where this tool may post; an agent that could pass
+         * its own `channel` would make that decision decorative.
+         */
+        val inputs: Map<String, Any> = withBoundParameters(tool.configJson, resolvedInputs)
+        result.remove("boundParameters")
+
         // Resolve {{ expr }} placeholders in the body template using resolvedInputs.
         // Without this, Slack/HTTP tools receive literal "{{message}}" text in the body
         // instead of the actual workflow values — the call returns 200 but nothing is posted.
@@ -747,7 +918,7 @@ class ToolNodeExecutor(
 
         // Case A: body stored as a plain String in config_json
         if (rawBody != null) {
-            val resolvedBody = resolveBodyString(rawBody, resolvedInputs, ctx)
+            val resolvedBody = resolveBodyString(rawBody, inputs, ctx)
             log.info("[tool] resolved body (string) [toolName={}, type={}]: {}",
                 tool.name, tool.type, resolvedBody.take(300))
             result["body"] = resolvedBody
@@ -758,25 +929,33 @@ class ToolNodeExecutor(
         @Suppress("UNCHECKED_CAST")
         val bodyFromConfig = tool.configJson["body"] as? Map<String, Any?>
         if (bodyFromConfig != null) {
-            // Walk the Map and resolve {{expr}} in every String value
-            val resolved = bodyFromConfig.mapValues { (_, v) ->
-                when (v) {
-                    is String -> resolveBodyString(v, resolvedInputs, ctx)
-                    else -> v
-                }
-            }
+            /*
+             * Resolved as VALUES, at any depth, and serialised once.
+             *
+             * This used to run `resolveBodyString` on top-level strings only —
+             * which escapes for splicing into JSON text — and then serialise the
+             * map, escaping everything a second time. A message with a quote or a
+             * newline arrived as `\"` and `\n` in the channel, and a template
+             * nested inside a card (Teams' `attachments[0].content.body[0].text`)
+             * was never resolved at all. A whole-string `{{text}}` now becomes the
+             * value itself; a template inside a longer string is interpolated;
+             * a key whose whole-string template resolves to nothing is dropped, so
+             * an optional parameter the caller left out is absent, not empty.
+             */
+            val resolved = resolveTemplateValue(bodyFromConfig, inputs, ctx)
             val resolvedJson = try { mapper.writeValueAsString(resolved) } catch (_: Exception) { null }
             if (resolvedJson != null) {
                 log.info("[tool] resolved body (map) [toolName={}, type={}]: {}",
                     tool.name, tool.type, resolvedJson.take(300))
                 result["body"] = resolvedJson
             }
-        } else if (resolvedInputs.isNotEmpty()) {
-            // No explicit body — pass resolved inputs (from node input mapping) as JSON body.
+        } else if (inputs.isNotEmpty()) {
+            // No explicit body — pass resolved inputs (from node input mapping), with
+            // any registration-fixed values over them, as the JSON body.
             // Applies to http, slack, email, and any SaaS tool type.
             log.info("[tool] using resolvedInputs as body [toolName={}, type={}, uiType={}, keys={}]",
-                tool.name, tool.type, uiType, resolvedInputs.keys)
-            result["body"] = resolvedInputs
+                tool.name, tool.type, uiType, inputs.keys)
+            result["body"] = inputs
         }
 
         // Diagnostic: log the full config_json keys for HTTP tools when no body was set.
@@ -1471,4 +1650,45 @@ class ToolNodeExecutor(
             log.warn("[builtin-email] quota refund failed: {}", e.message)
         }
     }
+}
+
+/**
+ * The caller's inputs with a tool's registration-fixed parameters laid over them.
+ * Fixed values win — see the note where this is used.
+ */
+internal fun withBoundParameters(config: Map<String, Any?>, inputs: Map<String, Any>): Map<String, Any> {
+    @Suppress("UNCHECKED_CAST")
+    val bound = (config["boundParameters"] as? Map<String, Any?>)
+        ?.filterValues { it != null }?.mapValues { it.value!! } ?: emptyMap()
+    return if (bound.isEmpty()) inputs else inputs + bound
+}
+
+/**
+ * Required parameters of [inputSchemaJson] with no usable value: absent, null or
+ * blank in [inputs], and not fixed on the tool (`boundParameters`).
+ */
+internal fun missingRequiredInputs(
+    inputSchemaJson: String?,
+    inputs: Map<String, Any?>,
+    toolConfig: Map<String, Any?>,
+): List<String> {
+    if (inputSchemaJson.isNullOrBlank()) return emptyList()
+    val required = runCatching {
+        (com.fasterxml.jackson.module.kotlin.jacksonObjectMapper()
+            .readValue(inputSchemaJson, Map::class.java)["required"] as? List<*>)
+            ?.filterIsInstance<String>()
+    }.getOrNull() ?: return emptyList()
+    @Suppress("UNCHECKED_CAST")
+    val bound = toolConfig["boundParameters"] as? Map<String, Any?> ?: emptyMap()
+    fun usable(v: Any?) = v != null && !(v is String && v.isBlank())
+    return required.filter { !usable(inputs[it]) && !usable(bound[it]) }
+}
+
+internal fun missingInputsMessage(toolName: String, missing: List<String>, mapping: Map<String, String>): String {
+    val parts = missing.joinToString("; ") { key ->
+        val ref = mapping[key]
+        if (ref.isNullOrBlank()) "$key is not set on the step's Inputs tab"
+        else "$key comes from $ref, which was empty — check that step returns that field"
+    }
+    return "'$toolName' needs ${missing.joinToString(", ")} and got nothing: $parts."
 }
