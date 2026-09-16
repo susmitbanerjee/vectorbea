@@ -72,6 +72,11 @@ export TEMPO_ENDPOINT="${TEMPO_ENDPOINT:-127.0.0.1:4317}"
 # them fails to start.
 export OTLP_HTTP_PORT=4318
 
+# ── Analytics databases: one per environment ────────────────────────────────
+# Defaults for the connections in datasources.yml, shared with the standalone image.
+. /usr/local/lib/grafana-analytics.sh
+grafana_analytics_configure
+
 # ── Grafana access control ──────────────────────────────────────────────────
 # Shared with the standalone Grafana image so the two cannot drift. Sets GF_AUTH_*.
 . /usr/local/lib/grafana-auth.sh

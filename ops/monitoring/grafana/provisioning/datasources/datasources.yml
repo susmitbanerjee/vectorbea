@@ -43,24 +43,54 @@ datasources:
   # `analytics_events.environment` has been a first-class column since V032, so the
   # same `$env` selector works here as on the metric dashboards.
   #
-  # THE CREDENTIAL MUST BE A READ-ONLY ROLE. Not the application user. Grafana
-  # dashboards accept arbitrary SQL from anyone who can edit a panel, and a
-  # connection with write access turns "someone experimented with a query" into a
-  # production incident. See ops/monitoring/railway/README.md §6 for the GRANT.
-  - name: Analytics
+  # ONE DATASOURCE PER ENVIRONMENT, because each environment has its own database.
+  # `analytics_events.environment` alone cannot separate them: the staging API writes
+  # into the staging database and production into production, so a single connection
+  # only ever sees one of them. The dashboards pick the connection from `$env` through
+  # a hidden datasource variable matching the NAME "Analytics <env>" — so the names
+  # below are load-bearing, and must equal the `environment` values (`prod`, `dev`).
+  #
+  # Every query still filters `environment = '$env'`. That is the guard against a
+  # connection pointed at the wrong database: it shows empty panels, never another
+  # environment's numbers under this one's name.
+  #
+  # THE CREDENTIAL MUST BE A READ-ONLY ROLE, in EACH database. Not the application
+  # user. Grafana dashboards accept arbitrary SQL from anyone who can edit a panel,
+  # and a connection with write access turns "someone experimented with a query" into
+  # a production incident. See ops/monitoring/railway/README.md §6 for the GRANT.
+  #
+  # Port and sslmode defaults are exported by the entrypoint (Grafana's provisioning
+  # has no `${VAR:-default}`).
+  - name: Analytics prod
     type: postgres
-    uid: analytics
+    uid: analytics-prod
     access: proxy
-    url: ${ANALYTICS_DB_HOST}:${ANALYTICS_DB_PORT}
-    database: ${ANALYTICS_DB_NAME}
-    user: ${ANALYTICS_DB_USER}
+    url: ${ANALYTICS_PROD_DB_HOST}:${ANALYTICS_PROD_DB_PORT}
+    database: ${ANALYTICS_PROD_DB_NAME}
+    user: ${ANALYTICS_PROD_DB_USER}
     secureJsonData:
-      password: ${ANALYTICS_DB_PASSWORD}
+      password: ${ANALYTICS_PROD_DB_PASSWORD}
     jsonData:
-      sslmode: require
+      sslmode: ${ANALYTICS_PROD_DB_SSLMODE}
       postgresVersion: 1600
       # Neon pools aggressively on its side; a large Grafana-side pool on top of it
       # is how a dashboard refresh starves the application of connections.
+      maxOpenConns: 4
+      maxIdleConns: 2
+      timescaledb: false
+
+  - name: Analytics dev
+    type: postgres
+    uid: analytics-dev
+    access: proxy
+    url: ${ANALYTICS_DEV_DB_HOST}:${ANALYTICS_DEV_DB_PORT}
+    database: ${ANALYTICS_DEV_DB_NAME}
+    user: ${ANALYTICS_DEV_DB_USER}
+    secureJsonData:
+      password: ${ANALYTICS_DEV_DB_PASSWORD}
+    jsonData:
+      sslmode: ${ANALYTICS_DEV_DB_SSLMODE}
+      postgresVersion: 1600
       maxOpenConns: 4
       maxIdleConns: 2
       timescaledb: false

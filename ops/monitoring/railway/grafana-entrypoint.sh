@@ -18,4 +18,8 @@ export GF_SERVER_HTTP_PORT="${PORT:-3000}"
 . /usr/local/lib/grafana-auth.sh
 grafana_auth_configure || exit 1
 
+# Defaults for the per-environment analytics connections in datasources.yml.
+. /usr/local/lib/grafana-analytics.sh
+grafana_analytics_configure
+
 exec /run.sh "$@"

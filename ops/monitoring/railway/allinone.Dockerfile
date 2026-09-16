@@ -68,6 +68,7 @@ COPY ops/monitoring/grafana/dashboards   /var/lib/grafana/dashboards
 COPY ops/monitoring/railway/allinone/supervisord.conf   /etc/supervisord.conf
 COPY ops/monitoring/railway/allinone/nginx.conf.template /etc/nginx/nginx.conf.template
 COPY ops/monitoring/railway/lib/grafana-auth.sh          /usr/local/lib/grafana-auth.sh
+COPY ops/monitoring/railway/lib/grafana-analytics.sh     /usr/local/lib/grafana-analytics.sh
 COPY ops/monitoring/railway/allinone-entrypoint.sh       /usr/local/bin/start-stack.sh
 RUN chmod +x /usr/local/bin/start-stack.sh
 
