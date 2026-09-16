@@ -285,7 +285,10 @@ function IncidentRow({ incident, onDelete }: { incident: IncidentView; onDelete:
        interactive element inside an anchor is invalid, and it makes the button
        navigate as well as fire — which on a destructive action is the worst
        possible failure mode. */
-    <li className="relative">
+    /* min-w-0: a grid item will not shrink below its content's own width, and the
+       reason line is one nowrap line — without this the row grows past the list and
+       the card is clipped by the scroll container. */
+    <li className="relative min-w-0">
       <Link
         href={`/incidents/${incident.id}` as Route}
         className={cn(
