@@ -34,6 +34,21 @@
         "sort": 1
       },
       {
+        "name": "analytics",
+        "label": "Analytics database",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "regex": "/^Analytics ${env}$/",
+        "hide": 2,
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "Analytics prod",
+          "value": "analytics-prod"
+        }
+      },
+      {
         "name": "workspace",
         "label": "Workspace",
         "type": "query",
@@ -409,8 +424,8 @@
       "title": "Recent events",
       "description": "The product event stream for this workspace, joined by eye to the metric panels above. Answers 'what did they actually do' rather than 'what did the platform do to them'.",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 10,

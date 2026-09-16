@@ -18,18 +18,40 @@
       {
         "name": "env",
         "label": "Environment",
-        "type": "query",
-        "datasource": {
-          "type": "postgres",
-          "uid": "analytics"
-        },
-        "query": "SELECT DISTINCT environment FROM analytics_events ORDER BY 1",
-        "refresh": 1,
+        "type": "custom",
+        "query": "prod,dev",
         "includeAll": false,
         "multi": false,
         "current": {
           "text": "prod",
           "value": "prod"
+        },
+        "options": [
+          {
+            "text": "prod",
+            "value": "prod",
+            "selected": true
+          },
+          {
+            "text": "dev",
+            "value": "dev",
+            "selected": false
+          }
+        ]
+      },
+      {
+        "name": "analytics",
+        "label": "Analytics database",
+        "type": "datasource",
+        "query": "grafana-postgresql-datasource",
+        "regex": "/^Analytics ${env}$/",
+        "hide": 2,
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "current": {
+          "text": "Analytics prod",
+          "value": "analytics-prod"
         }
       }
     ]
@@ -53,8 +75,8 @@
       "title": "Daily events by category",
       "description": "The shape of platform use over time. A category dropping to zero is usually a client that stopped emitting, not users who stopped acting — check against a deploy before reading it as a product signal.",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 8,
@@ -97,8 +119,8 @@
       "title": "Active workspaces (7d)",
       "description": "",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 8,
@@ -143,8 +165,8 @@
       "title": "First-time milestones (30d)",
       "description": "NOTE: the `first_*` events in this funnel are defined in the event whitelist but are not yet emitted by the application, so those steps read zero. That is a known instrumentation gap, not a conversion cliff.",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 8,
@@ -177,8 +199,8 @@
       "title": "Architect funnel (30d)",
       "description": "",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 8,
@@ -223,8 +245,8 @@
       "title": "Top events (7d)",
       "description": "Count AND distinct workspaces, deliberately. A high count from one workspace is one enthusiastic customer; the same count spread across thirty is adoption.",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 8,
@@ -257,8 +279,8 @@
       "title": "Run outcomes (7d)",
       "description": "",
       "datasource": {
-        "type": "postgres",
-        "uid": "analytics"
+        "type": "grafana-postgresql-datasource",
+        "uid": "${analytics}"
       },
       "gridPos": {
         "h": 8,

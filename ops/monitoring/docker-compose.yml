@@ -182,14 +182,23 @@ services:
       PROMETHEUS_URL: http://prometheus:9090
       LOKI_URL: http://loki:3100
       TEMPO_URL: http://tempo:3200
-      # The Product and Workspace-support dashboards read analytics_events directly.
-      # This MUST be a read-only role: Grafana accepts arbitrary SQL from anyone who
-      # can edit a panel. See ops/monitoring/railway/README.md §6.
-      ANALYTICS_DB_HOST: ${ANALYTICS_DB_HOST:-host.docker.internal}
-      ANALYTICS_DB_PORT: ${ANALYTICS_DB_PORT:-5432}
-      ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-vectorbea}
-      ANALYTICS_DB_USER: ${ANALYTICS_DB_USER:-grafana_ro}
-      ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD:-}
+      # The Product and Workspace-support dashboards read analytics_events directly,
+      # from one database per environment. These MUST be read-only roles: Grafana
+      # accepts arbitrary SQL from anyone who can edit a panel. See
+      # ops/monitoring/railway/README.md §6. Locally both default to the one database
+      # on the host; set ANALYTICS_DEV_DB_NAME to a second one to see them differ.
+      ANALYTICS_PROD_DB_HOST: ${ANALYTICS_PROD_DB_HOST:-host.docker.internal}
+      ANALYTICS_PROD_DB_PORT: ${ANALYTICS_PROD_DB_PORT:-5432}
+      ANALYTICS_PROD_DB_NAME: ${ANALYTICS_PROD_DB_NAME:-vectorbea}
+      ANALYTICS_PROD_DB_USER: ${ANALYTICS_PROD_DB_USER:-grafana_ro}
+      ANALYTICS_PROD_DB_PASSWORD: ${ANALYTICS_PROD_DB_PASSWORD:-}
+      ANALYTICS_PROD_DB_SSLMODE: ${ANALYTICS_PROD_DB_SSLMODE:-disable}
+      ANALYTICS_DEV_DB_HOST: ${ANALYTICS_DEV_DB_HOST:-host.docker.internal}
+      ANALYTICS_DEV_DB_PORT: ${ANALYTICS_DEV_DB_PORT:-5432}
+      ANALYTICS_DEV_DB_NAME: ${ANALYTICS_DEV_DB_NAME:-vectorbea}
+      ANALYTICS_DEV_DB_USER: ${ANALYTICS_DEV_DB_USER:-grafana_ro}
+      ANALYTICS_DEV_DB_PASSWORD: ${ANALYTICS_DEV_DB_PASSWORD:-}
+      ANALYTICS_DEV_DB_SSLMODE: ${ANALYTICS_DEV_DB_SSLMODE:-disable}
       # Dashboards and datasources are provisioned from this repo, not clicked
       # together in the UI. A dashboard that exists only in Grafana's database is one
       # box failure away from being gone, and is not reviewable.

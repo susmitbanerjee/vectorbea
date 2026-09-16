@@ -32,6 +32,7 @@ ENV GF_AUTH_ANONYMOUS_ENABLED=false \
 
 USER root
 COPY ops/monitoring/railway/lib/grafana-auth.sh   /usr/local/lib/grafana-auth.sh
+COPY ops/monitoring/railway/lib/grafana-analytics.sh /usr/local/lib/grafana-analytics.sh
 COPY ops/monitoring/railway/grafana-entrypoint.sh /usr/local/bin/start-grafana.sh
 RUN chmod +x /usr/local/bin/start-grafana.sh
 USER grafana

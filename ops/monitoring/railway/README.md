@@ -174,11 +174,16 @@ visibly absent rather than silently broken.
 | `SMTP_USER` | e.g. `resend` | defaults to `resend` |
 | `SMTP_PASSWORD` | your provider's API key | Alertmanager starts healthy and **every delivery fails at SMTP** |
 | `ALERT_WEBHOOK_URL` | optional — ntfy topic or Telegram bot | pages arrive by email only |
-| `ANALYTICS_DB_HOST` | Neon host | the Product and Workspace-support dashboards show a datasource error. The other six are unaffected — this is a Postgres datasource, not Prometheus. |
-| `ANALYTICS_DB_PORT` | `5432` | as above |
-| `ANALYTICS_DB_NAME` | `vectorbea` | as above |
-| `ANALYTICS_DB_USER` | `grafana_ro` | as above |
-| `ANALYTICS_DB_PASSWORD` | the read-only role's password, §6 | as above |
+| `ANALYTICS_PROD_DB_HOST` | production database's public host, §6 | the Product dashboard, and the Recent events panel on Workspace support, show a datasource error for `prod`. Every Prometheus dashboard is unaffected. |
+| `ANALYTICS_PROD_DB_PORT` | `5432` (default) | as above |
+| `ANALYTICS_PROD_DB_NAME` | `vectorbea` (default) | as above |
+| `ANALYTICS_PROD_DB_USER` | `grafana_ro` (default) | as above |
+| `ANALYTICS_PROD_DB_PASSWORD` | that database's read-only role password, §6 | as above |
+| `ANALYTICS_PROD_DB_SSLMODE` | `require` (default) | — |
+| `ANALYTICS_DEV_DB_*` | the same six, for the staging database | the same, for `dev` |
+
+`ANALYTICS_DB_*` (no environment) is the old single-database form. It is still read, as
+production's, with a warning at startup; rename it to `ANALYTICS_PROD_DB_*`.
 | `GRAFANA_BREAK_GLASS` | `true` only to recover from a broken OAuth config | password form stays disabled |
 
 ### Do not set these
@@ -368,13 +373,36 @@ companions are in-process Prometheus series, not rows. There is deliberately no
 `job_runs` table, because a job that stops running also stops writing its own status
 row, and a table that only proves health while the thing is healthy proves nothing.
 
-So the whole database step is **one role**, and the database is the Flyway Postgres the
-API uses — not the Supabase `vectorbea` schema, which is dead in every environment.
+So the whole database step is **one role per database**, and the database is the
+Flyway Postgres the API uses — not the Supabase `vectorbea` schema, which is dead in
+every environment.
+
+### Two databases, two connections
+
+Each environment's API writes `analytics_events` into **its own** database, so staging's
+events are only in the staging database. Grafana therefore has one connection per
+environment — **Analytics prod** and **Analytics dev** — and the Environment picker on the
+Product and Workspace-support dashboards switches the connection as well as the filter
+(a hidden `analytics` variable selects the datasource named `Analytics <env>`). Both
+connections come from this one service; nothing is deployed in the application
+environments for this.
+
+Grafana reaches each database over the **public** internet, because Railway's private
+network does not cross projects or environments:
+
+| Database | Host and port to use |
+|---|---|
+| Neon | the endpoint host from the connection string (`ep-….neon.tech`), port `5432`. Use the direct host, not `-pooler`; four connections do not need pooling. |
+| Railway Postgres | its **public** TCP proxy — `DATABASE_PUBLIC_URL` on the Postgres service (`….proxy.rlwy.net:<port>`). The `*.railway.internal` host is unreachable from here. |
+
+Every query still filters `environment = '$env'`, so a connection pointed at the wrong
+database shows empty panels rather than another environment's numbers.
 
 ### The role
 
-Grafana accepts arbitrary SQL from anyone who can edit a panel, so this connection must
-not be able to write.
+Create it in **each** database, with a different password in each. Grafana accepts
+arbitrary SQL from anyone who can edit a panel, so this connection must not be able to
+write.
 
 ```sql
 CREATE ROLE grafana_ro LOGIN PASSWORD '…';
@@ -392,12 +420,14 @@ GRANT SELECT ON analytics_events TO grafana_ro;
 
 ### One thing to keep aligned
 
-The Product dashboard's `$env` values come from `SELECT DISTINCT environment FROM
-analytics_events`; every other dashboard's come from the `environment` label the agents
-stamp from `VECTORBEA_ENV`. Both use `dev` and `prod`, so they line up — but they are
-two independent sources, and a third value appearing in one will not appear in the
-other. `analytics_events.environment` also permits `stage`, which the metric side has
-no equivalent for.
+Three things must use the same environment names, `prod` and `dev`: the agents'
+`VECTORBEA_ENV` (the Prometheus `environment` label), the API's `VECTORBEA_ENV` (the
+`analytics_events.environment` column), and the datasource names `Analytics prod` /
+`Analytics dev`. The Product dashboard's picker is a fixed `prod,dev` list, because it
+can no longer ask a database which environments exist — the database is what it
+selects. Adding an environment means a third datasource and a third value in that list.
+`scripts/monitoring/validate.mjs` checks the datasources and that every SQL panel goes
+through the `analytics` variable.
 
 ## 7. Verify
 
@@ -449,7 +479,10 @@ In order, because each step depends on the one before:
 9. **Open every dashboard** and switch `$env` between `prod` and `dev`. A panel that is
    empty in both is a genuine gap; a panel empty in one is usually correct (staging is
    quiet).
-10. **Fire a synthetic alert** — see `docs/telemetry/RUNBOOKS.md`.
+10. **Both databases answer.** Connections → Data sources → *Analytics prod* → **Save &
+   test**, then *Analytics dev*. Then on **Product**, switch Environment: the numbers
+   must change. If they are identical, both connections point at the same database.
+11. **Fire a synthetic alert** — see `docs/telemetry/RUNBOOKS.md`.
 
 ## 7a. Every dashboard is empty
 
@@ -463,6 +496,7 @@ not.
 | Agent reporting, **API: Not reachable** | Agent → API | `API_METRICS_TARGET` = `<API service name>.railway.internal:<PORT>`. The name is the Railway service's name as shown in the project canvas (not necessarily `api`), and the port is the API's `PORT` variable |
 | Agent reporting, **Worker replicas: 0** | Agent → worker | `WORKER_DNS_NAME` = `<worker service name>.railway.internal`, and the worker's `METRICS_PORT` is unset or `9090` |
 | Everything reporting, dashboards still empty | Environment label | The agent's `VECTORBEA_ENV` (`dev` / `prod`) — pick that value in the dashboard's Environment selector |
+| Only **Product** is empty (or errors) for one environment | That environment's database connection | `ANALYTICS_<PROD\|DEV>_DB_*` (§3, §6): a datasource error is the host, port, password or sslmode; empty panels with no error is the right server but the wrong database, or the role lacks `SELECT` on `analytics_events` |
 
 The agent logs a failed scrape as `Failed to scrape Prometheus endpoint` with the
 target and the reason, which settles the second and third rows without guessing.

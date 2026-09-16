@@ -159,6 +159,27 @@ for (const file of dashFiles) {
   const panels = d.panels ?? [];
   if (panels.length === 0) fail(where, 'has no panels');
 
+  // Each environment has its own database, so a SQL panel pinned to one datasource
+  // shows one environment's data whichever environment is selected. SQL panels must
+  // go through the hidden `analytics` variable, which follows `$env`.
+  const sqlPanels = panels.filter((p) => /postgres/.test(typeof p.datasource === 'object' ? p.datasource?.type ?? '' : ''));
+  if (sqlPanels.length > 0) {
+    const dbVar = (d.templating?.list ?? []).find((v) => v.name === 'analytics');
+    if (!dbVar || dbVar.type !== 'datasource' || !/\$\{?env\}?/.test(dbVar.regex ?? '')) {
+      fail(where, 'has SQL panels but no `analytics` datasource variable whose regex follows $env');
+    }
+    for (const p of sqlPanels) {
+      if (p.datasource?.uid !== '${analytics}') {
+        fail(where, `SQL panel "${p.title}" is pinned to datasource "${p.datasource?.uid}" instead of \${analytics}`);
+      }
+      for (const t of p.targets ?? []) {
+        if (t.rawSql !== undefined && !/environment\s*=\s*'\$\{?env\}?'/.test(t.rawSql)) {
+          fail(where, `SQL panel "${p.title}" does not filter on environment`);
+        }
+      }
+    }
+  }
+
   let promTargets = 0;
   for (const p of panels) {
     if (p.type === 'row') continue;
@@ -319,6 +340,22 @@ if (!/GF_AUTH_ANONYMOUS_ENABLED=false/.test(gfDocker)) {
   fail('grafana.Dockerfile', 'anonymous access is not explicitly disabled');
 } else ok('Grafana anonymous access is disabled');
 
+// One analytics datasource per environment. The dashboards select one by NAME
+// ("Analytics <env>"), so a renamed datasource empties those panels without an error.
+const datasources = stripComments(readFileSync(join(OPS, 'grafana', 'provisioning', 'datasources', 'datasources.yml'), 'utf8'));
+for (const env of ['prod', 'dev']) {
+  const upper = env.toUpperCase();
+  if (!new RegExp(`name:\\s*Analytics ${env}\\s*$`, 'm').test(datasources)) {
+    fail('datasources.yml', `no datasource named "Analytics ${env}" — the ${env} database panels would select nothing`);
+  } else if (!datasources.includes(`ANALYTICS_${upper}_DB_HOST`)) {
+    fail('datasources.yml', `"Analytics ${env}" does not read ANALYTICS_${upper}_DB_*`);
+  }
+}
+if (!['grafana-entrypoint.sh', 'allinone-entrypoint.sh'].every((f) =>
+  /grafana_analytics_configure/.test(readFileSync(join(OPS, 'railway', f), 'utf8')))) {
+  fail('railway entrypoints', 'an entrypoint does not export the analytics connection defaults');
+} else ok('one analytics database connection per environment, configured by both entrypoints');
+
 // ── The all-in-one container's routing boundary ─────────────────────────────
 //
 // In the six-service layout, Prometheus was private because it had no domain — an
@@ -335,6 +372,18 @@ const unexpected = upstreams.filter((u) => !allowedUpstreams.has(u));
 if (unexpected.length) {
   fail('nginx.conf.template', `routes to ${[...new Set(unexpected)].join(', ')} — only grafana and collector may be reachable`);
 } else ok(`nginx routes to only ${[...new Set(upstreams)].join(' and ')}`);
+
+// A location that sets ANY proxy_set_header stops inheriting ALL of them, Host
+// included. Grafana then sees `Host: grafana`, and its CSRF check refuses every
+// logged-in POST with "origin not allowed" — sign-in and every dashboard query.
+const headerLocations = [...nginxConf.matchAll(/location\s+([^{\s]+)\s*\{([^}]*)\}/g)]
+  .filter((m) => /proxy_set_header/.test(m[2]))
+  .map((m) => m[1]);
+if (headerLocations.length) {
+  fail('nginx.conf.template', `location ${headerLocations.join(', ')} sets proxy_set_header, so it drops the inherited Host header`);
+} else if (!/proxy_set_header\s+Host\s+\$host;/.test(nginxConf)) {
+  fail('nginx.conf.template', 'does not forward the Host header — Grafana would refuse logged-in requests as cross-origin');
+} else ok('every proxied request carries the original Host header');
 
 // The OTLP path must be the ONLY non-Grafana route, and it must reach the collector.
 if (!/location \/v1\/ \{[\s\S]{0,200}?proxy_pass http:\/\/collector/.test(nginxConf)) {
