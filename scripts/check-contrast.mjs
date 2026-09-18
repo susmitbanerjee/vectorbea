@@ -146,6 +146,8 @@ export function contrast(fg, bg) {
 const READING_SURFACES = ["--bg-app", "--bg-base", "--bg-raised", "--bg-overlay", "--bg-sunken"];
 const CARD_SURFACES = ["--bg-base", "--bg-raised"];
 const STATUSES = ["success", "failed", "live", "waiting", "queued", "cancelled"];
+// Free is absent on purpose: it has no tokens, because it draws nothing.
+const PLAN_TIERS = ["pro", "team", "enterprise"];
 
 /** @type {{fg:string,bg:string,min:number,kind:string,note?:string}[]} */
 const PAIRS = [];
@@ -191,6 +193,20 @@ for (const r of ["low", "medium", "high", "critical"]) {
 }
 for (const e of ["production", "staging", "development"]) {
   add(`--env-${e}`, "--bg-app", 3.0, "ui", "environment rail / chip");
+}
+
+// Plan tier: the ring sits on chrome, the chip label sits on its own fill.
+for (const t of PLAN_TIERS) {
+  add(`--plan-${t}-chip-fg`, `--plan-${t}-chip-bg`, 4.5, "text", "plan chip label");
+  for (const bg of [...CARD_SURFACES, "--bg-app", "--bg-overlay"]) {
+    add(`--plan-${t}-ink`, bg, 3.0, "ui", "plan ring on an avatar");
+  }
+  // Enterprise's chip is a SOLID inversion, so its outline is its own fill and
+  // measuring the two against each other asks a question with no answer. The
+  // tinted tiers still have to clear 3:1, which is what this skips past.
+  if (t !== "enterprise") {
+    add(`--plan-${t}-ink`, `--plan-${t}-chip-bg`, 3.0, "ui", "plan chip outline");
+  }
 }
 
 // Decorative and WCAG-exempt — measured and printed, never failed.
@@ -247,6 +263,29 @@ for (const [theme, map] of THEMES) {
     const hex = resolve(`--status-${s}`, map);
     if (hex && iris.has(hex)) {
       ruleViolations.push(`[${theme}] --status-${s} resolves to ${hex}, which is the BRAND hue. Status must never be iris.`);
+    }
+  }
+
+  // A plan tier is neither. It must not borrow the brand — a gold ring that is
+  // actually iris says "selected" on something nobody selected — and it must not
+  // borrow a status, INCLUDING EMBER: gold and amber are eleven degrees apart,
+  // so the one way this design fails silently is Team drifting into the colour
+  // of a run that is waiting on a human.
+  const planForbidden = new Map();
+  for (const f of ["iris", "verdant", "signal", "pulse", "ember"]) {
+    for (const hex of familyHexes(f, map)) planForbidden.set(hex, f);
+  }
+  for (const t of PLAN_TIERS) {
+    for (const role of ["ink", "chip-fg"]) {
+      const token = `--plan-${t}-${role}`;
+      const hex = resolve(token, map);
+      const family = hex ? planForbidden.get(hex) : undefined;
+      if (family) {
+        ruleViolations.push(
+          `[${theme}] ${token} resolves to ${hex}, which is a ${family.toUpperCase()} step. ` +
+          `A plan tier must not wear the brand or a status.`,
+        );
+      }
     }
   }
 

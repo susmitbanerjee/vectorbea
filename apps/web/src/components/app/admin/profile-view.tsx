@@ -9,6 +9,8 @@ import { Button } from "~/components/ui/button";
 import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
 import { TimezonePicker } from "~/components/ui/timezone-picker";
+import { PlanRing, planTier } from "~/components/ui/plan-badge";
+import { useEntitlements } from "~/lib/entitlements/use-entitlements";
 import { browserTimeZone, setPreferredTimeZone } from "~/lib/time/time-zone";
 import { cn } from "~/lib/cn";
 import { AdminInlineState, describeAdminFailure } from "./admin-states";
@@ -310,28 +312,44 @@ function SecurityPanel({ profile }: { profile: Profile }) {
 
 /* ── Atoms ────────────────────────────────────────────────────────────────── */
 
+/**
+ * The picture, inside the ring of the plan the current workspace is on.
+ *
+ * The ring is the WORKSPACE's, even here on a page about the person — that is
+ * the only plan the API will enforce for them while they are in it, and it is
+ * the same ring the sidebar draws two hundred pixels to the left. Reading it as
+ * "my plan" is the misreading this whole treatment has to survive, so the two
+ * places it appears are the two places the account already lives, and neither
+ * of them is a members list.
+ */
 function Avatar({ url, name }: { url: string | null; name: string }) {
   const [broken, setBroken] = React.useState(false);
   React.useEffect(() => { setBroken(false); }, [url]);
 
-  if (url && !broken) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- arbitrary remote avatar, not a build-time asset
-      <img
-        src={url}
-        alt=""
-        onError={() => setBroken(true)}
-        className="border-subtle size-16 shrink-0 rounded-full border object-cover"
-      />
-    );
-  }
+  const { planCode } = useEntitlements();
+  const tier = planTier(planCode);
+
+  // `lg` offset: at 64px a two-pixel gap closes up and the ring reads as a
+  // border on the photo rather than as something around it.
   return (
-    <span
-      aria-hidden="true"
-      className="bg-accent-subtle text-accent border-accent-border grid size-16 shrink-0 place-items-center rounded-full border"
-    >
-      <Text variant="heading-sm" tone="inherit">{name.slice(0, 1).toUpperCase()}</Text>
-    </span>
+    <PlanRing tier={tier} offset="lg">
+      {url && !broken ? (
+        // eslint-disable-next-line @next/next/no-img-element -- arbitrary remote avatar, not a build-time asset
+        <img
+          src={url}
+          alt=""
+          onError={() => setBroken(true)}
+          className="border-subtle size-16 shrink-0 rounded-full border object-cover"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="bg-accent-subtle text-accent border-accent-border grid size-16 shrink-0 place-items-center rounded-full border"
+        >
+          <Text variant="heading-sm" tone="inherit">{name.slice(0, 1).toUpperCase()}</Text>
+        </span>
+      )}
+    </PlanRing>
   );
 }
 

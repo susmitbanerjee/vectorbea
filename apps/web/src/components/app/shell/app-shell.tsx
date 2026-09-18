@@ -15,6 +15,7 @@ import { CommandPalette } from "./command-palette";
 import { ShortcutsSheet } from "./shortcuts-sheet";
 import { type ShellCounts, type Workspace } from "~/mocks/shell";
 import { useWorkspace } from "~/lib/workspace/workspace-provider";
+import { EntitlementProvider } from "~/lib/entitlements/use-entitlements";
 import { useApi } from "~/lib/api/api-provider";
 import { useApiQuery } from "~/lib/api/hooks";
 import { queryKeys } from "~/lib/api/keys";
@@ -48,7 +49,16 @@ export function AppShell({ children, user }: AppShellProps) {
   return (
     <KeyboardProvider>
       <TooltipProvider delayDuration={400} skipDelayDuration={200}>
-        <ShellInner user={user}>{children}</ShellInner>
+        {/* Entitlements move up to the shell because the sidebar now reads them:
+            the account row wears the workspace's plan. Two screens below here
+            (the builder and the template gallery) mount their own provider, and
+            they can keep it — both queries are keyed by workspace and cached, so
+            a nested provider re-reads the same answer rather than re-fetching
+            it, and neither screen has to depend on being mounted under a shell
+            to gate its palette. */}
+        <EntitlementProvider>
+          <ShellInner user={user}>{children}</ShellInner>
+        </EntitlementProvider>
       </TooltipProvider>
     </KeyboardProvider>
   );
