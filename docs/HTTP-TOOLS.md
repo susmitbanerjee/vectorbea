@@ -278,25 +278,13 @@ the old resolver could not act on. One scheme is chosen (the one most operations
 require) and the credential is prompted for **once**, at connection level;
 prompting per operation would make importing forty tools a forty-step wizard.
 
-A connection is asked for **only when the document needs one**, which is two
-cases and not "HTTP tools have connections":
-
-* **A relative or absent `servers` entry.** The document describes its paths
-  relative to wherever it was served from, so it never says which host to call,
-  and the connection's base URL is the only other source of one.
-* **A declared security scheme.** Every strategy but `inherit` and `none` names
-  *fields* of a connection's secret bundle (§2.3), so without a bundle there is
-  nothing to read them from.
-
-A document with an absolute server and no security produces tools that need
-neither, and the wizard skips the credential step and says so on the operations
-step. It refused them until this was fixed, which was the same mistake
-`toolRequiresConnection` had already been corrected for and reached through a
-different button: the skip fired on "no security", the Create button still
-demanded a connection, and the step that would have set one was no longer on
-screen. `ApiSpecRoutes.connectionRequirement` is the copy that counts, and it
-names the operation and which of the two reasons applies — "these tools need a
-credential" is the wrong sentence for a document that declared none.
+The connection step is shown **even when the document declares no security**, and
+asks the question there actually is. Every imported tool hangs off one connection
+(§5), so that step is where the host and the allowed hosts for the whole set are
+chosen, not only the key — and a document with no scheme is imported against a
+`Generic HTTP` connection whose auth is `none`. Skipping the step on "no
+security" is how the Create button became unsatisfiable: it still required what
+the skipped step was the only place to set.
 
 External `$ref`s are refused with a message naming `redocly bundle`. Following one
 would make the API process fetch an address the document chose. The URL fetch
@@ -337,6 +325,39 @@ off weeks later.
 
 Rejected versions are kept, so the same declined change is not re-proposed on
 every re-import until people stop reading the queue.
+
+---
+
+## 5. A tool names its connection
+
+An HTTP tool requires a `connection_id`. This is a rule about how an API is
+modelled, not a limit of the runtime — `HttpToolResolver` executes a
+connection-less tool perfectly well and always has, and nothing here changes
+that.
+
+An API is described **once**, as an integration. A tool is one fine-tuned call on
+it. Somebody registering an API registers several: a GET, a POST, a delete. Every
+one of them wants the same host, the same credential, the same allowed hosts and
+the same egress policy, and with a connection that is one row they all point at —
+`RequestAssembler.joinUrl` composes the connection's base URL with each tool's
+relative path (§2), so staging to production is one edit rather than one per
+tool, and revoking the credential revokes the set. Without one, that shared fact
+is copied N times, which is the state where a base URL is changed in four places
+out of five.
+
+**This is not the dead end the same rule was before V064.** That refusal was
+wrong because the only way past it was inventing an empty connection. That is now
+the supported shape and not a workaround: the catalogue ships a `Generic HTTP`
+integration whose auth methods are `none` and `api-key`, so an API with no key is
+a connection carrying its base URL and nothing else — a truthful description of
+it, and the place its allowed hosts and egress policy live if it ever needs them.
+
+`toolRequiresConnection` is the enforcement. The create dialog, the registry
+editor and the import wizard each mirror it so the answer arrives beside the
+field rather than after a round trip. A tool saved **before** the rule keeps
+running and keeps its `NULL`; the editor offers "No connection" for exactly that
+tool, so the select has a value to render, and still refuses the save until one
+is picked.
 
 ---
 

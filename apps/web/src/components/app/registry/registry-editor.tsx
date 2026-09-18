@@ -165,19 +165,20 @@ export function ToolEditor({
     return () => { alive = false; };
   }, [api, id, scope]);
 
+  /* Mirrors `toolRequiresConnection` in the API. */
+  const requiresConnection = ["http", "database", "llm_generate"].includes(type);
   /*
-   * Mirrors `toolRequiresConnection` in the API, which has excluded `http` since
-   * V064: the call lives in `httpSpec` and carries its own absolute URL, so a
-   * tool against a public endpoint needs neither base URL nor credential, and
-   * `HttpToolResolver` runs it under `EgressPolicy.PUBLIC`.
+   * A tool that is ALREADY saved without one keeps "No connection" on the list.
    *
-   * Listing `http` here was worse than a stale hint. A connection-less HTTP tool
-   * — which the create dialog and the API both allow — opened with its select on
-   * an option this form had removed, and Save disabled beneath an error saying
-   * the adapter cannot run without a connection. The tool ran fine; it just
-   * could never be edited again.
+   * Not an exemption — `blocked` below still refuses the save, and the field
+   * still reads as required. It is there so the select has a value to render.
+   * Removing the option a tool is sitting on leaves a blank control above an
+   * error about a state the form is no longer able to depict, which reads as a
+   * broken screen rather than as one thing to go and fix. The tool keeps running
+   * either way: the requirement is a rule about how APIs are modelled here, and
+   * `HttpToolResolver` has never needed a connection to execute a call.
    */
-  const requiresConnection = ["database", "llm_generate"].includes(type);
+  const strandedWithoutConnection = requiresConnection && connectionId === "none";
   const compatible = connections.filter((connection) =>
     type === "custom"
       || (type === "http" && connection.type === "http")
@@ -196,7 +197,7 @@ export function ToolEditor({
    */
   const specProblems = httpSpec ? problemsIn(httpSpec) : [];
   const blocked = !name.trim() || !timeoutValid
-    || (requiresConnection && connectionId === "none")
+    || strandedWithoutConnection
     || specProblems.length > 0;
 
   async function save() {
@@ -266,19 +267,27 @@ export function ToolEditor({
             label="Connection"
             required={requiresConnection}
             description={
-              requiresConnection
-                ? "Required for this adapter."
-                : type === "http"
-                  ? "Optional. Without one the tool calls its own URL under public egress, with no credential."
+              type === "http"
+                ? "The API this tool calls. It supplies the base URL the path below is appended to, and the credential."
+                : requiresConnection
+                  ? "Required for this adapter."
                   : "Optional for this adapter."
             }
-            error={requiresConnection && connectionId === "none" ? "This adapter cannot run without a connection." : undefined}
+            error={
+              strandedWithoutConnection
+                ? type === "http"
+                  ? "This tool was saved before an HTTP tool had to name its API. Pick the connection it calls, and its base URL takes over from the tool's own."
+                  : "This adapter cannot run without a connection."
+                : undefined
+            }
           >
             <Select
               value={connectionId}
               onValueChange={setConnectionId}
               options={[
-                ...(requiresConnection ? [] : [{ value: "none", label: "No connection" }]),
+                ...(!requiresConnection || strandedWithoutConnection
+                  ? [{ value: "none", label: "No connection" }]
+                  : []),
                 ...compatible.map((connection) => ({
                   value: connection.id,
                   label: connection.name,
