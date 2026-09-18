@@ -166,7 +166,12 @@ export function IntegrationsView() {
       <IntegrationDetail
         integration={open}
         onClose={() => setParams({ integration: null })}
-        onConnect={(id) => { if (id === "http") { setParams({ integration: null }); setHttpAction("test"); } else setParams({ integration: null, connect: id }); }}
+        /* Generic HTTP connects like everything else. It used to divert to the
+           request tester, which made it the one catalogue entry with no way to
+           produce a connection — survivable while an HTTP tool did not need one,
+           and a hole the moment it did, since this is the integration the tool
+           form sends people to. The tester is still here, as its own action. */
+        onConnect={(id) => setParams({ integration: null, connect: id })}
         canBuild={canBuild}
         onHttpAction={(action) => {
           const existing = connections.filter((connection) => providerMatches("http", connection.provider));
@@ -177,7 +182,7 @@ export function IntegrationsView() {
         }}
       />
       <CreateConnectionDialog
-        open={connectTo !== null && connectTo.id !== "http"}
+        open={connectTo !== null}
         presetProvider={connectTo?.id ?? null}
         onOpenChange={(next) => { if (!next) { setParams({ connect: null }); } }}
         onCreated={() => {
@@ -186,7 +191,7 @@ export function IntegrationsView() {
 
         }}
       />
-      {httpAction === "test" || connectTo?.id === "http" ? <HttpClientDialog onCreateTool={(spec) => {
+      {httpAction === "test" ? <HttpClientDialog onCreateTool={(spec) => {
         setHttpSpecDraft(spec); setHttpAction("create"); setParams({ connect: null });
       }} onClose={() => { setHttpAction(null); setParams({ connect: null }); }} /> : null}
       {httpAction === "create" ? <CreateToolDialog
@@ -301,14 +306,21 @@ function IntegrationDetail({
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <div className="grid gap-4">
               <Text variant="body-sm" tone="secondary" className="block">{integration.description}</Text>
-              {integration.id === "http" ? <Section title="HTTP requests and API documents" help="Build a tool by hand, or import one from an API document.">
+              {integration.id === "http" ? <Section title="Build tools on this API" help="A connection holds the API. Each tool is one call on it.">
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="primary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("test")}>Open HTTP client</Button>
                   <Button variant="secondary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("create")}>Create HTTP tool</Button>
                   <Button variant="secondary" size="sm" disabled={!canBuild} onClick={() => onHttpAction("import")}>Import OpenAPI / Postman</Button>
+                  <Button variant="ghost" size="sm" disabled={!canBuild} onClick={() => onHttpAction("test")}>Open HTTP client</Button>
                 </div>
+                {/* Says the ORDER, because both routes below end at a connection
+                    picker and arriving there with nothing to pick is the thing
+                    that reads as a broken form rather than as a missing step. */}
                 <Text variant="caption" tone="muted" className="mt-2 block">
-                  {!canBuild ? "Creating tools requires the developer role or higher." : isConnected ? "Choose a saved connection for these tools." : "Test requests without saving a connection. Import API documents separately to generate tools."}
+                  {!canBuild
+                    ? "Creating tools requires the developer role or higher."
+                    : isConnected
+                      ? "Both build on a saved connection — it supplies the base URL and the credential, and each tool adds a method and a path."
+                      : "Connect the API first: its base URL and credential live there, and every tool you build on it inherits them. The HTTP client sends a request without saving anything."}
                 </Text>
               </Section> : null}
 
@@ -386,7 +398,7 @@ function IntegrationDetail({
 
           <footer className="border-subtle flex justify-end gap-2 border-t px-4 py-3">
             <Button variant="primary" size="sm" onClick={() => onConnect(integration.id)}>
-              {integration.id === "http" ? "Open HTTP client" : isConnected ? "Add another connection" : `Connect ${integration.name}`}
+              {isConnected ? "Add another connection" : `Connect ${integration.name}`}
             </Button>
           </footer>
         </Dialog.Content>
