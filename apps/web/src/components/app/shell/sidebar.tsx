@@ -10,6 +10,8 @@ import { Tooltip } from "~/components/ui/tooltip";
 import { Kbd } from "~/components/ui/kbd";
 import { overlaySurface, overlayMotion, menuItem } from "~/components/ui/select";
 import { useSession } from "~/lib/auth/session-provider";
+import { useEntitlements } from "~/lib/entitlements/use-entitlements";
+import { PlanChip, PlanRing, planTier } from "~/components/ui/plan-badge";
 import { NAV, type NavItem } from "./nav";
 import { CountRoll } from "./count-roll";
 import { WorkspaceSwitcher } from "./workspace-switcher";
@@ -293,6 +295,25 @@ function UserMenu({
   const avatarUrl = user?.avatarUrl;
 
   /*
+   * ── THE PLAN ON THE ACCOUNT ROW ──────────────────────────────────────────
+   *
+   * The ring and the chip say what THIS WORKSPACE's billing account is on, not
+   * what the person signed in is on — those are different questions and only
+   * the first one matches what the API will enforce (invariant 11). Switching
+   * workspaces changes the ring, which is the correct and useful behaviour: it
+   * is the same fact every gate in the product is about to use.
+   *
+   * Free resolves to no tier and draws nothing, so does an answer that has not
+   * arrived. There is no skeleton here on purpose — a placeholder pill that
+   * resolves to nothing for most accounts is a worse first paint than a chip
+   * that appears once, and the chip is a decoration, not information the screen
+   * is incomplete without.
+   */
+  const { planCode, planName, upgradeTo } = useEntitlements();
+  const tier = planTier(planCode);
+  const planLabel = planName || tier?.fallbackLabel || null;
+
+  /*
    * ── SIGN OUT WAS A LINK TO THE SIGN-IN PAGE ──────────────────────────────
    *
    * `<Link href="/signin">Sign out</Link>`. It navigated. It cleared nothing —
@@ -310,39 +331,87 @@ function UserMenu({
 
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger
-        className={cn(
-          "flex items-center gap-2.5 rounded-sm px-2 py-1.5",
-          "font-ui text-body-sm text-fg-secondary",
-          "transition-colors duration-fast outline-none",
-          "hover:bg-surface-hover hover:text-fg-primary focus-visible:focus-ring",
-          collapsed && "justify-center px-0",
-        )}
-        aria-label={`Account: ${name}`}
+      <Tooltip
+        disabled={!collapsed}
+        side="right"
+        content={name}
+        shortcut={planLabel ?? undefined}
       >
-        {avatarUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- external provider avatar, not a local asset
-          <img
-            src={avatarUrl}
-            alt=""
-            className="size-5 shrink-0 rounded-full object-cover"
-          />
-        ) : null}
-        {collapsed ? null : <span className="truncate">{name}</span>}
-      </DropdownMenu.Trigger>
+        <DropdownMenu.Trigger
+          className={cn(
+            "flex items-center gap-2.5 rounded-sm px-2 py-1.5",
+            "font-ui text-body-sm text-fg-secondary",
+            "transition-colors duration-fast outline-none",
+            "hover:bg-surface-hover hover:text-fg-primary focus-visible:focus-ring",
+            collapsed && "justify-center px-0",
+          )}
+          /* The plan belongs in the accessible name, not only in the ring —
+             colour is never the only carrier of a fact (design §14), and a ring
+             is colour and nothing else. */
+          aria-label={planLabel ? `Account: ${name}, ${planLabel} plan` : `Account: ${name}`}
+        >
+          <PlanRing tier={tier}>
+            <UserAvatar url={avatarUrl} name={name} size="sm" />
+          </PlanRing>
+          {collapsed ? null : (
+            <>
+              <span className="truncate">{name}</span>
+              <PlanChip tier={tier} name={planName} className="ml-auto" />
+            </>
+          )}
+        </DropdownMenu.Trigger>
+      </Tooltip>
 
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           side="top"
           align="start"
           sideOffset={6}
-          className={cn(overlaySurface, overlayMotion, "z-popover w-56 p-1")}
+          className={cn(overlaySurface, overlayMotion, "z-popover w-64 p-1")}
         >
           {email ? (
-            <div className="border-subtle mb-1 border-b px-2 pb-2 pt-1">
-              <p className="font-ui text-body-sm text-fg-primary truncate">{name}</p>
-              <p className="font-ui text-caption text-fg-muted truncate">{email}</p>
+            <div className="border-subtle mb-1 flex items-center gap-2.5 border-b px-2 pb-2 pt-1">
+              <PlanRing tier={tier}>
+                <UserAvatar url={avatarUrl} name={name} size="md" />
+              </PlanRing>
+              <div className="min-w-0">
+                <p className="font-ui text-body-sm text-fg-primary truncate">{name}</p>
+                <p className="font-ui text-caption text-fg-muted truncate">{email}</p>
+              </div>
             </div>
+          ) : null}
+
+          {/* What the WORKSPACE is on. Named as such, because the row above it
+              is the person and the two are different subjects — a Pro
+              subscriber inside a Free workspace is held to Free, and this line
+              is the only place the product can say so before a gate does. */}
+          {planLabel ? (
+            <div className="flex items-center gap-2 px-2 pb-1.5 pt-1">
+              <span className="font-ui text-caption text-fg-muted shrink-0">Workspace plan</span>
+              {tier ? (
+                <PlanChip tier={tier} name={planName} className="ml-auto" />
+              ) : (
+                // Free still gets its name here — this row is a statement of
+                // fact, not the decoration. It is the ring and the chip that
+                // Free deliberately has none of.
+                <span className="font-ui text-caption text-fg-secondary ml-auto truncate">
+                  {planLabel}
+                </span>
+              )}
+            </div>
+          ) : null}
+
+          {/* Only when the catalogue says there is somewhere to go. Enterprise
+              is the top plan and gets no upsell, which is the point of reading
+              this from the plan row rather than from a list written here.
+
+              The link is the in-product plan page rather than the plan's own
+              `upgradeUrl`: that field is data, a typed route is not, and the
+              screen it would skip is where the upgrade is actually filed. */}
+          {upgradeTo ? (
+            <DropdownMenu.Item className={menuItem} asChild>
+              <Link href={"/settings/billing" as never}>Upgrade to {upgradeTo.name}</Link>
+            </DropdownMenu.Item>
           ) : null}
 
           <DropdownMenu.Item className={menuItem} asChild>
@@ -368,5 +437,62 @@ function UserMenu({
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
+  );
+}
+
+/**
+ * The account picture, with the letter it falls back to.
+ *
+ * ── IT USED TO RENDER NOTHING ────────────────────────────────────────────────
+ * The trigger was `{avatarUrl ? <img/> : null}`, so an account with no picture —
+ * and a collapsed sidebar — had an EMPTY 56px button as its only way into
+ * Profile and Sign out. It was invisible, and it was the whole account menu.
+ *
+ * That also decides this component's shape: the plan ring is drawn around the
+ * avatar, so an avatar that is sometimes absent is a ring that is sometimes
+ * absent, and the tier would silently stop being visible for exactly the
+ * accounts that never uploaded a photo. A fallback is not a nicety here; it is
+ * what makes the feature above it true for everybody.
+ *
+ * `onError` matters for the same reason: a provider URL that 404s (a rotated
+ * Google photo, a deleted Slack avatar) leaves a broken-image glyph inside a
+ * gold ring, which looks like a rendering failure rather than a missing file.
+ */
+function UserAvatar({
+  url, name, size,
+}: {
+  url?: string | null;
+  name: string;
+  size: "sm" | "md";
+}) {
+  const [broken, setBroken] = React.useState(false);
+  React.useEffect(() => { setBroken(false); }, [url]);
+
+  const box = size === "sm" ? "size-5" : "size-8";
+
+  if (url && !broken) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- external provider avatar, not a local asset
+      <img
+        src={url}
+        alt=""
+        onError={() => setBroken(true)}
+        className={cn(box, "shrink-0 rounded-full object-cover")}
+      />
+    );
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className={cn(
+        box,
+        "bg-accent-subtle text-accent grid shrink-0 place-items-center rounded-full",
+        "font-ui",
+        size === "sm" ? "text-eyebrow" : "text-label",
+      )}
+    >
+      {name.slice(0, 1).toUpperCase()}
+    </span>
   );
 }

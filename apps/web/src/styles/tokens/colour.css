@@ -130,6 +130,38 @@
   --pulse-700: #0a748f;
   --pulse-950: #06283a;
 
+  /* ── Plan tier hues — WHO IS PAYING. A third disjoint set. ──────────────────
+     Brand says "ours", status says "how the run went", and these say "what this
+     workspace bought". Borrowing from either of the other two would be the same
+     class of mistake this file exists to prevent: a paying customer wearing the
+     colour of a failed run, or a decoration that reads as "selected" on a
+     control nobody selected.
+
+     Both hues clear 40° from verdant, signal, pulse, ember AND iris — the
+     separation the chart sequence is held to, for the same reason.
+
+     AUREATE IS AT 48°, NOT THE LOW 40s. Ember (human involvement) sits at 33°,
+     and these are drawn as a 1.5px ring around a 20px avatar. Gold and amber
+     are already close; at that size, ten degrees apart is one colour. */
+
+  /* Amethyst — Pro. 281°, which is 41° off iris. */
+  --amethyst-50: #f8edfe;
+  --amethyst-200: #e9c9fb;
+  --amethyst-400: #cd83f0;
+  --amethyst-500: #bb5ee8;
+  --amethyst-600: #9c3bcb;
+  --amethyst-700: #7e28a6;
+  --amethyst-950: #2d0c40;
+
+  /* Aureate — Team. Gold, and deliberately not amber. */
+  --aureate-50: #fbf3d9;
+  --aureate-200: #f2e2a5;
+  --aureate-400: #d9bc47;
+  --aureate-500: #c2a52c;
+  --aureate-600: #9b8317;
+  --aureate-700: #786510;
+  --aureate-950: #2a2304;
+
   /* ── Chart sequence — CATEGORICAL, and never a status. ──────────────────────
      A stacked band is an AGENT, not an outcome. Borrowing the status ramp would
      make the expensive member red and say it failed; borrowing iris would make
@@ -260,6 +292,34 @@
   --status-cancelled-subtle: var(--graphite-850);
   --status-cancelled-border: var(--graphite-400);
 
+  /* ── Plan tier — the ring on an avatar, and the chip beside it. ─────────────
+     Free has NO tokens here, and that is the design: the absence is what makes
+     the presence mean something. A "Free" chip on every unpaid account would
+     make the paid ones ordinary.
+
+     Three roles per tier, because the top tier inverts:
+       -ink      the ring, and the chip's outline
+       -chip-bg  the chip fill
+       -chip-fg  the chip label, on that fill
+
+     Pro and Team are tinted chips, the shape every badge in the product uses.
+     ENTERPRISE IS A SOLID INVERSION — ink fill, surface-coloured label — and it
+     is the only chip in the product that does that. That is the whole point:
+     gold escalates to the black card, and on dark the black card is a white
+     one. Handing Enterprise a fourth hue would have put it 20° from either Pro
+     or Team, which at this size is not a tier, it is a rendering bug. */
+  --plan-pro-ink: var(--amethyst-500);
+  --plan-pro-chip-bg: var(--amethyst-950);
+  --plan-pro-chip-fg: var(--amethyst-400);
+
+  --plan-team-ink: var(--aureate-500);
+  --plan-team-chip-bg: var(--aureate-950);
+  --plan-team-chip-fg: var(--aureate-400);
+
+  --plan-enterprise-ink: var(--graphite-50);
+  --plan-enterprise-chip-bg: var(--graphite-50);
+  --plan-enterprise-chip-fg: var(--graphite-1000);
+
   /* ── Risk (§3.5). Always paired with a glyph, never colour alone. ─────── */
   --risk-low: var(--graphite-300);
   --risk-medium: var(--ember-400);
@@ -372,6 +432,24 @@
   --status-cancelled-subtle: var(--paper-100);
   --status-cancelled-border: var(--paper-500);
 
+  /* ── Plan tier ──────────────────────────────────────────────────────────────
+     Gold has to darken to survive white — aureate-700 for the label, -600 for
+     the ring — which is the same move --status-waiting makes, and for the same
+     reason. Enterprise flips the other way: the inversion is ink on paper here
+     and paper on ink in dark, so the chip stays the loudest thing in the row in
+     both themes rather than only in one. */
+  --plan-pro-ink: var(--amethyst-600);
+  --plan-pro-chip-bg: var(--amethyst-50);
+  --plan-pro-chip-fg: var(--amethyst-700);
+
+  --plan-team-ink: var(--aureate-600);
+  --plan-team-chip-bg: var(--aureate-50);
+  --plan-team-chip-fg: var(--aureate-700);
+
+  --plan-enterprise-ink: var(--paper-1000);
+  --plan-enterprise-chip-bg: var(--paper-1000);
+  --plan-enterprise-chip-fg: var(--paper-0);
+
   /* ── Risk ─────────────────────────────────────────────────────────────── */
   --risk-low: var(--paper-500);
   --risk-medium: var(--ember-600);
@@ -458,6 +536,19 @@
   --color-status-cancelled: var(--status-cancelled);
   --color-status-cancelled-subtle: var(--status-cancelled-subtle);
   --color-status-cancelled-border: var(--status-cancelled-border);
+
+  /* Plan tier → ring-plan-pro-ink, bg-plan-team-chip, text-plan-team-chip-fg.
+     No `free` key exists, so `bg-plan-free-chip` cannot compile — a typo there
+     renders nothing rather than inventing a tier. */
+  --color-plan-pro-ink: var(--plan-pro-ink);
+  --color-plan-pro-chip: var(--plan-pro-chip-bg);
+  --color-plan-pro-chip-fg: var(--plan-pro-chip-fg);
+  --color-plan-team-ink: var(--plan-team-ink);
+  --color-plan-team-chip: var(--plan-team-chip-bg);
+  --color-plan-team-chip-fg: var(--plan-team-chip-fg);
+  --color-plan-enterprise-ink: var(--plan-enterprise-ink);
+  --color-plan-enterprise-chip: var(--plan-enterprise-chip-bg);
+  --color-plan-enterprise-chip-fg: var(--plan-enterprise-chip-fg);
 
   /* Risk → text-risk-critical, border-risk-high, … */
   --color-risk-low: var(--risk-low);
