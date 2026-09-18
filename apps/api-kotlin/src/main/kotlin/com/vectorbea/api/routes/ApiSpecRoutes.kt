@@ -460,19 +460,24 @@ class ApiSpecRoutes(
             )
         }
 
+        val operations = keys.map { key ->
+            key to (imports.operation(importId, ctx.workspaceId, key)
+                ?: throw ApiError.ValidationError("This import has no operation '$key'."))
+        }
+
+        /* A connection is asked for when the operations need one, and not
+           otherwise — see `connectionRequirement`. This used to be unconditional,
+           which made a public API a dead end: a document declaring no security
+           skips the credential step in the wizard, and the Create button was then
+           disabled with nothing left on screen to satisfy it. */
         val connectionId = body.connectionId?.let { validateConnection(it, ctx.workspaceId) }
             ?: record.connectionId
-            ?: throw ApiError.ValidationError(
-                "Choose the connection these tools authenticate through. The credential " +
-                    "is stored once, on the connection, not on each tool."
-            )
+            ?: connectionRequirement(operations)?.let { throw ApiError.ValidationError(it) }
 
         val created = ArrayList<Map<String, Any?>>()
         val pending = ArrayList<Map<String, Any?>>()
 
-        for (key in keys) {
-            val op = imports.operation(importId, ctx.workspaceId, key)
-                ?: throw ApiError.ValidationError("This import has no operation '$key'.")
+        for ((key, op) in operations) {
             val spec = op.httpSpecJson
                 ?: throw ApiError.ValidationError("Operation '$key' produced no usable definition.")
 
@@ -574,7 +579,7 @@ class ApiSpecRoutes(
             )
         }
 
-        if (record.connectionId == null) {
+        if (record.connectionId == null && connectionId != null) {
             imports.attachConnection(importId, ctx.workspaceId, connectionId)
         }
 
@@ -679,6 +684,70 @@ class ApiSpecRoutes(
         }
         return id
     }
+
+    /**
+     * Why these operations need a connection, or null when they do not.
+     *
+     * An HTTP tool has not required a connection since V064 — see
+     * `toolRequiresConnection`. The generated spec carries the document's own
+     * `servers` entry as an absolute `baseUrl`, and an operation under no
+     * security scheme maps to `inherit`, which with no connection behind it is
+     * `AuthApplier`'s no-op. Such a tool runs under `EgressPolicy.PUBLIC` and can
+     * reach strictly less than one with a connection, never more. Demanding one
+     * anyway is what made a public API an import that could be read and never
+     * finished.
+     *
+     * Two things genuinely still need one, and each names itself rather than
+     * arriving as one sentence about credentials:
+     *
+     *  - **No absolute base URL.** A document whose server is relative (`/v3`)
+     *    or absent says where to send nothing; the connection's `baseUrl` is the
+     *    only other source of a host.
+     *  - **A strategy that reads a secret.** Every strategy but `inherit` and
+     *    `none` names FIELDS of a connection's secret bundle (§2.3), so without
+     *    a bundle to read them from the first call is a 401 blaming a credential
+     *    that was never configured.
+     *
+     * An unparseable definition is treated as needing one: the generator cannot
+     * produce it, so reaching here means something is wrong and refusing is the
+     * conservative direction.
+     */
+    private fun connectionRequirement(
+        operations: List<Pair<String, com.vectorbea.api.repository.SpecOperation>>,
+    ): String? {
+        val needsHost = ArrayList<String>()
+        val needsSecret = ArrayList<String>()
+
+        for ((key, op) in operations) {
+            val spec = com.vectorbea.worker.tools.httpspec.HttpToolSpec.parse(op.httpSpecJson)
+            if (spec == null) {
+                needsHost += key
+                continue
+            }
+            val base = spec.request.baseUrl?.trim().orEmpty()
+            if (!base.startsWith("http://") && !base.startsWith("https://")) needsHost += key
+            if (spec.auth !is HttpAuthSpec.InheritConnection && spec.auth !is HttpAuthSpec.None) {
+                needsSecret += key
+            }
+        }
+
+        return when {
+            needsHost.isNotEmpty() -> "This document declares no absolute server URL, so " +
+                "${describe(needsHost)} has nowhere to send its request. Choose a connection — its " +
+                "base URL becomes the host — or re-import a document whose `servers` entry is absolute."
+
+            needsSecret.isNotEmpty() -> "${describe(needsSecret)} authenticates, and the credential " +
+                "is stored once, on the connection, not on each tool. Choose the connection these " +
+                "tools run as."
+
+            else -> null
+        }
+    }
+
+    /** "`GET /pets`" for one, "3 operations (`GET /pets`, …)" for several. */
+    private fun describe(keys: List<String>): String =
+        if (keys.size == 1) "`${keys.first()}`"
+        else "${keys.size} of the selected operations (`${keys.take(3).joinToString("`, `")}`…)"
 
     /** Mirrors `OperationMapper.riskOf`, from the columns kept on the row. */
     private fun riskOf(method: String, path: String, summary: String?): String {
