@@ -95,7 +95,7 @@ const TOOL_TYPES: {
    */
   unavailable?: string;
 }[] = [
-  { value: "http", label: "HTTP API", description: "Call a REST or JSON endpoint. A connection is optional — attach one for a credential or a private host.", icon: Globe, connectionTypes: ["http"] },
+  { value: "http", label: "HTTP API", description: "One call on a connected API. The connection holds the host and credential; this tool is the method, path and inputs.", icon: Globe, connectionTypes: ["http"] },
   { value: "database", label: "Database", description: "Run a parameterised SQL template against a database connection.", icon: Database, connectionTypes: ["database"] },
   { value: "llm_generate", label: "LLM generation", description: "Generate text with a model, billed to an LLM connection.", icon: Sparkle, connectionTypes: ["llm"], unavailable: "Not available yet. Give an agent a model instead — it writes the text and passes it to a tool." },
   { value: "code", label: "Code", description: "Run sandboxed code in the worker. No external credentials.", icon: Code, connectionTypes: "none", unavailable: "Not available yet — runs cannot execute code tools." },
@@ -453,14 +453,20 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
    * Mirrors `toolRequiresConnection` on the API side, and `http` is
    * deliberately not in it.
    *
-   * A connection gives an HTTP tool a base URL and a credential. The spec
-   * carries its own absolute URL, so a public endpoint needs neither — and
-   * `HttpToolResolver` has always run a connection-less tool as PUBLIC egress
-   * with no secret, which is strictly less reach, not more. Asking for one
-   * anyway made "register a tool for this public API" a dead end whose only
-   * exit was inventing an empty connection.
+   * HTTP is here because an API is modelled ONCE, as an integration, and a tool
+   * is one fine-tuned call on it. Registering an API means registering several
+   * tools against it — a GET, a POST, a delete — and all of them want the same
+   * host, credential, allowed hosts and egress policy. The connection is the one
+   * row they point at: the spec editor composes its base URL with each tool's
+   * relative path, so staging to production is one edit rather than N, and
+   * revoking the credential revokes the set.
+   *
+   * This is not the dead end the same rule used to be. A public API is a
+   * `Generic HTTP` connection with a base URL and auth `none` — a truthful
+   * description of it, not a workaround — so nothing has to be invented to get
+   * past this step. Mirrored by `toolRequiresConnection` in the API.
    */
-  const requiresConnection = type === "database" || type === "llm_generate";
+  const requiresConnection = type === "http" || type === "database" || type === "llm_generate";
 
   const compatible = React.useMemo(() => {
     if (spec.connectionTypes === "none") return [];
@@ -700,7 +706,9 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
   const longStepErrors: (string | null)[] = [
     nameError,
     requiresConnection && !connectionId
-      ? `A ${spec.label.toLowerCase()} tool runs as a connection. Pick one, or the API will refuse the create.`
+      ? type === "http"
+        ? "Pick the API this tool calls. It supplies the host and the credential, so the tool only has to say which call it makes."
+        : `A ${spec.label.toLowerCase()} tool runs as a connection. Pick one, or the API will refuse the create.`
       : null,
     type === "http" && usesCatalogue && !operation && operationId !== CUSTOM_REQUEST
       ? "Pick what this tool does. Every option is one call to the connected account."
@@ -1014,25 +1022,25 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
               <ModalSection
                 title="Connection"
                 description={
-                  requiresConnection
-                    ? `A ${spec.label.toLowerCase()} tool executes as a stored credential. Only ${
-                        spec.connectionTypes === "any" ? "workspace" : (spec.connectionTypes as string[])[0]
-                      } connections are compatible.`
-                    : type === "http"
-                      ? "Optional. Pick one to inherit its base URL, its credential and its allowed hosts — or leave it as None for a public endpoint the tool calls on its own."
+                  type === "http"
+                    ? "The API this tool calls. It supplies the base URL, the credential and the allowed hosts; the next step is the one call this tool makes on it."
+                    : requiresConnection
+                      ? `A ${spec.label.toLowerCase()} tool executes as a stored credential. Only ${
+                          spec.connectionTypes === "any" ? "workspace" : (spec.connectionTypes as string[])[0]
+                        } connections are compatible.`
                       : "This adapter runs inside the worker and needs no external credential."
                 }
               >
                 {/*
                   CAN take one, not MUST take one.
 
-                  This read `requiresConnection || connectionTypes === "any"`,
-                  which was correct while http required a connection and became
-                  wrong the moment it stopped: an HTTP tool then fell to the
-                  "no connection required" branch and the picker disappeared
-                  altogether — so a Slack connection, sitting right there in the
-                  registry, could not be attached to a tool at all. Optional and
-                  unofferable are not the same thing.
+                  Keyed on `connectionTypes` rather than on `requiresConnection`,
+                  which is not the same question and has been the wrong one in
+                  both directions. An adapter that MAY carry a connection still
+                  has to offer the picker: when this read `requiresConnection`,
+                  an optional-connection HTTP tool fell to the "no connection
+                  required" branch and a Slack connection sitting right there in
+                  the registry could not be attached at all.
                 */}
                 {spec.connectionTypes !== "none" ? (
                   <ConnectionPicker
@@ -1057,17 +1065,22 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                       );
                     }}
                     allowNone={!requiresConnection}
-                    noneDescription={
-                      type === "http"
-                        ? "Call a public endpoint. No credential, no private egress, no host widening."
-                        : "Run without credentials."
-                    }
+                    noneDescription="Run without credentials."
                     emptyTitle={`No compatible ${spec.label.toLowerCase()} connection`}
                     emptyBody={
-                      <>
-                        The registry has no connection this adapter can use. Create one first — the
-                        credential lives on the connection, never on the tool.
-                      </>
+                      type === "http" ? (
+                        <>
+                          Connect the API first, under Integrations. A public one with no key is a
+                          Generic HTTP connection with its base URL and auth set to none — that is
+                          the supported shape, not a workaround, and it is where the host and the
+                          allowed hosts live for every tool you build on it.
+                        </>
+                      ) : (
+                        <>
+                          The registry has no connection this adapter can use. Create one first — the
+                          credential lives on the connection, never on the tool.
+                        </>
+                      )
                     }
                   />
                 ) : (
@@ -1082,12 +1095,6 @@ export function CreateToolDialog({ open, onOpenChange, onCreated, presetConnecti
                 <ModalNote tone="info" title="Why the credential is not here">
                   Secrets live on the connection and are referenced by id. A tool config containing a
                   key is rejected by the API, so rotating a credential never means editing a tool.
-                </ModalNote>
-              ) : type === "http" && !connectionId ? (
-                <ModalNote title="Without a connection this tool is public-only">
-                  It reaches exactly what anyone on the internet can reach: no credential is sent,
-                  private and link-local addresses are refused, and it cannot be widened to an
-                  internal host. Attach a connection later if any of that changes.
                 </ModalNote>
               ) : null}
             </div>

@@ -115,29 +115,40 @@ fun compatibleConnectionTypes(toolType: String): Set<String> = when (toolType) {
 /**
  * Returns true if the given tool type requires a connectionId.
  *
- * ── WHY `http` IS NOT HERE ──────────────────────────────────────────────────
- * It was, and it was wrong. A connection supplies an HTTP tool with two things:
- * a base URL and a credential. Since V064 the whole call lives in
- * `http_spec_json`, which carries its own absolute URL — so a tool that hits a
- * public endpoint needs neither, and `HttpToolResolver` has always handled
- * that: "Public until a connection says otherwise. A tool with no connection
- * behind it has nothing that could have authorised private egress."
+ * ── WHY `http` IS HERE ──────────────────────────────────────────────────────
+ * It is a PRODUCT decision, not a runtime one, and the distinction matters when
+ * reading `HttpToolResolver`: the runtime runs a connection-less tool perfectly
+ * well ("Public until a connection says otherwise"), and still does. Nothing
+ * below is a claim that it cannot.
  *
- * The runtime was therefore already correct and only the create route refused,
- * which made "register a tool for this public API" a dead end that ended in
- * inventing an empty connection to get past the form.
+ * The decision is that an API is modelled ONCE, as an integration, and a tool is
+ * one fine-tuned call on it. Somebody registering an API registers a handful of
+ * tools against it — a GET, a POST, a delete — and every one of them wants the
+ * same host, the same credential, the same allowed hosts and the same egress
+ * policy. With a connection that is one row they all point at:
+ * `RequestAssembler.joinUrl` composes the connection's base URL with each tool's
+ * relative path, so moving from staging to production is one edit rather than
+ * one edit per tool, and revoking the credential revokes the whole set.
  *
- * The egress story is unchanged and is the reason this is safe: no connection
- * means `EgressPolicy.PUBLIC`, no allowed-hosts widening and no secret. A
- * connection-less HTTP tool can reach strictly less than one with a connection,
- * never more.
+ * Without one, each tool carries its own absolute URL and that shared fact is
+ * copied N times, which is the state where a base URL gets changed in four
+ * places out of five.
  *
- * `mcp` is also deliberately absent, for a different reason: a discovered MCP
- * tool carries its server in `mcp_server_connection_id`, a separate column with
- * its own FK. Requiring `connection_id` would refuse every row discovery writes.
+ * ── THIS IS NOT THE DEAD END IT WAS BEFORE V064 ─────────────────────────────
+ * The old refusal was wrong because the only escape was inventing an empty
+ * connection. That escape is now the supported path and not a workaround: the
+ * catalogue ships a `Generic HTTP` integration whose auth methods are `none` and
+ * `api-key`, so a public API is a connection with a base URL and no credential —
+ * which is a truthful description of it, and the place its allowed hosts and
+ * egress policy live if it ever needs them.
+ *
+ * `mcp` is deliberately absent, for a reason unrelated to any of this: a
+ * discovered MCP tool carries its server in `mcp_server_connection_id`, a
+ * separate column with its own FK. Requiring `connection_id` would refuse every
+ * row discovery writes.
  */
 fun toolRequiresConnection(toolType: String): Boolean = when (toolType) {
-    "database", "llm_generate" -> true
+    "http", "database", "llm_generate" -> true
     else -> false
 }
 
