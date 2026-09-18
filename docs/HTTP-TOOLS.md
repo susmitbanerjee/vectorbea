@@ -278,6 +278,26 @@ the old resolver could not act on. One scheme is chosen (the one most operations
 require) and the credential is prompted for **once**, at connection level;
 prompting per operation would make importing forty tools a forty-step wizard.
 
+A connection is asked for **only when the document needs one**, which is two
+cases and not "HTTP tools have connections":
+
+* **A relative or absent `servers` entry.** The document describes its paths
+  relative to wherever it was served from, so it never says which host to call,
+  and the connection's base URL is the only other source of one.
+* **A declared security scheme.** Every strategy but `inherit` and `none` names
+  *fields* of a connection's secret bundle (§2.3), so without a bundle there is
+  nothing to read them from.
+
+A document with an absolute server and no security produces tools that need
+neither, and the wizard skips the credential step and says so on the operations
+step. It refused them until this was fixed, which was the same mistake
+`toolRequiresConnection` had already been corrected for and reached through a
+different button: the skip fired on "no security", the Create button still
+demanded a connection, and the step that would have set one was no longer on
+screen. `ApiSpecRoutes.connectionRequirement` is the copy that counts, and it
+names the operation and which of the two reasons applies — "these tools need a
+credential" is the wrong sentence for a document that declared none.
+
 External `$ref`s are refused with a message naming `redocly bundle`. Following one
 would make the API process fetch an address the document chose. The URL fetch
 itself re-runs the SSRF guard on **every redirect hop**, with

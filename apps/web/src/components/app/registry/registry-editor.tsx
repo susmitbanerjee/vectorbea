@@ -165,7 +165,19 @@ export function ToolEditor({
     return () => { alive = false; };
   }, [api, id, scope]);
 
-  const requiresConnection = ["http", "database", "llm_generate"].includes(type);
+  /*
+   * Mirrors `toolRequiresConnection` in the API, which has excluded `http` since
+   * V064: the call lives in `httpSpec` and carries its own absolute URL, so a
+   * tool against a public endpoint needs neither base URL nor credential, and
+   * `HttpToolResolver` runs it under `EgressPolicy.PUBLIC`.
+   *
+   * Listing `http` here was worse than a stale hint. A connection-less HTTP tool
+   * — which the create dialog and the API both allow — opened with its select on
+   * an option this form had removed, and Save disabled beneath an error saying
+   * the adapter cannot run without a connection. The tool ran fine; it just
+   * could never be edited again.
+   */
+  const requiresConnection = ["database", "llm_generate"].includes(type);
   const compatible = connections.filter((connection) =>
     type === "custom"
       || (type === "http" && connection.type === "http")
@@ -253,7 +265,13 @@ export function ToolEditor({
           <Field
             label="Connection"
             required={requiresConnection}
-            description={requiresConnection ? "Required for this adapter." : "Optional for this adapter."}
+            description={
+              requiresConnection
+                ? "Required for this adapter."
+                : type === "http"
+                  ? "Optional. Without one the tool calls its own URL under public egress, with no credential."
+                  : "Optional for this adapter."
+            }
             error={requiresConnection && connectionId === "none" ? "This adapter cannot run without a connection." : undefined}
           >
             <Select

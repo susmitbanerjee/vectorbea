@@ -51,6 +51,31 @@ import { ConnectionPicker } from "./create-atoms";
 
 type Step = "source" | "auth" | "operations" | "done";
 
+/**
+ * Whether these tools cannot be created without a connection.
+ *
+ * An HTTP tool has not needed one since V064. The generated definition carries
+ * the document's own server as an absolute base URL, and an operation under no
+ * security scheme maps to `inherit`, which with nothing behind it applies no
+ * auth — the tool runs under public egress and can reach strictly less than one
+ * with a connection. Two things still need one, and they are exactly these: a
+ * document whose server is relative or absent has no host to send to, and a
+ * declared scheme names fields of a secret bundle that only a connection holds.
+ *
+ * This gate used to be unconditional, and combined with the skip in
+ * `importSpec.onSuccess` — straight past the credential step when the document
+ * declares no security — it produced a dead end: Create was disabled for a
+ * connection there was no longer any step on screen to choose.
+ *
+ * Mirrored by `ApiSpecRoutes.connectionRequirement`, which is the copy that
+ * counts and which names the operation that needs one.
+ */
+function connectionNeeded(result: contracts.SpecImportResult): boolean {
+  const base = result.import.servers[0]?.url?.trim() ?? "";
+  const absolute = base.startsWith("http://") || base.startsWith("https://");
+  return !absolute || result.auth.length > 0;
+}
+
 const STEPS: ModalStep[] = [
   { id: "source", label: "Document", summary: "Where the API is described" },
   { id: "auth", label: "Credential", summary: "What it needs to authenticate" },
@@ -111,8 +136,11 @@ export function ImportSpecDialog({
       setResult(data);
       /* Straight past the credential step when the document says it needs none —
          asking for a key an API does not read is a step that teaches the wrong
-         thing about the API. */
-      setStep(data.auth.length === 0 ? "operations" : "auth");
+         thing about the API. It is skipped on the same condition the Create
+         button is gated on, never on `auth.length` alone: a document with a
+         relative server declares no credential and still needs a connection for
+         its host, and skipping there is what made Create unsatisfiable. */
+      setStep(connectionNeeded(data) ? "auth" : "operations");
     },
   });
 
@@ -151,6 +179,9 @@ export function ImportSpecDialog({
 
   const sourceReady = mode === "url" ? url.trim().length > 8 : document.length > 0;
   const activeIndex = STEPS.findIndex((s) => s.id === step);
+
+  const needsConnection = result ? connectionNeeded(result) : false;
+  const connectionReady = !needsConnection || Boolean(connectionId);
 
   const close = () => { onOpenChange(false); window.setTimeout(reset, 200); };
 
@@ -238,7 +269,7 @@ export function ImportSpecDialog({
             <Button
               variant="primary"
               iconRight={<Icon icon={ArrowRight} size="sm" decorative />}
-              disabled={!connectionId}
+              disabled={!connectionReady}
               onClick={() => setStep("operations")}
             >
               Choose operations
@@ -250,13 +281,13 @@ export function ImportSpecDialog({
           <>
             <Button
               variant="ghost" iconLeft={<Icon icon={ArrowLeft} size="sm" decorative />}
-              onClick={() => setStep(result?.auth.length ? "auth" : "source")}
+              onClick={() => setStep(result && connectionNeeded(result) ? "auth" : "source")}
             >
               Back
             </Button>
             <Button
               variant="primary"
-              disabled={selected.size === 0 || !connectionId || createTools.isPending}
+              disabled={selected.size === 0 || !connectionReady || createTools.isPending}
               loading={createTools.isPending}
               onClick={() => createTools.mutate()}
             >
@@ -369,6 +400,11 @@ function AuthStep({
   onConnectionChange: (id: string | null) => void;
 }) {
   const primary = candidates[0];
+  /* This step is also reached by a document that declares no credential and no
+     absolute server — there the connection supplies the HOST, and saying "what
+     this API needs: nothing" above a required picker is how a step reads as a
+     bug. */
+  const forHost = candidates.length === 0;
 
   return (
     <div className="flex flex-col gap-5">
@@ -381,8 +417,13 @@ function AuthStep({
       ) : null}
 
       <ModalSection
-        title="What this API needs"
-        description="Detected from the document."
+        title={forHost ? "Where this API lives" : "What this API needs"}
+        description={
+          forHost
+            ? "This document describes its paths relative to wherever it was served from, " +
+              "so it does not say which host to call. A connection's base URL supplies it."
+            : "Detected from the document."
+        }
       >
         {candidates.map((candidate, index) => (
           <div
@@ -418,7 +459,7 @@ function AuthStep({
       </ModalSection>
 
       <ModalSection
-        title="Which connection holds it"
+        title={forHost ? "Which connection points at it" : "Which connection holds it"}
         description="All imported tools use this connection."
       >
         <ConnectionPicker
@@ -428,8 +469,10 @@ function AuthStep({
           label="HTTP connection"
           emptyTitle="No HTTP connection yet"
           emptyBody={
-            "Create one under Connections first. It holds the credential these tools " +
-            "authenticate with, encrypted, so no tool ever stores it."
+            forHost
+              ? "Create one under Connections first. Its base URL is the host these tools call."
+              : "Create one under Connections first. It holds the credential these tools " +
+                "authenticate with, encrypted, so no tool ever stores it."
           }
         />
         {primary ? (
@@ -473,6 +516,16 @@ function OperationsStep({
   return (
     <div className="flex flex-col gap-4">
       {result.diff?.hasChanges ? <DiffSummary diff={result.diff} /> : null}
+
+      {/* The credential step was skipped, so say what that means rather than
+          leaving the operator to wonder which account these tools will run as. */}
+      {!connectionNeeded(result) ? (
+        <ModalNote tone="neutral" title="These tools need no connection">
+          The document declares an absolute server and no credential, so each tool calls{" "}
+          <code className="font-code">{result.import.servers[0]?.url}</code> under public egress —
+          no secret, no private host. Attach a connection on any of them later if that changes.
+        </ModalNote>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
